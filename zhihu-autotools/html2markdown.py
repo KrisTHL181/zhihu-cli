@@ -124,11 +124,8 @@ class ZhihuMarkdownConverter:
         
         if not parts:
             return ''
-        # 智能连接：如果任何部分包含换行符（可能是块级元素），用双换行；否则用空格
-        if any('\n' in part for part in parts):
-            return '\n\n'.join(parts)
-        else:
-            return ' '.join(parts)
+
+        return '\n\n'.join(parts)
     
     def _process_element(self, element: Union[Tag, NavigableString]) -> Optional[str]:
         """Recursively convert a single element to Markdown."""
