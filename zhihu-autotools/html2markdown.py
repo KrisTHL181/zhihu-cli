@@ -250,6 +250,18 @@ class ZhihuMarkdownConverter:
             # 若无 a 标签，递归处理内部内容
             return self._process_inline(element)
 
+        # 拦截知乎广告卡片和付费咨询卡片
+        if tag == 'a' and ( # 付费咨询
+            element.get('data-draft-type') == 'ad-link-card' or \
+                element.get("data-ad-id") is not None
+        ):
+            return None
+        if tag == 'a' and ( # 知学堂广告
+            element.get('data-draft-type') == 'edu-card' or \
+                element.get('data-edu-card-id') is not None
+        ):
+            return None
+
         if tag == 'a':
             href = element.get('href', '')
             text = element.get_text(strip=True)
@@ -266,7 +278,6 @@ class ZhihuMarkdownConverter:
         # Italic / em
         if tag in ('i', 'em'):
             return f"*{self._process_inline(element)}*"
-        
         # Underline
         if tag == 'u':
             return f"<u>{self._process_inline(element)}</u>"
