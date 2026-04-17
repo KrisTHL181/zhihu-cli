@@ -72,11 +72,20 @@ class ZhihuMarkdownConverter:
 
     def tex_normalize(self, content: str) -> str:
         """
-        Convert
+        Convert inline-mode
          <img eeimg="1" src="https://www.zhihu.com/equation?tex=A" alt="B"/>
         To:
          $B$
+
+        Convert display-mode
+         ![A](https://www.zhihu.com/equation?tex=B)
+        to
+         $$B$$
         """
+        pattern = r'!\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(https://www\.zhihu\.com/equation\?tex=[^)]*\)'
+    
+        content = re.sub(pattern, lambda match: f"$${match.group(1)}$$", content)
+        
         soup = BeautifulSoup(content, 'html.parser')
 
         # 查找所有 eeimg="1" 且带有 alt 属性的 img 标签
