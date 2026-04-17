@@ -1,0 +1,5 @@
+*.json
+*.png
+__pycache__
+
+(draft)*
