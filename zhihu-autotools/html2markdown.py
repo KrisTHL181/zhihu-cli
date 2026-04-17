@@ -267,6 +267,10 @@ class ZhihuMarkdownConverter:
         if tag in ('i', 'em'):
             return f"*{self._process_inline(element)}*"
         
+        # Underline
+        if tag == 'u':
+            return f"<u>{self._process_inline(element)}</u>"
+        
         # Inline code
         if tag == 'code':
             return f"`{element.get_text()}`"
@@ -278,9 +282,11 @@ class ZhihuMarkdownConverter:
         # Math (Zhihu specific)
         if tag == 'span' and element.get('class') and 'ztext-math' in element.get('class', []):
             tex = element.get('data-tex', '')
+            eeimg = element.get('data-eeimg', '') # 获取知乎官方的公式类型标识
+            
             if tex:
-                # Determine display mode (block vs inline)
-                if element.find(class_='MathJax_SVG_Display') or '\\tag' in tex:
+                # data-eeimg="2" 代表整行/块级公式
+                if eeimg == '2' or '\\tag' in tex:
                     return f"\n$$\n{tex}\n$$\n"
                 else:
                     return f"${tex}$"
@@ -386,3 +392,15 @@ class PageToMarkdown:
         """
         content = self.converter.tex_normalize(html_content)
         return self.converter.convert(content, url)
+
+if __name__ == "__main__":
+    import sys
+    converter = PageToMarkdown()
+    
+    if len(sys.argv) > 1:
+        html_file = sys.argv[1]
+        with open(html_file, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        print(converter.convert(html_content))
+    else:
+        print("Usage: python html2markdown.py <html_file>")
