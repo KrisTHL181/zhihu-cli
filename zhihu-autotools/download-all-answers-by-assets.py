@@ -16,7 +16,7 @@ from download_contents import ContentDownloader
 
 def load_answers_from_json(json_path: str) -> List[str]:
     """
-    从 scrap-content-list.py 生成的 JSON 文件中提取所有回答的 URL
+    从 all_assets_list.json 中提取所有回答的 URL
     """
     if not os.path.exists(json_path):
         print(f"[Error] File not found: {json_path}")
@@ -35,14 +35,13 @@ def load_answers_from_json(json_path: str) -> List[str]:
 
     urls = []
     for item in data:
-        # 动态类型字段可能是 'type' 或 'verb'
         item_type = item.get('type', '')
-        verb = item.get('verb', '')
-        if item_type == 'answer' or verb == 'ANSWER':
-            # 获取 URL
+        if item_type == 'answer':
+            # 获取 ID 并构建网页 URL
             answer_id = item.get('id')
-            url = f"https://www.zhihu.com/answer/{answer_id}"
-            urls.append(url)
+            if answer_id:
+                url = f"https://www.zhihu.com/answer/{answer_id}"
+                urls.append(url)
 
     print(f"[Info] Found {len(urls)} answers in {json_path}")
     return urls
@@ -55,8 +54,8 @@ def main():
     parser.add_argument(
         '--input', '-i',
         type=str,
-        default='zhihu_user_activities.json',
-        help='scrap-content-list.py 生成的 JSON 文件路径 (默认: zhihu_user_activities.json)'
+        default='all_assets_list.json',
+        help='all_assets_list.json 文件路径 (默认: all_assets_list.json)'
     )
     parser.add_argument(
         '--output-dir', '-o',
