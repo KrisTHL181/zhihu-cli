@@ -93,6 +93,11 @@ class ZhihuMarkdownConverter:
             latex_content = img.get('alt', '')
             if latex_content:
                 img.replace_with(f"${latex_content}$")
+        # 处理块级/显示模式公式 (eeimg="2")
+        for img in soup.find_all('img', eeimg="2"):
+            latex_content = img.get('alt', '')
+            if latex_content:
+                img.replace_with(f"\n$$\n{latex_content}\n$$\n")
         return str(soup)
 
     def convert(self, html_content: str, url: str = '') -> str:
