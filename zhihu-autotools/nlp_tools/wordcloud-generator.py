@@ -6,15 +6,12 @@ import jieba.analyse
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import argparse
+from . import FONT_PATH, STOP_WORDS
 
 # --- 配置区 ---
 SOURCE_DIR = "downloads"
 OUTPUT_FILE = "zhihu_wordcloud.png"
-FONT_PATH = "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
 
-# 扩展停用词表（可以根据需要继续添加）
-with open("stop_words.txt", "r", encoding="utf-8") as f:
-    STOP_WORDS = set(line.strip() for line in f if line.strip())
 
 def extract_text_from_md(file_path):
     """提取MD文件中的JSON元数据和正文内容"""
