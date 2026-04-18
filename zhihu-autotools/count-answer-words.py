@@ -36,6 +36,8 @@ for filename in os.listdir(args.folder):
 
 print(f"统计了 {len(word_counts)} 个回答的字数")
 print(f"平均字数: {np.mean(word_counts):.2f}")
+print(f"标准差: {np.std(word_counts):.2f}")
+print(f"CV: {(np.std(word_counts) / np.mean(word_counts)):.2f}")
 print(f"10% 分位数: {np.percentile(word_counts, 10)}")
 print(f"50% 分位数: {np.percentile(word_counts, 50)}")
 print(f"90% 分位数: {np.percentile(word_counts, 90)}")
