@@ -3,7 +3,7 @@
 This package provides Zhihu scraping, Markdown conversion, and download helpers.
 """
 
-from .cache_manager import cache_manager
+from .handlers.cache_manager import cache_manager
 from .download_contents import (
     ContentDownloader,
     extract_config_from_curl,

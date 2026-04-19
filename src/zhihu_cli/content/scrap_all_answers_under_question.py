@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import track
 
-from .cache_manager import cache_manager
+from .handlers.cache_manager import cache_manager
 
 
 def save_headers(headers):

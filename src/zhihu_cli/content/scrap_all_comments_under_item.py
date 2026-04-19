@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 from .html2markdown import PageToMarkdown
-from .cache_manager import cache_manager
+from .handlers.cache_manager import cache_manager
 
 ZHIHU_ARTICLE_PATTERN = r"https?://zhuanlan\.zhihu\.com/p/(\d+)"
 ZHIHU_QUESTION_PATTERN = r'https?://(?:www\.)?zhihu\.com/question/(\d+)'

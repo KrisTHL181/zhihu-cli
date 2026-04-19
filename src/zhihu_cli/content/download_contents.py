@@ -7,7 +7,7 @@ import json
 import time
 from typing import List, Optional, Dict, Any
 from curl_cffi import requests
-from .cache_manager import cache_manager
+from .handlers.cache_manager import cache_manager
 from datetime import datetime
 from bs4 import BeautifulSoup
 

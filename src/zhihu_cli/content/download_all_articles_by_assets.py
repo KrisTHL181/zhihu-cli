@@ -12,7 +12,7 @@ import re
 from typing import List, Dict, Any
 from datetime import datetime
 from curl_cffi import requests
-from .cache_manager import cache_manager
+from .handlers.cache_manager import cache_manager
 
 # 导入已有的模块
 from .html2markdown import PageToMarkdown
