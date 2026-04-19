@@ -9,16 +9,18 @@ import argparse
 from . import FONT_PATH, STOP_WORDS
 
 # --- 配置区 ---
-SOURCE_DIR = "downloads"
 OUTPUT_FILE = "zhihu_wordcloud.png"
 
 
-def extract_text_from_md(file_path):
+def extract_text_from_md(file_path, skip_metadata=False):
     """提取MD文件中的JSON元数据和正文内容"""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
             
+            if not skip_metadata:
+                return content
+
             # 1. 提取头部JSON
             parts = content.split("---", 1)
             text_to_analyze = ""
@@ -45,12 +47,12 @@ def is_stop_word(word):
     """判断是否为停用词"""
     return word in STOP_WORDS or len(word) == 1  # 也可以过滤单字词
 
-def main(topk_words: int = 200):
+def main(topk_words: int = 200, source_dir: str = "./downloads", only_print: bool = False):
     all_text = []
-    print(f"正在扫描 {SOURCE_DIR} 下的 Markdown 文件...")
+    print(f"正在扫描 {source_dir} 下的 Markdown 文件...")
 
     # 递归遍历所有文件夹
-    for root, _, files in os.walk(SOURCE_DIR):
+    for root, _, files in os.walk(source_dir):
         for file in files:
             if file.endswith(".md"):
                 file_path = os.path.join(root, file)
@@ -85,6 +87,12 @@ def main(topk_words: int = 200):
     word_freq = {word: weight for word, weight in keywords}
     
     # 可选：打印前20个关键词供检查
+    if only_print:
+        print("\n关键词：")
+        for i, (word, weight) in enumerate(keywords, 1):
+            print(f"{i}. {word} ({weight:.4f})")
+        return
+
     print("\n前20个关键词（已过滤停用词）：")
     for i, (word, weight) in enumerate(keywords[:20], 1):
         print(f"{i}. {word} ({weight:.4f})")
@@ -112,6 +120,9 @@ def main(topk_words: int = 200):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="生成词云图")
     parser.add_argument('--topk', type=int, default=200, help='要显示的关键词数量 (默认: 200)')
+    parser.add_argument('--source_dir', type=str, default="./downloads", help='Markdown文件所在目录 (默认: downloads)')
+    parser.add_argument("--only_print", action="store_true", help="仅打印关键词，不生成词云图")
+
     args = parser.parse_args()
 
-    main(topk_words=args.topk)
+    main(topk_words=args.topk, source_dir=args.source_dir, only_print=args.only_print)
