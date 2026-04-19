@@ -4,7 +4,7 @@ import time
 import re
 import os
 from curl_cffi import requests
-from cache_manager import cache_manager
+from .cache_manager import cache_manager
 
 def load_headers(quick_mode: bool = False):
     """Load headers from file or via cURL paste"""

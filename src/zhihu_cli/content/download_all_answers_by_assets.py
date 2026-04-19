@@ -11,7 +11,7 @@ import os
 from typing import List, Dict, Any
 
 # 导入已有的下载模块
-from download_contents import ContentDownloader
+from .download_contents import ContentDownloader
 
 
 def load_answers_from_json(json_path: str) -> List[str]:

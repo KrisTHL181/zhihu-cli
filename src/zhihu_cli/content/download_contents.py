@@ -7,12 +7,12 @@ import json
 import time
 from typing import List, Optional, Dict, Any
 from curl_cffi import requests
-from cache_manager import cache_manager
+from .cache_manager import cache_manager
 from datetime import datetime
 from bs4 import BeautifulSoup
 
 # 导入 html2markdown 模块
-from html2markdown import PageToMarkdown
+from .html2markdown import PageToMarkdown
 
 
 def extract_config_from_curl(curl_text: str):
