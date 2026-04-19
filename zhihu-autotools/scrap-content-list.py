@@ -228,7 +228,7 @@ def fetch_user_activities():
                     else:
                         # 使用 offset 分页
                         offset = paging.get('next', '').split('offset=')[-1].split('&')[0] if not is_end else offset
-                        if offset and offset.isdigit():
+                        if not isinstance(offset, int) and offset and offset.isdigit():
                             offset = int(offset)
                     
                     success = True
