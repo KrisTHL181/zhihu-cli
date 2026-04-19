@@ -5,33 +5,30 @@ import re
 import os
 from datetime import datetime
 from curl_cffi import requests
+from cache_manager import cache_manager
 
 def load_headers(quick_mode: bool = False):
-    """Load headers from file or via cURL paste"""
-    header_cache = "headers.json"
-    
-    if quick_mode and os.path.exists(header_cache):
-        with open(header_cache, 'r', encoding='utf-8') as f:
-            headers = json.load(f)
-            print(f"[Success] Loaded cached headers from {header_cache}")
+    """Load headers from cache or via cURL paste"""
+    if quick_mode:
+        headers = cache_manager.load_headers()
+        if headers:
+            print("[Success] Loaded cached headers from .cache/headers.json")
             return headers
 
     print("\n--- Please paste cURL from any Zhihu Article Page ---")
     print("Tip: Press Ctrl+D (Unix) or Ctrl+Z+Enter (Win) to finish\n")
     
     curl_input = sys.stdin.read()
-    if not curl_input.strip(): return None
+    if not curl_input.strip():
+        return None
     
     base_url, headers, offset_match, after_id_match = extract_config_from_curl(curl_input)
-    if not headers: return None
+    if not headers:
+        return None
     
-    # Clean up headers
     headers.pop('Accept-Encoding', None)
-    
-    # Save for next time
-    with open(header_cache, 'w', encoding='utf-8') as f:
-        json.dump(headers, f, indent=2)
-    print(f"[Success] Headers configured and cached.")
+    cache_manager.save_headers(headers)
+    print("[Success] Headers configured and cached.")
     return headers
 
 def extract_config_from_curl(curl_text):

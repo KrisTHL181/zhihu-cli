@@ -9,9 +9,8 @@ from typing import Optional, Dict, Any, List
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 from html2markdown import PageToMarkdown
+from cache_manager import cache_manager
 
-
-CACHE_FILE = "headers.json"
 ZHIHU_ARTICLE_PATTERN = r"https?://zhuanlan\.zhihu\.com/p/(\d+)"
 ZHIHU_QUESTION_PATTERN = r'https?://(?:www\.)?zhihu\.com/question/(\d+)'
 ZHIHU_QUESTION_WITH_ANSWER_PATTERN = r'https?://(?:www\.)?zhihu\.com/question/(\d+)(?:/answer/(\d+))?'
@@ -23,18 +22,14 @@ md_converter = PageToMarkdown()
 
 
 def save_headers(headers: Dict[str, str]) -> None:
-    """保存 Header 到本地文件"""
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(headers, f, indent=2, ensure_ascii=False)
-    print(f"✅ Headers 已缓存至 {CACHE_FILE}")
+    """保存 Header 到缓存"""
+    cache_manager.save_headers(headers)
+    print("✅ Headers 已缓存至 .cache/headers.json")
 
 
 def load_headers() -> Optional[Dict[str, str]]:
-    """从本地文件读取 Header"""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return None
+    """从缓存读取 Header"""
+    return cache_manager.load_headers()
 
 
 def extract_config_from_curl(curl_text: str) -> tuple[str, Dict[str, str]]:

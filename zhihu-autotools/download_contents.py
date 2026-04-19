@@ -7,6 +7,7 @@ import json
 import time
 from typing import List, Optional, Dict, Any
 from curl_cffi import requests
+from cache_manager import cache_manager
 from datetime import datetime
 from bs4 import BeautifulSoup
 
@@ -110,12 +111,11 @@ class ContentDownloader:
         Returns:
             是否成功加载
         """
-        header_cache = "headers.json"
-        
-        if quick_mode and os.path.exists(header_cache):
-            with open(header_cache, 'r', encoding='utf-8') as f:
-                self.headers = json.load(f)
-                print(f"[Success] Loaded cached headers from {header_cache}")
+        if quick_mode:
+            headers = cache_manager.load_headers()
+            if headers:
+                self.headers = headers
+                print("[Success] Loaded cached headers from .cache/headers.json")
                 return True
 
         print("--- 请粘贴【获取文章页面】的 cURL 命令 ---")
@@ -133,11 +133,8 @@ class ContentDownloader:
             return False
         
         self.headers = headers
-        
-        # Save for next time
-        with open(header_cache, 'w', encoding='utf-8') as f:
-            json.dump(headers, f, indent=2)
-        print(f"[Success] Headers configured and cached.")
+        cache_manager.save_headers(headers)
+        print("[Success] Headers configured and cached.")
         return True
 
     def _html_to_markdown(self, html_content: str, url: str = "") -> str:

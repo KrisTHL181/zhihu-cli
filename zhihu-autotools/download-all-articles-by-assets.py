@@ -12,6 +12,7 @@ import re
 from typing import List, Dict, Any
 from datetime import datetime
 from curl_cffi import requests
+from cache_manager import cache_manager
 
 # 导入已有的模块
 from html2markdown import PageToMarkdown
@@ -310,40 +311,30 @@ id: {article_id}
         print(f"\n失败记录已保存: {log_file}")
 
 
-def load_saved_headers(headers_file: str = "headers.json") -> Dict[str, str]:
+def load_saved_headers() -> Dict[str, str]:
     """
-    从文件加载已保存的请求头
-    
-    Args:
-        headers_file: 请求头文件路径
-        
+    从缓存加载已保存的请求头
+
     Returns:
         请求头字典
     """
-    if os.path.exists(headers_file):
-        try:
-            with open(headers_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    headers = cache_manager.load_headers()
+    return headers if headers else {}
 
 
-def save_headers(headers: Dict[str, str], headers_file: str = "headers.json") -> None:
+def save_headers(headers: Dict[str, str]) -> None:
     """
-    保存请求头到文件
-    
+    保存请求头到缓存
+
     Args:
         headers: 请求头字典
-        headers_file: 保存路径
     """
     # 移除可能敏感的信息
     safe_headers = {k: v for k, v in headers.items() 
                     if k.lower() not in ['cookie', 'authorization', 'x-zse-93']}
     safe_headers['_note'] = 'Cookie and auth headers removed for security'
     
-    with open(headers_file, 'w', encoding='utf-8') as f:
-        json.dump(safe_headers, f, ensure_ascii=False, indent=2)
+    cache_manager.save_headers(safe_headers)
 
 
 class QuickDownloadPipeline(ArticleDownloadPipeline):
@@ -353,17 +344,14 @@ class QuickDownloadPipeline(ArticleDownloadPipeline):
         super().__init__(assets_file, output_dir)
         self.headers_loaded = False
     
-    def load_headers_from_file(self, headers_file: str = "headers.json") -> bool:
+    def load_headers_from_file(self) -> bool:
         """
-        从文件加载已保存的请求头
-        
-        Args:
-            headers_file: 请求头文件路径
-            
+        从缓存加载已保存的请求头
+
         Returns:
             是否成功加载
         """
-        headers = load_saved_headers(headers_file)
+        headers = load_saved_headers()
         if headers:
             self.headers = headers
             self.headers_loaded = True
@@ -380,7 +368,7 @@ class QuickDownloadPipeline(ArticleDownloadPipeline):
         save = input("\n是否保存请求头以便下次使用？(y/n): ").strip().lower()
         if save == 'y':
             save_headers(self.headers)
-            print("[Info] 请求头已保存到 headers.json")
+            print("[Info] 请求头已保存到 .cache/headers.json")
         
         return True
     

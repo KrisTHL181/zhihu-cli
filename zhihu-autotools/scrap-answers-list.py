@@ -6,15 +6,14 @@ import os
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from curl_cffi import requests
+from cache_manager import cache_manager
 
 def load_headers(quick_mode: bool = False):
     """从文件加载缓存的 headers，或通过粘贴 cURL 获取"""
-    header_cache = "headers.json"
-    
-    if quick_mode and os.path.exists(header_cache):
-        with open(header_cache, 'r', encoding='utf-8') as f:
-            headers = json.load(f)
-            print(f"[Success] Loaded cached headers from {header_cache}")
+    if quick_mode:
+        headers = cache_manager.load_headers()
+        if headers:
+            print("[Success] Loaded cached headers from .cache/headers.json")
             return headers
 
     print("\n--- Please paste cURL from any Zhihu Answers API request ---")
@@ -28,11 +27,8 @@ def load_headers(quick_mode: bool = False):
     
     # 移除可能导致问题的头部
     headers.pop('Accept-Encoding', None)
-    
-    # 保存供下次使用
-    with open(header_cache, 'w', encoding='utf-8') as f:
-        json.dump(headers, f, indent=2)
-    print(f"[Success] Headers configured and cached.")
+    cache_manager.save_headers(headers)
+    print("[Success] Headers configured and cached.")
     return headers
 
 def extract_config_from_curl(curl_text):

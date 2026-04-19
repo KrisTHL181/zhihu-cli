@@ -13,20 +13,17 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import track
 
-CACHE_FILE = "headers.json"
+from cache_manager import cache_manager
+
 
 def save_headers(headers):
-    """保存 Header 到本地文件"""
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(headers, f, indent=2, ensure_ascii=False)
-    print(f"✅ Headers 已缓存至 {CACHE_FILE}")
+    """保存 Header 到缓存"""
+    cache_manager.save_headers(headers)
+    print("✅ Headers 已缓存至 .cache/headers.json")
 
 def load_headers():
-    """从本地文件读取 Header"""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return None
+    """从缓存读取 Header"""
+    return cache_manager.load_headers()
 
 def extract_config(curl_text):
     """从 cURL 提取 Header 和基础 URL"""
@@ -210,7 +207,7 @@ def main(url: str, reading_mode: bool = False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape all answers under a Zhihu question")
     parser.add_argument("--url", help="输入 cURL 命令或知乎问题链接（可通过管道传入）")
-    parser.add_argument("--reading-mode",  action='store_true', help='使用基于 Rich 的阅读模式')
+    parser.add_argument("--reading-mode", action='store_true', help='使用基于 Rich 的阅读模式')
     args = parser.parse_args()
 
     main(args.url, args.reading_mode)
