@@ -158,7 +158,7 @@ def get_best_pager() -> str:
 
     return "more"
 
-def main(url: str, reading_mode: bool = False):
+def main(url: str, reading_mode: bool = False, no_cache: bool = False):
     current_url, headers = get_request_data(url)
     if not current_url or not headers:
         return
@@ -184,11 +184,18 @@ def main(url: str, reading_mode: bool = False):
     sys.stdin = open('/dev/tty') # 刷新已经被消费掉的stdin
     console = Console()
 
-    answers = []
-    for num, author, vote, content in track(scrape_answers(session, question_data, headers),
-                                            total=question_data["answer_count"],
-                                            description="抓取答案中..."):
-        answers.append((num, author, vote, content))
+    answers = cache_manager.get_cached_question(question_data["id"]) if not no_cache else None
+
+    if answers is None:
+        answers = []
+        for item in track(scrape_answers(session, question_data, headers),
+                        total=question_data["answer_count"],
+                        description="抓取答案中..."):
+            answers.append(item)
+
+        if not no_cache:
+            cache_manager.save_question(question_data["id"], answers)
+            print("问题回答数据已缓存！", file=sys.stderr)
 
     os.environ["PAGER"] = get_best_pager()
 
@@ -208,6 +215,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape all answers under a Zhihu question")
     parser.add_argument("--url", help="输入 cURL 命令或知乎问题链接（可通过管道传入）")
     parser.add_argument("--reading-mode", action='store_true', help='使用基于 Rich 的阅读模式')
+    parser.add_argument("--no-cache", action="store_true", help="强制重新抓取而不是缓存回答")
     args = parser.parse_args()
 
-    main(args.url, args.reading_mode)
+    main(args.url, args.reading_mode, args.no_cache)
