@@ -395,7 +395,7 @@ class PageToMarkdown:
         """
         self.converter = ZhihuMarkdownConverter(skip_empty=skip_empty)
     
-    def convert(self, html_content: str, url: str = '') -> str:
+    def convert(self, html_content: str, url: str = '', strip: bool = True) -> str:
         """
         Convert HTML content to Markdown.
         
@@ -404,7 +404,8 @@ class PageToMarkdown:
         :return: Markdown string.
         """
         content = self.converter.tex_normalize(html_content)
-        return self.converter.convert(content, url)
+        result = self.converter.convert(content, url)
+        return result.strip() if strip else result
 
 converter = PageToMarkdown()
 
