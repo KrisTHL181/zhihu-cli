@@ -4,7 +4,7 @@ import re
 import time
 import os
 from datetime import datetime
-
+import argparse
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 from html2markdown import PageToMarkdown
@@ -56,11 +56,14 @@ def parse_question(entities: dict) -> dict:
         "detail": PageToMarkdown().convert(q_data.get("detail", "")),
     }
 
-def main():
-    print("--- 💡 请粘贴 [知乎问题链接] 或 [cURL 命令] ---", file=sys.stderr)
-    print("(直接输入链接将使用上次缓存的 Headers)\n", file=sys.stderr)
+def main(url=None):
+    if url:
+        user_input = url
+    else:
+        print("--- 💡 请粘贴 [知乎问题链接] 或 [cURL 命令] ---", file=sys.stderr)
+        print("(直接输入链接将使用上次缓存的 Headers)\n", file=sys.stderr)
+        user_input = sys.stdin.read().strip()
     
-    user_input = sys.stdin.read().strip()
     if not user_input:
         return
 
@@ -152,4 +155,8 @@ def main():
             print(f"💥 出错: {e}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Scrape all answers under a Zhihu question")
+    parser.add_argument("--url", help="输入 cURL 命令或知乎问题链接（可通过管道传入）")
+    args = parser.parse_args()
+
+    main(args.url)
