@@ -7,15 +7,12 @@ Adapted from the Tampermonkey script "知乎备份剪藏" (zhihu-backup-collect)
 
 import re
 from html.parser import HTMLParser
-from typing import List, Optional, Union
+from typing import Optional, Union
 from urllib.parse import urlparse, parse_qs
 
 
-try:
-    from bs4 import BeautifulSoup, NavigableString, Tag
-except ImportError:
-    raise ImportError("Please install beautifulsoup4: pip install beautifulsoup4")
-
+from bs4 import BeautifulSoup, Tag
+from bs4.element import NavigableString
 
 class ZhihuLinkConverter:
     """Convert Zhihu internal links to normal URLs."""
