@@ -409,10 +409,11 @@ class PageToMarkdown:
         content = self.converter.tex_normalize(html_content)
         return self.converter.convert(content, url)
 
+converter = PageToMarkdown()
+
 if __name__ == "__main__":
     import sys
-    converter = PageToMarkdown()
-    
+
     if len(sys.argv) > 1:
         html_file = sys.argv[1]
         with open(html_file, 'r', encoding='utf-8') as f:

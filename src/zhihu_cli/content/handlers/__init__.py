@@ -1,4 +1,9 @@
-from .requests import requests
-from .cache_manager import cache_manager
+from datetime import datetime
 
-requests.headers.update(cache_manager.load_headers())
+def fmt_time(ts):
+    if ts:
+        try:
+            return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return str(ts)
+    return '未知时间'
