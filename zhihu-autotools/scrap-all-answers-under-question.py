@@ -149,10 +149,6 @@ def scrape_answers(session, question_data, headers):
         print(f"💥 出错: {e}")
 
 def get_best_pager() -> str:
-    bat_path = shutil.which("bat") or shutil.which("batcat")
-    if bat_path:
-        return f"{bat_path} --plain --language md"
-
     if shutil.which("less"):
         return "less -R"
 
