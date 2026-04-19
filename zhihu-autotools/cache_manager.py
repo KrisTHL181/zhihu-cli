@@ -92,3 +92,42 @@ class CacheManager:
         self._atomic_write(cache_path, json.dumps(data, indent=2))
 
 cache_manager = CacheManager()
+
+if __name__ == "__main__":
+    import sys
+    import re
+
+    print("=== Zhihu Headers Refresh Tool ===")
+    print("Please paste the cURL command (from Browser DevTools):")
+    print("Tip: Press Ctrl+D (Unix) or Ctrl+Z then Enter (Windows) to save.\n")
+    
+    try:
+        curl_text = sys.stdin.read()
+    except EOFError:
+        curl_text = ""
+
+    if not curl_text.strip():
+        print("❌ Error: No input detected.")
+        sys.exit(1)
+
+    # 1. 提取 Headers (兼容 -H 和 --header)
+    headers = {}
+    header_matches = re.findall(r"(?:-H|--header)\s+['\"]([^'\"]+)['\"]", curl_text)
+    
+    for h in header_matches:
+        if ":" in h:
+            k, v = h.split(":", 1)
+            # 过滤掉一些可能引起干扰的 header
+            if k.strip().lower() not in ['accept-encoding', 'content-length']:
+                headers[k.strip()] = v.strip()
+
+    # 2. 校验并保存
+    if headers:
+        # 确保关键字段存在
+        if 'cookie' not in [k.lower() for k in headers.keys()]:
+            print("⚠️  Warning: No Cookie found in headers. Some requests might fail.")
+
+        cache_manager.save_headers(headers)
+        print(f"✅ Success! {len(headers)} headers saved to {cache_manager.header_file}")
+    else:
+        print("❌ Error: Could not parse any headers from the input.")
