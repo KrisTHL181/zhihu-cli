@@ -18,11 +18,15 @@ class CacheManager:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, cache_dir=".cache"):
+    def __init__(self, cache_dir: str | Path | None = None):
         if self._initialized:
             return
 
-        self.cache_dir = Path(cache_dir)
+        if cache_dir is None:
+            self.cache_dir = Path(__file__).parent.resolve() / ".cache"
+        else:
+            self.cache_dir = Path(cache_dir).resolve()
+
         self.cache_dir.mkdir(exist_ok=True)
         self.header_file = self.cache_dir / "headers.json"
         self.content_dir = self.cache_dir / "questions"
