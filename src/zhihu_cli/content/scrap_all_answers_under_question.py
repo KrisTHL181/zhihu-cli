@@ -8,7 +8,7 @@ from datetime import datetime
 import argparse
 from bs4 import BeautifulSoup
 from curl_cffi import requests
-from .html2markdown import PageToMarkdown
+from .utils.html2markdown import PageToMarkdown
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import track

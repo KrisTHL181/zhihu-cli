@@ -10,7 +10,7 @@ from .download_contents import (
     extract_metadata_from_html,
     sanitize_filename,
 )
-from .html2markdown import PageToMarkdown
+from .utils.html2markdown import PageToMarkdown
 
 __all__ = [
     "cache_manager",

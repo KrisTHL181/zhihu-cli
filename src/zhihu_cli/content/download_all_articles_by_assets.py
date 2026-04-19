@@ -15,7 +15,7 @@ from curl_cffi import requests
 from .handlers.cache_manager import cache_manager
 
 # 导入已有的模块
-from .html2markdown import PageToMarkdown
+from .utils.html2markdown import PageToMarkdown
 from .download_contents import extract_config_from_curl, extract_metadata_from_html, sanitize_filename
 
 

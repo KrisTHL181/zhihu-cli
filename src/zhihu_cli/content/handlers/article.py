@@ -1,5 +1,5 @@
 from .requests import get_page_entities
-from ..html2markdown import converter
+from ..utils.html2markdown import converter
 from . import fmt_time
 
 def parse_article_metadata(item: dict) -> dict:

@@ -1,6 +1,6 @@
 import time
 from typing import Dict, Generator
-from ..html2markdown import converter
+from ..utils.html2markdown import converter
 from .requests import session
 
 def fetch_child_comments(parent_comment: Dict) -> Generator[Dict, None, None]:

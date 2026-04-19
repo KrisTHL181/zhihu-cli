@@ -12,7 +12,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 # 导入 html2markdown 模块
-from .html2markdown import PageToMarkdown
+from .utils.html2markdown import PageToMarkdown
 
 
 def extract_config_from_curl(curl_text: str):
