@@ -1,3 +1,4 @@
+import shutil
 import sys
 import json
 import re
@@ -8,6 +9,9 @@ import argparse
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 from html2markdown import PageToMarkdown
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.progress import track
 
 CACHE_FILE = "headers.json"
 
@@ -53,6 +57,7 @@ def parse_question(entities: dict) -> dict:
         "url": q_data.get("url", ""),
         "created_time": q_data.get("created", 0),
         "updated_time": q_data.get("updatedTime", 0),
+        "answer_count": q_data.get("answerCount", 0),
         "detail": PageToMarkdown().convert(q_data.get("detail", "")),
     }
 
@@ -146,7 +151,17 @@ def scrape_answers(session, question_data, headers):
     except Exception as e:
         print(f"💥 出错: {e}")
 
-def main(url: str):
+def get_best_pager() -> str:
+    bat_path = shutil.which("bat") or shutil.which("batcat")
+    if bat_path:
+        return f"{bat_path} --plain --language md"
+
+    if shutil.which("less"):
+        return "less -R"
+
+    return "more"
+
+def main(url: str, reading_mode: bool = False):
     current_url, headers = get_request_data(url)
     if not current_url or not headers:
         return
@@ -156,20 +171,46 @@ def main(url: str):
     if not question_data:
         return
 
-    print(f"📌 知乎问题: {question_data['title']}")
-    print(f"🔗 链接: {question_data['url']}")
-    print(f"⏰ 创建时间: {datetime.fromtimestamp(question_data['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📝 详情:\n{question_data['detail']}\n")
+    if not reading_mode:
+        print(f"📌 知乎问题: {question_data['title']}")
+        print(f"🔗 链接: {question_data['url']}")
+        print(f"⏰ 创建时间: {datetime.fromtimestamp(question_data['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"📝 详情:\n{question_data['detail']}\n")
 
-    for answer_num, author, vote, content in scrape_answers(session, question_data, headers):
-        print(f"\n[{answer_num}] 作者: {author} | 赞同: {vote}")
-        print("-" * 20)
-        print(content)
-        print("-" * 20)
+        for answer_num, author, vote, content in scrape_answers(session, question_data, headers):
+            print(f"\n[{answer_num}] 作者: {author} | 赞同: {vote}")
+            print("-" * 20)
+            print(content)
+            print("-" * 20)
+        return
+
+    sys.stdin = open('/dev/tty') # 刷新已经被消费掉的stdin
+    console = Console()
+
+    answers = []
+    for num, author, vote, content in track(scrape_answers(session, question_data, headers),
+                                            total=question_data["answer_count"],
+                                            description="抓取答案中..."):
+        answers.append((num, author, vote, content))
+
+    os.environ["PAGER"] = get_best_pager()
+
+    with console.pager(styles=True, links=True):
+        console.print(f"📌 知乎问题: {question_data['title']}")
+        console.print(f"🔗 链接: {question_data['url']}")
+        console.print(f"⏰ 创建时间: {datetime.fromtimestamp(question_data['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+        console.print(f"📝 详情:\n{question_data['detail']}\n")
+
+        for num, author, vote, content in answers:
+            ans_md = f"## [{num}] 作者: {author} | 赞同: {vote}\n"
+            ans_md += f"{content}\n\n---"
+
+            console.print(Markdown(ans_md))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape all answers under a Zhihu question")
     parser.add_argument("--url", help="输入 cURL 命令或知乎问题链接（可通过管道传入）")
+    parser.add_argument("--reading-mode",  action='store_true', help='使用基于 Rich 的阅读模式')
     args = parser.parse_args()
 
-    main(args.url)
+    main(args.url, args.reading_mode)
