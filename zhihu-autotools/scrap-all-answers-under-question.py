@@ -56,7 +56,7 @@ def parse_question(entities: dict) -> dict:
         "detail": PageToMarkdown().convert(q_data.get("detail", "")),
     }
 
-def main(url=None):
+def get_request_data(url=None):
     if url:
         user_input = url
     else:
@@ -65,7 +65,7 @@ def main(url=None):
         user_input = sys.stdin.read().strip()
     
     if not user_input:
-        return
+        return None, None
 
     current_url = ""
     headers = {}
@@ -82,77 +82,90 @@ def main(url=None):
         headers = load_headers()
         if not headers:
             print("❌ 本地无缓存，请先粘贴一次 cURL 以初始化 Headers", file=sys.stderr)
-            return
+            return None, None
         print("使用缓存的 Headers 进行请求...", file=sys.stderr)
     else:
         print("❌ 无法识别的输入，请输入正确的 cURL 或知乎链接", file=sys.stderr)
+        return None, None
+
+    return current_url, headers
+
+def get_question(session, current_url, headers):
+    resp = session.get(current_url, headers=headers, impersonate="chrome110", timeout=15)
+    
+    if resp.status_code == 403:
+        print("❌ 403 Forbidden: 缓存的 Headers 可能已过期，请重新粘贴 cURL")
         return
 
-    print(f"🚀 开始请求: {current_url}\n\n{'='*60}\n\n", file=sys.stderr)
+    soup = BeautifulSoup(resp.text, 'html.parser')
     
-    with requests.Session() as session:
-        resp = session.get(current_url, headers=headers, impersonate="chrome110", timeout=15)
+    # 提取初始数据
+    script_tag = soup.find('script', id='js-initialData')
+    if not script_tag:
+        print("❌ 无法解析页面数据，请检查链接或 Headers 是否有效", file=sys.stderr)
+        return
         
-        if resp.status_code == 403:
-            print("❌ 403 Forbidden: 缓存的 Headers 可能已过期，请重新粘贴 cURL")
-            return
+    initial_data = json.loads(script_tag.string)
+    page_data = initial_data['initialState']['entities']
+    return parse_question(page_data)
 
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        
-        # 提取初始数据
-        script_tag = soup.find('script', id='js-initialData')
-        if not script_tag:
-            print("❌ 无法解析页面数据，请检查链接或 Headers 是否有效", file=sys.stderr)
-            return
+def scrape_answers(session, question_data, headers):
+    # 1. API 翻页逻辑
+    next_url = f"https://www.zhihu.com/api/v4/questions/{question_data['id']}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
+    
+    is_end = False
+    answer_num = 1
+
+    try:
+        while not is_end and next_url:
+            resp = session.get(next_url, headers=headers, impersonate="chrome110", timeout=15)
+            if resp.status_code != 200:
+                print(f"❌ API 请求失败: {resp.status_code}")
+                break
+
+            res_json = resp.json()
+            answers = res_json.get("data", [])
+
+            for ans in answers:
+                author = ans.get("author", {}).get("name", "匿名用户")
+                vote = ans.get("voteup_count", 0)
+                content = PageToMarkdown().convert(ans.get("content", ""))
+
+                yield answer_num, author, vote, content
+                answer_num += 1
+
+            paging = res_json.get("paging", {})
+            is_end = paging.get("is_end", True)
+            next_url = paging.get("next")
+            if next_url:
+                next_url = next_url.replace("http://", "https://")
             
-        initial_data = json.loads(script_tag.string)
-        page_data = initial_data['initialState']['entities']
-        question_data = parse_question(page_data)
-        
-        print(f"📌 知乎问题: {question_data['title']}")
-        print(f"🔗 链接: {question_data['url']}")
-        print(f"⏰ 创建时间: {datetime.fromtimestamp(question_data['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"📝 详情:\n{question_data['detail']}\n")
-        print("="*50)
+            if not is_end:
+                time.sleep(1)
 
-        # 2. API 翻页逻辑
-        next_url = f"https://www.zhihu.com/api/v4/questions/{question_data['id']}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
-        
-        is_end = False
-        answer_num = 1
+    except Exception as e:
+        print(f"💥 出错: {e}")
 
-        try:
-            while not is_end and next_url:
-                resp = session.get(next_url, headers=headers, impersonate="chrome110", timeout=15)
-                if resp.status_code != 200:
-                    print(f"❌ API 请求失败: {resp.status_code}")
-                    break
+def main(url: str):
+    current_url, headers = get_request_data(url)
+    if not current_url or not headers:
+        return
+    
+    session = requests.Session()
+    question_data = get_question(session, current_url, headers)
+    if not question_data:
+        return
 
-                res_json = resp.json()
-                answers = res_json.get("data", [])
+    print(f"📌 知乎问题: {question_data['title']}")
+    print(f"🔗 链接: {question_data['url']}")
+    print(f"⏰ 创建时间: {datetime.fromtimestamp(question_data['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📝 详情:\n{question_data['detail']}\n")
 
-                for ans in answers:
-                    author = ans.get("author", {}).get("name", "匿名用户")
-                    vote = ans.get("voteup_count", 0)
-                    content = PageToMarkdown().convert(ans.get("content", ""))
-
-                    print(f"\n[{answer_num}] 作者: {author} | 赞同: {vote}")
-                    print("-" * 20)
-                    print(content)
-                    print("-" * 20)
-                    answer_num += 1
-
-                paging = res_json.get("paging", {})
-                is_end = paging.get("is_end", True)
-                next_url = paging.get("next")
-                if next_url:
-                    next_url = next_url.replace("http://", "https://")
-                
-                if not is_end:
-                    time.sleep(1)
-
-        except Exception as e:
-            print(f"💥 出错: {e}")
+    for answer_num, author, vote, content in scrape_answers(session, question_data, headers):
+        print(f"\n[{answer_num}] 作者: {author} | 赞同: {vote}")
+        print("-" * 20)
+        print(content)
+        print("-" * 20)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape all answers under a Zhihu question")
