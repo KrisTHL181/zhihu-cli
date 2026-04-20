@@ -58,3 +58,27 @@ def scrape_answers(question_data):
         next_url = paging.get("next")
         if next_url:
             next_url = next_url.replace("http://", "https://")
+
+def upvote_answer(answer_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "up"})
+    return resp.json()
+
+def neutral_answer(answer_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "neutral"})
+    return resp.json()
+
+def downvote_answer(answer_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "down"})
+    return resp.json()
+
+def collect_answer(answer_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/collections/contents/answer/{answer_id}")
+    return resp.json()
+
+def thank_answer(answer_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/thankers")
+    return resp.json()
+
+def unthank_answer(answer_id) -> dict:
+    resp = session.delete(f"https://www.zhihu.com/api/v4/answers/{answer_id}/thankers")
+    return resp.json()
