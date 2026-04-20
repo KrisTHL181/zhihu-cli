@@ -1,22 +1,17 @@
-import time
-from typing import Dict, Generator
+from typing import Dict, Iterable
 from ..utils.html2markdown import converter
-from .requests import session
+from .waterfall import stream_handler
 
-def fetch_child_comments(parent_comment: Dict) -> Generator[Dict, None, None]:
-    """递归获取子评论，生成每条子评论"""
+def fetch_child_comments(parent_comment: Dict) -> Iterable[Dict]:
     child_offset = parent_comment.get("child_comment_next_offset")
     if not child_offset:
-        return
-    child_api_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
-    child_next_url = f"{child_api_url}?limit=20&offset={child_offset}"
-    
-    while child_next_url:
-        resp = session.get(child_next_url)
-        if resp.status_code != 200:
-            break
-        child_json = resp.json()
-        for child in child_json.get("data", []):
+        return []
+
+    base_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
+    initial_url = f"{base_url}?limit=20&offset={child_offset}"
+
+    def child_parser(data: dict):
+        for child in data.get("data", []):
             yield {
                 "author": child.get("author", {}).get("name", "匿名用户"),
                 "like_count": child.get("like_count", 0),
@@ -24,23 +19,14 @@ def fetch_child_comments(parent_comment: Dict) -> Generator[Dict, None, None]:
                 "content": converter.convert(child.get("content", "")),
                 "id": child.get("id")
             }
-        paging = child_json.get("paging", {})
-        child_next_url = paging.get("next") if not paging.get("is_end") else None
-        if child_next_url:
-            time.sleep(0.5)
 
-def fetch_root_comments(
-    item_type: str,
-    item_id: str,
-) -> Generator[Dict, None, None]:
-    """获取根评论（含子评论）生成器"""
-    next_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{item_id}/root_comment?order_by=score&limit=20&offset="
-    while next_url:
-        resp = session.get(next_url)
-        if resp.status_code != 200:
-            break
-        res_json = resp.json()
-        for comment in res_json.get("data", []):
+    return stream_handler(initial_url, child_parser)
+
+def fetch_root_comments(item_type: str, item_id: str) -> Iterable[Dict]:
+    initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{item_id}/root_comment?order_by=score&limit=20"
+
+    def root_parser(data: dict):
+        for comment in data.get("data", []):
             root = {
                 "author": comment.get("author", {}).get("name", "匿名用户"),
                 "like_count": comment.get("like_count", 0),
@@ -49,7 +35,7 @@ def fetch_root_comments(
                 "id": comment.get("id"),
                 "child_comments": []
             }
-            # 已有的直接子评论
+
             for child in comment.get("child_comments", []):
                 root["child_comments"].append({
                     "author": child.get("author", {}).get("name", "匿名用户"),
@@ -57,18 +43,12 @@ def fetch_root_comments(
                     "dislike_count": child.get("dislike_count", 0),
                     "content": converter.convert(child.get("content", "")),
                 })
-            # 递归获取更多子评论
-            for child in fetch_child_comments(comment):
-                root["child_comments"].append(child)
+
+            root["child_comments"].extend(fetch_child_comments(comment))
+
             yield root
-        
-        paging = res_json.get("paging", {})
-        if paging.get("is_end"):
-            break
-        next_url = paging.get("next")
-        if next_url:
-            next_url = next_url.replace("http://", "https://")
-        time.sleep(1)
+
+    return stream_handler(initial_url, root_parser)
 
 def print_comments(item_type: str, item_id: str) -> None:
     """打印所有评论（带格式）"""

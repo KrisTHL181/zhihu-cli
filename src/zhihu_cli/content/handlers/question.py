@@ -1,6 +1,8 @@
+
 from .requests import get_page_entities, session
 from ..utils.html2markdown import converter
 from . import fmt_time
+from .waterfall import stream_handler
 
 NEXT_URL_API = "https://www.zhihu.com/api/v4/questions/{question_id}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
 
@@ -33,31 +35,17 @@ def scrape_question_data(question_url: str) -> tuple[dict, str]:
     return parse_question_metadata(item_data), converter.convert(item_data.get("detail"))
 
 def scrape_answers(question_data):
-    next_url = NEXT_URL_API.replace("{question_id}", question_data["id"])
+    url = NEXT_URL_API.replace("{question_id}", question_data["id"])
+    
+    def parse_ans(data):
+        for ans in data.get("data", []):
+            yield {
+                "author": ans.get("author", {}).get("name", "匿名用户"),
+                "vote": ans.get("voteup_count", 0),
+                "content": converter.convert(ans.get("content", ""))
+            }
 
-    is_end = False
-    answer_num = 1
-
-    while not is_end and next_url:
-        resp = session.get(next_url)
-        resp.raise_for_status()
-
-        res_json = resp.json()
-        answers = res_json.get("data", [])
-
-        for ans in answers:
-            author = ans.get("author", {}).get("name", "匿名用户")
-            vote = ans.get("voteup_count", 0)
-            content = converter.convert(ans.get("content", ""))
-
-            yield answer_num, author, vote, content
-            answer_num += 1
-
-        paging = res_json.get("paging", {})
-        is_end = paging.get("is_end", True)
-        next_url = paging.get("next")
-        if next_url:
-            next_url = next_url.replace("http://", "https://")
+    return stream_handler(url, parse_ans)
 
 def upvote_answer(answer_id) -> dict:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "up"})
