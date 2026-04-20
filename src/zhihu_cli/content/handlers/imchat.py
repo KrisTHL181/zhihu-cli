@@ -3,8 +3,8 @@ import time
 from paho.mqtt import client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
 import queue
-from .cache_manager import cache_manager
-from .requests import get_page_entities
+from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import get_page_entities
 
 NOTIFICATION_TOPIC = "zhihu/notification/badge/web/v1/{USER_HASH}/"
 IMCHAT_TOPIC = "zhihu/message/v1/im/user/{USER_HASH}/"

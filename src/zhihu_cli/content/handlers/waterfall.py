@@ -1,5 +1,5 @@
 from typing import Iterable, Callable, Dict, Any, Optional
-from .requests import session
+from zhihu_cli.content.handlers.requests import session
 import time
 
 def stream_handler(

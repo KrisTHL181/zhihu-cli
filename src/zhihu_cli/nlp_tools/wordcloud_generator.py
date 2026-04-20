@@ -6,7 +6,7 @@ import jieba.analyse
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import argparse
-from . import FONT_PATH, STOP_WORDS
+from zhihu_cli.nlp_tools import FONT_PATH, STOP_WORDS
 
 # --- 配置区 ---
 OUTPUT_FILE = "zhihu_wordcloud.png"

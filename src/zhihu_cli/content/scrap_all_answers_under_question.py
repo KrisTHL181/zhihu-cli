@@ -8,12 +8,12 @@ from datetime import datetime
 import argparse
 from bs4 import BeautifulSoup
 from curl_cffi import requests
-from .utils.html2markdown import PageToMarkdown
+from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import track
 
-from .handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 
 def save_headers(headers):

@@ -1,4 +1,4 @@
-from .requests import session
+from zhihu_cli.content.handlers.requests import session
 
 def collect(item_type: str, item_id) -> dict:
     resp = session.post(f"https://www.zhihu.com/api/v4/collections/contents/{item_type}/{item_id}")

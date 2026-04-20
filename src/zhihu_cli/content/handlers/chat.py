@@ -1,6 +1,6 @@
-from .requests import session
-from . import fmt_time
-from .requests import get_page_entities
+from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers import fmt_time
+from zhihu_cli.content.handlers.requests import get_page_entities
 from typing import List, Dict, Optional
 
 def get_inbox() -> List[Dict]:

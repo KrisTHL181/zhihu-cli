@@ -10,7 +10,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_score
-from . import STOP_WORDS as stop_words
+from zhihu_cli.nlp_tools import STOP_WORDS as stop_words
 
 def find_best_k(X, max_k=20):
     from matplotlib import pyplot as plt

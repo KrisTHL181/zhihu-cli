@@ -12,11 +12,11 @@ import re
 from typing import List, Dict, Any
 from datetime import datetime
 from curl_cffi import requests
-from .handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 # 导入已有的模块
-from .utils.html2markdown import PageToMarkdown
-from .download_contents import extract_config_from_curl, extract_metadata_from_html, sanitize_filename
+from zhihu_cli.content.utils.html2markdown import PageToMarkdown
+from zhihu_cli.content.download_contents import extract_config_from_curl, extract_metadata_from_html, sanitize_filename
 
 
 class ArticleDownloadPipeline:

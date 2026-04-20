@@ -1,8 +1,8 @@
 
-from .requests import get_page_entities, session
-from ..utils.html2markdown import converter
-from . import fmt_time
-from .waterfall import stream_handler
+from zhihu_cli.content.handlers.requests import get_page_entities, session
+from zhihu_cli.content.utils.html2markdown import converter
+from zhihu_cli.content.handlers import fmt_time
+from zhihu_cli.content.handlers.waterfall import stream_handler
 
 NEXT_URL_API = "https://www.zhihu.com/api/v4/questions/{question_id}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
 

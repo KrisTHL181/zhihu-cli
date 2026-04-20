@@ -5,7 +5,7 @@ import re
 import os
 from datetime import datetime
 from curl_cffi import requests
-from .handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 def load_headers(quick_mode: bool = False):
     """从文件加载缓存的 headers，或通过粘贴 cURL 获取"""

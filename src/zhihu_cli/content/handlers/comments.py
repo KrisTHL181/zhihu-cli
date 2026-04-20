@@ -1,8 +1,8 @@
 from typing import Dict, Iterable
-from ..utils.html2markdown import converter
-from .requests import session
-from .waterfall import stream_handler
-from ..utils import markdown2html
+from zhihu_cli.content.utils.html2markdown import converter
+from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.utils import markdown2html
 
 COMMENT_API = {
     "answer": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",

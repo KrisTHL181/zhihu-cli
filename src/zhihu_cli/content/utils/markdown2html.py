@@ -1,4 +1,4 @@
-from ..handlers.requests import session
+from zhihu_cli.content.handlers.requests import session
 import uuid
 import json
 import time

@@ -1,6 +1,6 @@
-from .requests import get_page_entities
-from ..utils.html2markdown import converter
-from . import fmt_time
+from zhihu_cli.content.handlers.requests import get_page_entities
+from zhihu_cli.content.utils.html2markdown import converter
+from zhihu_cli.content.handlers import fmt_time
 
 def parse_pin_metadata(item: dict) -> dict:
     pin_id = item.get('id', '')

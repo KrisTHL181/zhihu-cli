@@ -1,4 +1,4 @@
-from .requests import session
+from zhihu_cli.content.handlers.requests import session
 
 def follow(user_id: str) -> dict:
     resp = session.post(f"https://www.zhihu.com/api/v4/members/{user_id}/followers")

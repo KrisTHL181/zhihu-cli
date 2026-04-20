@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests as _requests
 from user_agents import parse
 import json
-from .cache_manager import cache_manager
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
     family = parse(ua).browser.family
