@@ -78,3 +78,23 @@ def thank_answer(answer_id) -> dict:
 def unthank_answer(answer_id) -> dict:
     resp = session.delete(f"https://www.zhihu.com/api/v4/answers/{answer_id}/thankers")
     return resp.json()
+
+def upvote_question(question_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters/up")
+    return resp.json()
+
+def unvote_question(question_id) -> dict:
+    resp = session.delete(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters")
+    return resp.json()
+
+def downvote_quesetion(question_id) -> dict: # 未公开接口！
+    resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters/down")
+    return resp.json()
+
+def follow_question(question_id) -> dict:
+    resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/followers")
+    return resp.json()
+    
+def unfollow_question(question_id) -> dict:
+    resp = session.delete(f"https://www.zhihu.com/api/v4/questions/{question_id}/followers")
+    return resp.json()
