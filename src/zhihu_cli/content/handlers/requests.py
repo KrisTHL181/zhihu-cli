@@ -1,10 +1,20 @@
 from bs4 import BeautifulSoup
 from curl_cffi import requests as _requests
+from user_agents import parse
 import json
 from .cache_manager import cache_manager
 
-session = requests = _requests.Session(impersonate="chrome110")
-requests.headers.update(cache_manager.load_headers())
+def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
+    family = parse(ua).browser.family
+    if family in _requests.impersonate.REAL_TARGET_MAP:
+        return family
+
+    return "chrome"
+
+headers = cache_manager.load_headers()
+
+session = requests = _requests.Session(impersonate=get_browser(headers.get("User-Agent")))
+requests.headers.update(headers)
 
 def get_page_entities(url: str) -> dict:
     resp = session.get(url, timeout=15)
