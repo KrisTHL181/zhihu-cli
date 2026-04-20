@@ -5,7 +5,7 @@ import json
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
-    family = parse(ua).browser.family
+    family = parse(ua).browser.family.lower()
     if family in _requests.impersonate.REAL_TARGET_MAP:
         return family
 
@@ -13,7 +13,7 @@ def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
 
 headers = cache_manager.load_headers()
 
-session = requests = _requests.Session(impersonate=get_browser(headers.get("User-Agent")))
+session = requests = _requests.Session(impersonate=get_browser(headers.get("User-Agent", "")))
 requests.headers.update(headers)
 
 def get_page_entities(url: str) -> dict:
