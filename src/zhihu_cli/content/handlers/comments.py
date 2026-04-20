@@ -1,6 +1,15 @@
 from typing import Dict, Iterable
 from ..utils.html2markdown import converter
+from .requests import session
 from .waterfall import stream_handler
+from ..utils import markdown2html
+
+COMMENT_API = {
+    "answer": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
+    "article": "https://www.zhihu.com/api/v4/comment_v5/articles/{item_id}/comment",
+    "pin": "https://www.zhihu.com/api/v4/comment_v5/pins/{item_id}/comment",
+    "question": "https://www.zhihu.com/api/v4/comment_v5/questions/{item_id}/comment"
+}
 
 def fetch_child_comments(parent_comment: Dict) -> Iterable[Dict]:
     child_offset = parent_comment.get("child_comment_next_offset")
@@ -64,3 +73,18 @@ def print_comments(item_type: str, item_id: str) -> None:
                 print(f"      {child['content']}\n")
         print("-" * 20)
         comment_id += 1
+
+def comment_item(item_type: str, item_id: str, content: str) -> dict:
+    if item_type not in COMMENT_API:
+        raise ValueError(f"Invalid item_type: '{item_type}'. Supported types are: {list(COMMENT_API.keys())}")
+
+    api = COMMENT_API[item_type].replace("{item_id}", item_id)
+    content = f"{markdown2html.markdown2html(content, scene='answer')}"
+
+    resp = session.post(api, json={"content": content})
+    return resp.json()
+
+def delete_comment(comment_id) -> None:
+    resp = session.delete(f"https://www.zhihu.com/api/v4/comment_v5/comment/{comment_id}")
+    if not resp.json()["success"]:
+        raise RuntimeError(f"Failed to delete comment {comment_id}")
