@@ -75,8 +75,8 @@ class CacheManager:
             try:
                 return json.loads(self.header_file.read_text())
             except json.JSONDecodeError:
-                return None
-        return None
+                return {}
+        return {}
 
     @make_thread_safe
     def get_cached_question(self, q_id):
@@ -87,7 +87,7 @@ class CacheManager:
         if cache_path.exists():
             if time.time() - cache_path.stat().st_mtime < 86400:
                 return json.loads(cache_path.read_text())
-        return None
+        return {}
 
     @make_thread_safe
     def save_question(self, q_id, data):
