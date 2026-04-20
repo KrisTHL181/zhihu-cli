@@ -71,10 +71,6 @@ def downvote_answer(answer_id) -> dict:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "down"})
     return resp.json()
 
-def collect_answer(answer_id) -> dict:
-    resp = session.post(f"https://www.zhihu.com/api/v4/collections/contents/answer/{answer_id}")
-    return resp.json()
-
 def thank_answer(answer_id) -> dict:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/thankers")
     return resp.json()
