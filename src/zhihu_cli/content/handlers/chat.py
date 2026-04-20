@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 
 def get_inbox() -> List[Dict]:
     messages = []
-    resp = session.get("https://www.zhihu.com/api/v4/inbox", timeout=15)
+    resp = session.get("https://www.zhihu.com/api/v4/inbox")
     resp.raise_for_status()
 
     inbox = resp.json()["data"]
@@ -53,7 +53,7 @@ def iter_chat_history(chat_id: str):
     current_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
     
     while current_url:
-        resp = session.get(current_url, timeout=15)
+        resp = session.get(current_url)
         resp.raise_for_status()
         
         breakpoint()
@@ -77,7 +77,7 @@ def send_text_message(their_id: str, content: str) -> dict:
         "content_type": 0,
         "text": content,
         "receiver_id": their_id
-    }, timeout=15)
+    })
     
     data = resp.json()
     if resp.status_code == 403 and "error" in data.keys():

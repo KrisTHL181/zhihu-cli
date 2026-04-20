@@ -32,14 +32,14 @@ def scrape_question_data(question_url: str) -> tuple[dict, str]:
     item_data = next(iter(item.values()))
     return parse_question_metadata(item_data), converter.convert(item_data.get("detail"))
 
-def scrape_answers(question_data, headers):
+def scrape_answers(question_data):
     next_url = NEXT_URL_API.replace("{question_id}", question_data["id"])
 
     is_end = False
     answer_num = 1
 
     while not is_end and next_url:
-        resp = session.get(next_url, headers=headers, impersonate="chrome110", timeout=15)
+        resp = session.get(next_url)
         resp.raise_for_status()
 
         res_json = resp.json()

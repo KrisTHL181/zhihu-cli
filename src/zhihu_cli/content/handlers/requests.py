@@ -17,7 +17,7 @@ session = requests = _requests.Session(impersonate=get_browser(headers.get("User
 requests.headers.update(headers)
 
 def get_page_entities(url: str) -> dict:
-    resp = session.get(url, timeout=15)
+    resp = session.get(url)
     
     if resp.status_code == 403:
         raise PermissionError(f"Access denied (403). You might be blocked: {url}")

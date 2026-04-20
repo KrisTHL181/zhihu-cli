@@ -12,7 +12,7 @@ def fetch_child_comments(parent_comment: Dict) -> Generator[Dict, None, None]:
     child_next_url = f"{child_api_url}?limit=20&offset={child_offset}"
     
     while child_next_url:
-        resp = session.get(child_next_url, impersonate="chrome110", timeout=15)
+        resp = session.get(child_next_url)
         if resp.status_code != 200:
             break
         child_json = resp.json()
@@ -36,7 +36,7 @@ def fetch_root_comments(
     """获取根评论（含子评论）生成器"""
     next_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{item_id}/root_comment?order_by=score&limit=20&offset="
     while next_url:
-        resp = session.get(next_url, impersonate="chrome110", timeout=15)
+        resp = session.get(next_url)
         if resp.status_code != 200:
             break
         res_json = resp.json()
