@@ -18,7 +18,7 @@ def markdown2html(markdown: str, scene: Literal["article", "answer"]) -> str:
     })
 
     parsed.raise_for_status()
-    return parsed.json().get("data", {}).get("parsed_content", "")
+    return parsed.json().get("data", {}).get("parsed_content", "").rstrip("<br>")
 
 def rich2html(rich: str, scene: Literal["article", "answer"]) -> str:
     parsed = session.post(PARSE_API, json={
@@ -31,4 +31,4 @@ def rich2html(rich: str, scene: Literal["article", "answer"]) -> str:
     })
 
     parsed.raise_for_status()
-    return parsed.json().get("data", {}).get("parsed_content", "")
+    return parsed.json().get("data", {}).get("parsed_content", "").rstrip("<br>")
