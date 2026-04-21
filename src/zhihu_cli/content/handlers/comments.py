@@ -1,17 +1,19 @@
-from typing import Dict, Iterable
-from zhihu_cli.content.utils.html2markdown import converter
+from collections.abc import Iterable
+
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils import markdown2html
+from zhihu_cli.content.utils.html2markdown import converter
 
 COMMENT_API = {
     "answer": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
     "article": "https://www.zhihu.com/api/v4/comment_v5/articles/{item_id}/comment",
     "pin": "https://www.zhihu.com/api/v4/comment_v5/pins/{item_id}/comment",
-    "question": "https://www.zhihu.com/api/v4/comment_v5/questions/{item_id}/comment"
+    "question": "https://www.zhihu.com/api/v4/comment_v5/questions/{item_id}/comment",
 }
 
-def fetch_child_comments(parent_comment: Dict) -> Iterable[Dict]:
+
+def fetch_child_comments(parent_comment: dict) -> Iterable[dict]:
     child_offset = parent_comment.get("child_comment_next_offset")
     if not child_offset:
         return []
@@ -26,12 +28,13 @@ def fetch_child_comments(parent_comment: Dict) -> Iterable[Dict]:
                 "like_count": child.get("like_count", 0),
                 "dislike_count": child.get("dislike_count", 0),
                 "content": converter.convert(child.get("content", "")),
-                "id": child.get("id")
+                "id": child.get("id"),
             }
 
     return stream_handler(initial_url, child_parser)
 
-def fetch_root_comments(item_type: str, item_id: str) -> Iterable[Dict]:
+
+def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict]:
     initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{item_id}/root_comment?order_by=score&limit=20"
 
     def root_parser(data: dict):
@@ -42,16 +45,18 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[Dict]:
                 "dislike_count": comment.get("dislike_count", 0),
                 "content": converter.convert(comment.get("content", "")),
                 "id": comment.get("id"),
-                "child_comments": []
+                "child_comments": [],
             }
 
             for child in comment.get("child_comments", []):
-                root["child_comments"].append({
-                    "author": child.get("author", {}).get("name", "匿名用户"),
-                    "like_count": child.get("like_count", 0),
-                    "dislike_count": child.get("dislike_count", 0),
-                    "content": converter.convert(child.get("content", "")),
-                })
+                root["child_comments"].append(
+                    {
+                        "author": child.get("author", {}).get("name", "匿名用户"),
+                        "like_count": child.get("like_count", 0),
+                        "dislike_count": child.get("dislike_count", 0),
+                        "content": converter.convert(child.get("content", "")),
+                    }
+                )
 
             root["child_comments"].extend(fetch_child_comments(comment))
 
@@ -59,20 +64,24 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[Dict]:
 
     return stream_handler(initial_url, root_parser)
 
+
 def print_comments(item_type: str, item_id: str) -> None:
     """打印所有评论（带格式）"""
     comment_id = 1
     for comment in fetch_root_comments(item_type, item_id):
-        print(f"\n[{comment_id}] 作者: {comment['author']} | 赞: {comment['like_count']} | 踩: {comment['dislike_count']}")
+        print(
+            f"\n[{comment_id}] 作者: {comment['author']} | 赞: {comment['like_count']} | 踩: {comment['dislike_count']}"
+        )
         print("-" * 20)
-        print(comment['content'])
-        if comment['child_comments']:
+        print(comment["content"])
+        if comment["child_comments"]:
             print("\n  ↳ 子评论:")
-            for child in comment['child_comments']:
+            for child in comment["child_comments"]:
                 print(f"    - 作者: {child['author']} | 赞: {child['like_count']} | 踩: {child['dislike_count']}")
                 print(f"      {child['content']}\n")
         print("-" * 20)
         comment_id += 1
+
 
 def comment_item(item_type: str, item_id: str, content: str) -> dict:
     if item_type not in COMMENT_API:
@@ -83,6 +92,7 @@ def comment_item(item_type: str, item_id: str, content: str) -> dict:
 
     resp = session.post(api, json={"content": content})
     return resp.json()
+
 
 def delete_comment(comment_id) -> None:
     resp = session.delete(f"https://www.zhihu.com/api/v4/comment_v5/comment/{comment_id}")

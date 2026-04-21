@@ -1,38 +1,38 @@
-import sys
 import json
 import re
+import sys
 import time
-import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
-from zhihu_cli.content.utils.html2markdown import PageToMarkdown
+
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 ZHIHU_ARTICLE_PATTERN = r"https?://zhuanlan\.zhihu\.com/p/(\d+)"
-ZHIHU_QUESTION_PATTERN = r'https?://(?:www\.)?zhihu\.com/question/(\d+)'
-ZHIHU_QUESTION_WITH_ANSWER_PATTERN = r'https?://(?:www\.)?zhihu\.com/question/(\d+)(?:/answer/(\d+))?'
-ZHIHU_PIN_PATTERN = r'https?://(?:www\.)?zhihu\.com/pin/([^/?#]+)'
+ZHIHU_QUESTION_PATTERN = r"https?://(?:www\.)?zhihu\.com/question/(\d+)"
+ZHIHU_QUESTION_WITH_ANSWER_PATTERN = r"https?://(?:www\.)?zhihu\.com/question/(\d+)(?:/answer/(\d+))?"
+ZHIHU_PIN_PATTERN = r"https?://(?:www\.)?zhihu\.com/pin/([^/?#]+)"
 CURL_HEADER_PATTERN = r"-H\s+['\"]([^'\"]+)['\"]"
 CURL_URL_PATTERN = r"curl\s+'([^']+)'"
 
 md_converter = PageToMarkdown()
 
 
-def save_headers(headers: Dict[str, str]) -> None:
+def save_headers(headers: dict[str, str]) -> None:
     """保存 Header 到缓存"""
     cache_manager.save_headers(headers)
     print("✅ Headers 已缓存至 .cache/headers.json")
 
 
-def load_headers() -> Optional[Dict[str, str]]:
+def load_headers() -> dict[str, str] | None:
     """从缓存读取 Header"""
     return cache_manager.load_headers()
 
 
-def extract_config_from_curl(curl_text: str) -> tuple[str, Dict[str, str]]:
+def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 提取 URL 和 Headers"""
     url_match = re.search(CURL_URL_PATTERN, curl_text)
     url = url_match.group(1) if url_match else ""
@@ -45,12 +45,12 @@ def extract_config_from_curl(curl_text: str) -> tuple[str, Dict[str, str]]:
             headers[k.strip()] = v.strip()
 
     # 移除干扰字段
-    headers.pop('Accept-Encoding', None)
-    headers.pop('Content-Length', None)
+    headers.pop("Accept-Encoding", None)
+    headers.pop("Content-Length", None)
     return url, headers
 
 
-def parse_item(item_type: str, entities: Dict[str, Any]) -> Dict[str, Any]:
+def parse_item(item_type: str, entities: dict[str, Any]) -> dict[str, Any]:
     """从 initialData 中提取文章信息"""
     item = entities.get(item_type, {})
     if not item:
@@ -59,7 +59,7 @@ def parse_item(item_type: str, entities: Dict[str, Any]) -> Dict[str, Any]:
     q_id = next(iter(item))
     q_data = item[q_id]
     content = q_data.get("content", q_data.get("detail", ""))
-    if isinstance(content, list): # 知乎想法的API特殊
+    if isinstance(content, list):  # 知乎想法的API特殊
         content = content[0].get("content")
 
     return {
@@ -73,7 +73,7 @@ def parse_item(item_type: str, entities: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def fetch_page_data(session: requests.Session, url: str, headers: Dict[str, str]) -> Dict[str, Any]:
+def fetch_page_data(session: requests.Session, url: str, headers: dict[str, str]) -> dict[str, Any]:
     """获取知乎文章页面并解析 initialData"""
     resp = session.get(url, headers=headers, impersonate="chrome110", timeout=15)
     if resp.status_code == 403:
@@ -81,18 +81,18 @@ def fetch_page_data(session: requests.Session, url: str, headers: Dict[str, str]
     if resp.status_code != 200:
         raise RuntimeError(f"页面请求失败: {resp.status_code}")
 
-    soup = BeautifulSoup(resp.text, 'html.parser')
-    script_tag = soup.find('script', id='js-initialData')
+    soup = BeautifulSoup(resp.text, "html.parser")
+    script_tag = soup.find("script", id="js-initialData")
     if not script_tag or not script_tag.string:
         raise ValueError("无法找到 js-initialData 脚本标签")
 
     initial_data = json.loads(script_tag.string)
-    return initial_data['initialState']['entities']
+    return initial_data["initialState"]["entities"]
 
 
-def print_item_info(item: Dict[str, Any]) -> None:
+def print_item_info(item: dict[str, Any]) -> None:
     """打印内容基本信息"""
-    created = datetime.fromtimestamp(item['created_time']).strftime('%Y-%m-%d %H:%M:%S')
+    created = datetime.fromtimestamp(item["created_time"]).strftime("%Y-%m-%d %H:%M:%S")
     print(f"📌 标题: {item['title']}")
     print(f"🔗 链接: {item['url']}")
     print(f"⏰ 创建时间: {created}")
@@ -106,11 +106,7 @@ def convert_content(content: str) -> str:
     return converted if converted.strip() else content
 
 
-def fetch_child_comments(
-    session: requests.Session,
-    parent_comment: Dict[str, Any],
-    headers: Dict[str, str]
-) -> None:
+def fetch_child_comments(session: requests.Session, parent_comment: dict[str, Any], headers: dict[str, str]) -> None:
     """递归获取子评论（含翻页）"""
     child_offset = parent_comment.get("child_comment_next_offset")
     if not child_offset:
@@ -137,12 +133,7 @@ def fetch_child_comments(
             time.sleep(0.5)
 
 
-def fetch_and_print_comments(
-    session: requests.Session,
-    item_type: str,
-    id: str,
-    headers: Dict[str, str]
-) -> None:
+def fetch_and_print_comments(session: requests.Session, item_type: str, id: str, headers: dict[str, str]) -> None:
     """获取并打印所有根评论及子评论"""
     next_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{id}/root_comment?order_by=score&limit=20&offset="
     comment_id = 1
@@ -154,7 +145,7 @@ def fetch_and_print_comments(
             break
 
         res_json = resp.json()
-        comments: List[Dict] = res_json.get("data", [])
+        comments: list[dict] = res_json.get("data", [])
         for comment in comments:
             author = comment.get("author", {}).get("name", "匿名用户")
             like = comment.get("like_count", 0)
@@ -188,36 +179,37 @@ def fetch_and_print_comments(
             next_url = next_url.replace("http://", "https://")
         time.sleep(1)
 
-def get_type(url: str) -> tuple[Optional[str], Optional[str]]:
+
+def get_type(url: str) -> tuple[str | None, str | None]:
     """
     通过正则捕获判断知乎链接类型并返回对应的ID
-    
+
     Args:
         url: 知乎链接字符串
-        
+
     Returns:
-        tuple: (type, id) 
+        tuple: (type, id)
             - type: 'article', 'question', 'pin' 或 None
             - id: 匹配到的ID，如果没有匹配返回 None
     """
     match = re.search(ZHIHU_ARTICLE_PATTERN, url)
     if match:
-        return ('articles', match.group(1))
-    
+        return ("articles", match.group(1))
+
     # 检查问题类型
     match = re.search(ZHIHU_QUESTION_WITH_ANSWER_PATTERN, url)
     if match:
-        return ('answers', f"{match.group(1)}/{match.group(2)}")
+        return ("answers", f"{match.group(1)}/{match.group(2)}")
 
     match = re.search(ZHIHU_QUESTION_PATTERN, url)
     if match:
-        return ('questions', match.group(1))
-    
+        return ("questions", match.group(1))
+
     # 检查想法类型
     match = re.search(ZHIHU_PIN_PATTERN, url)
     if match:
-        return ('pins', match.group(1))
-    
+        return ("pins", match.group(1))
+
     # 无法识别
     return (None, None)
 
@@ -231,7 +223,7 @@ def main() -> None:
         return
 
     current_url: str = ""
-    headers: Optional[Dict[str, str]] = None
+    headers: dict[str, str] | None = None
 
     # 输入识别
     if user_input.startswith("curl"):
@@ -249,7 +241,7 @@ def main() -> None:
 
     assert headers is not None, "Headers 不应为空"
 
-    print(f"🚀 开始请求: {current_url}\n\n{'='*60}\n\n", file=sys.stderr)
+    print(f"🚀 开始请求: {current_url}\n\n{'=' * 60}\n\n", file=sys.stderr)
 
     try:
         with requests.Session() as session:

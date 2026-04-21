@@ -1,12 +1,15 @@
-from typing import Iterable, Callable, Dict, Any, Optional
-from zhihu_cli.content.handlers.requests import session
 import time
+from collections.abc import Callable, Iterable
+from typing import Any
+
+from zhihu_cli.content.handlers.requests import session
+
 
 def stream_handler(
     initial_url: str,
-    parser: Callable[[Dict[str, Any]], Iterable[Any]],
-    extract_next: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
-    delay: float = 1.0
+    parser: Callable[[dict[str, Any]], Iterable[Any]],
+    extract_next: Callable[[dict[str, Any]], str | None] | None = None,
+    delay: float = 1.0,
 ) -> Iterable:
     current_url = initial_url
     while current_url:

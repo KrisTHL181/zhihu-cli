@@ -1,36 +1,40 @@
+import argparse
 import os
 import re
+
 import matplotlib.pyplot as plt
 import numpy as np
-import argparse
+
 
 def count_words(filepath, no_code=False):
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, encoding="utf-8") as f:
         content = f.read()
         # 1. 拆分文件，只取正文部分
-        parts = content.split('---', 1)
-        if len(parts) < 2: return 0
+        parts = content.split("---", 1)
+        if len(parts) < 2:
+            return 0
         body = parts[1]
-        
+
         # 2. 清洗数据：去除LaTeX公式标记、空白字符等
         # 简单去除 $...$ 和 \begin...\end 等结构，只统计纯文字
-        clean_text = re.sub(r'\$.*?\$', '', body)  # 去除行内公式
-        clean_text = re.sub(r'\\begin\{.*?\}.*?\\end\{.*?\}', '', clean_text, flags=re.DOTALL)
-        clean_text = re.sub(r'\s+', '', clean_text) # 去除所有空白
+        clean_text = re.sub(r"\$.*?\$", "", body)  # 去除行内公式
+        clean_text = re.sub(r"\\begin\{.*?\}.*?\\end\{.*?\}", "", clean_text, flags=re.DOTALL)
+        clean_text = re.sub(r"\s+", "", clean_text)  # 去除所有空白
         if no_code:
-            clean_text = re.sub(r'```.*?```', '', clean_text, flags=re.DOTALL)
-        
+            clean_text = re.sub(r"```.*?```", "", clean_text, flags=re.DOTALL)
+
         return len(clean_text)
 
-parser = argparse.ArgumentParser(description='Count words in Markdown files')
-parser.add_argument('--folder', default='./downloads/answers', help='Folder containing Markdown files')
-parser.add_argument('--no-code', action='store_true', help='Only count text, ignore code blocks')
+
+parser = argparse.ArgumentParser(description="Count words in Markdown files")
+parser.add_argument("--folder", default="./downloads/answers", help="Folder containing Markdown files")
+parser.add_argument("--no-code", action="store_true", help="Only count text, ignore code blocks")
 args = parser.parse_args()
 
 word_counts = []
 
 for filename in os.listdir(args.folder):
-    if filename.endswith('.md'):
+    if filename.endswith(".md"):
         word_counts.append(count_words(os.path.join(args.folder, filename), no_code=args.no_code))
 
 
@@ -46,7 +50,7 @@ print(f"最大字数: {max(word_counts)}")
 
 file_counts = {}
 for filename in os.listdir(args.folder):
-    if filename.endswith('.md'):
+    if filename.endswith(".md"):
         count = count_words(os.path.join(args.folder, filename), no_code=args.no_code)
         file_counts[filename] = count
 
@@ -59,12 +63,14 @@ for filename, count in sorted_files[:10]:
 
 # 绘图
 plt.figure(figsize=(10, 6))
-plt.hist(word_counts, bins=15, color='skyblue', edgecolor='black', alpha=0.7)
-plt.axvline(np.mean(word_counts), color='red', linestyle='dashed', linewidth=1, label=f'Mean: {int(np.mean(word_counts))} words')
+plt.hist(word_counts, bins=15, color="skyblue", edgecolor="black", alpha=0.7)
+plt.axvline(
+    np.mean(word_counts), color="red", linestyle="dashed", linewidth=1, label=f"Mean: {int(np.mean(word_counts))} words"
+)
 
-plt.title('Distribution of Answer Lengths (Markdown Body)')
-plt.xlabel('Word Count (Cleaned)')
-plt.ylabel('Frequency')
+plt.title("Distribution of Answer Lengths (Markdown Body)")
+plt.xlabel("Word Count (Cleaned)")
+plt.ylabel("Frequency")
 plt.legend()
-plt.grid(axis='y', alpha=0.3)
+plt.grid(axis="y", alpha=0.3)
 plt.show()
