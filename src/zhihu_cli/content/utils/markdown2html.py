@@ -1,7 +1,6 @@
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.utils import generate_trace_context
 import uuid
-import json
-import time
 from typing import Literal
 
 PARSE_API = "https://zhuanlan.zhihu.com/editor/paste/parse"
@@ -14,7 +13,7 @@ def markdown2html(markdown: str, scene: Literal["article", "answer"]) -> str:
         "content_type": "markdown",
         "html": markdown,
         "scene": scene,
-        "trace_id": f"{time.time()}{uuid.uuid4()}",
+        "trace_id": "".join([str(x) for x in generate_trace_context()]),
     })
 
     parsed.raise_for_status()
@@ -27,7 +26,7 @@ def rich2html(rich: str, scene: Literal["article", "answer"]) -> str:
         "content_type": "html",
         "html": rich,
         "scene": scene,
-        "trace_id": f"{time.time()}{uuid.uuid4()}",
+        "trace_id": "".join([str(x) for x in generate_trace_context()]),
     })
 
     parsed.raise_for_status()
