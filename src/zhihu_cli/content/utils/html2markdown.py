@@ -12,6 +12,8 @@ from urllib.parse import parse_qs, urlparse
 from bs4 import BeautifulSoup, Tag
 from bs4.element import NavigableString
 
+_eeimg_re = re.compile(r"eeimg|equation")
+
 
 class ZhihuLinkConverter:
     """Convert Zhihu internal links to normal URLs."""
@@ -404,6 +406,19 @@ class PageToMarkdown:
         content = self.converter.tex_normalize(html_content)
         result = self.converter.convert(content, url)
         return result.strip() if strip else result
+
+
+def calculate_text_length(html_content: str):
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    for img in soup.find_all("img", class_=_eeimg_re):
+        img.replace_with(" ")
+
+    for img in soup.find_all("img", class_=lambda x: x != "eeimg"):
+        img.decompose()
+
+    pure_text = soup.get_text(strip=False)
+    return len(pure_text)
 
 
 converter = PageToMarkdown()
