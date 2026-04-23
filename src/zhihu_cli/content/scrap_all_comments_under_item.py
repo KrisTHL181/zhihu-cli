@@ -108,9 +108,10 @@ def convert_content(content: str) -> str:
 
 def fetch_child_comments(session: requests.Session, parent_comment: dict[str, Any], headers: dict[str, str]) -> None:
     """递归获取子评论（含翻页）"""
-    child_offset = parent_comment.get("child_comment_next_offset")
-    if not child_offset:
+    if parent_comment.get("child_comment_count", 0) == 0:
         return
+
+    child_offset = parent_comment.get("child_comment_next_offset")
 
     child_api_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
     child_next_url = f"{child_api_url}?limit=20&offset={child_offset}"
@@ -157,15 +158,8 @@ def fetch_and_print_comments(session: requests.Session, item_type: str, id: str,
             print(content)
 
             # 子评论（直接展示 + 翻页）
-            if comment.get("child_comments"):
+            if comment.get("child_comment_count") >= 1:
                 print("\n  ↳ 子评论:")
-                for child in comment["child_comments"]:
-                    c_author = child.get("author", {}).get("name", "匿名用户")
-                    c_like = child.get("like_count", 0)
-                    c_dislike = child.get("dislike_count", 0)
-                    c_content = convert_content(child.get("content", ""))
-                    print(f"    - 作者: {c_author} | 赞: {c_like} | 踩: {c_dislike}")
-                    print(f"      {c_content}\n")
                 fetch_child_comments(session, comment, headers)
 
             print("-" * 20)
