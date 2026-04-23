@@ -189,28 +189,34 @@ def get_type(url: str) -> tuple[str | None, str | None]:
 
     Returns:
         tuple: (type, id)
-            - type: 'article', 'question', 'pin' 或 None
+            - type: 'articles', 'questions', 'answers', 'pins' 或 None
             - id: 匹配到的ID，如果没有匹配返回 None
     """
-    match = re.search(ZHIHU_ARTICLE_PATTERN, url)
-    if match:
-        return ("articles", match.group(1))
-
-    # 检查问题类型
+    # 先检查带答案的问题（最具体的模式）
     match = re.search(ZHIHU_QUESTION_WITH_ANSWER_PATTERN, url)
     if match:
-        return ("answers", f"{match.group(1)}/{match.group(2)}")
+        question_id = match.group(1)
+        answer_id = match.group(2)
+        if answer_id:
+            return ("answers", f"{question_id}/{answer_id}")
+        # 如果只有问题ID没有答案ID，当作普通问题处理
+        return ("questions", question_id)
 
+    # 再检查普通问题
     match = re.search(ZHIHU_QUESTION_PATTERN, url)
     if match:
         return ("questions", match.group(1))
 
-    # 检查想法类型
+    # 检查文章
+    match = re.search(ZHIHU_ARTICLE_PATTERN, url)
+    if match:
+        return ("articles", match.group(1))
+
+    # 检查想法
     match = re.search(ZHIHU_PIN_PATTERN, url)
     if match:
         return ("pins", match.group(1))
 
-    # 无法识别
     return (None, None)
 
 
