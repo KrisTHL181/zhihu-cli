@@ -103,6 +103,7 @@ def print_item_info(item: dict[str, Any]) -> None:
 def convert_content(content: str) -> str:
     """统一内容转换逻辑"""
     converted = md_converter.convert(content)
+    converted = converted.replace("\n\n\n\n\n", "\n\t")
     return converted if converted.strip() else content
 
 
