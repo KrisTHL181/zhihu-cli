@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests as _requests
@@ -21,7 +22,7 @@ session = requests = _requests.Session(impersonate=get_browser(headers.get("User
 requests.headers.update(headers)
 
 
-def get_page_entities(url: str) -> dict:
+def get_page_entities(url: str) -> dict[str, Any]:
     resp = session.get(url)
 
     if resp.status_code == 403:

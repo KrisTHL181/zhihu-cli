@@ -2,14 +2,16 @@ import functools
 import json
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 
 class CacheManager:
-    _instance = None
-    _lock = threading.Lock()  # 为单例模式提供的线程锁
+    _instance: "CacheManager | None" = None
+    _lock: threading.Lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args: Any, **kwargs: Any) -> "CacheManager":
         # Thread‑safe singleton creation
         if not cls._instance:
             with cls._lock:
@@ -18,7 +20,7 @@ class CacheManager:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, cache_dir: str | Path | None = None):
+    def __init__(self, cache_dir: str | Path | None = None) -> None:
         if self._initialized:
             return
 
@@ -38,14 +40,10 @@ class CacheManager:
         self._initialized = True
 
     @staticmethod
-    def make_thread_safe(fn=None, *, lock_attr="_file_lock"):
-        """
-        使得一个函数是线程安全的
-        """
-
-        def decorator(func):
+    def make_thread_safe(fn: Callable | None = None, *, lock_attr: str = "_file_lock") -> Callable:
+        def decorator(func: Callable) -> Callable:
             @functools.wraps(func)
-            def wrapper(self, *args, **kwargs):
+            def wrapper(self: "CacheManager", *args: Any, **kwargs: Any) -> Any:
                 lock = getattr(self, lock_attr)
                 with lock:
                     return func(self, *args, **kwargs)
@@ -56,7 +54,7 @@ class CacheManager:
             return decorator
         return decorator(fn)
 
-    def _atomic_write(self, path, data, mode="w"):
+    def _atomic_write(self, path: Path, data: str | bytes, mode: str = "w") -> None:
         """原子写入文件的辅助方法"""
         tmp_path = path.with_suffix(".tmp")
         if mode == "w":
@@ -66,12 +64,12 @@ class CacheManager:
         tmp_path.replace(path)
 
     @make_thread_safe
-    def save_headers(self, headers):
+    def save_headers(self, headers: dict[str, str]) -> None:
         """保存 headers.json"""
         self._atomic_write(self.header_file, json.dumps(headers, indent=2))
 
     @make_thread_safe
-    def load_headers(self):
+    def load_headers(self) -> dict[str, str]:
         """读取 headers.json"""
         if self.header_file.exists():
             try:
@@ -81,7 +79,7 @@ class CacheManager:
         return {}
 
     @make_thread_safe
-    def get_cached_question(self, q_id):
+    def get_cached_question(self, q_id: str) -> dict[str, Any]:
         """
         获取一个问题的缓存，如果超过一天则认为缓存失效。
         """
@@ -92,7 +90,7 @@ class CacheManager:
         return {}
 
     @make_thread_safe
-    def save_question(self, q_id, data):
+    def save_question(self, q_id: str, data: dict[str, Any]) -> None:
         """存储一个问题数据。"""
         cache_path = self.content_dir / f"{q_id}.json"
         self._atomic_write(cache_path, json.dumps(data, indent=2))

@@ -1,6 +1,7 @@
 import json
 import queue
 import time
+from typing import Any
 
 from paho.mqtt import client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
@@ -8,8 +9,8 @@ from paho.mqtt.enums import CallbackAPIVersion
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import get_page_entities
 
-NOTIFICATION_TOPIC = "zhihu/notification/badge/web/v1/{USER_HASH}/"
-IMCHAT_TOPIC = "zhihu/message/v1/im/user/{USER_HASH}/"
+NOTIFICATION_TOPIC: str = "zhihu/notification/badge/web/v1/{USER_HASH}/"
+IMCHAT_TOPIC: str = "zhihu/message/v1/im/user/{USER_HASH}/"
 
 
 def get_pm_mqtt_topic(url_token: str) -> str:
@@ -19,7 +20,7 @@ def get_pm_mqtt_topic(url_token: str) -> str:
 
 
 class ZhihuMessageListener:
-    def __init__(self, url_token: str, topic: str, incognito: bool = False):
+    def __init__(self, url_token: str, topic: str, incognito: bool = False) -> None:
         self.url_token = url_token
         self.user_hash = get_pm_mqtt_topic(url_token)
         self.msg_queue = queue.Queue()
@@ -32,7 +33,7 @@ class ZhihuMessageListener:
         self.incognito = incognito
         self.client = self._connect()
 
-    def _connect(self):
+    def _connect(self) -> mqtt_client.Client:
         client = mqtt_client.Client(CallbackAPIVersion.VERSION2, self.client_id, transport="websockets")
         client.tls_set()
 
@@ -47,7 +48,9 @@ class ZhihuMessageListener:
         client.connect(self.broker, self.port)
         return client
 
-    def on_connect(self, client, userdata, flags, reason_code, properties):
+    def on_connect(
+        self, client: mqtt_client.Client, userdata: Any, flags: dict[str, Any], reason_code: Any, properties: Any
+    ) -> None:
         if reason_code.is_failure:
             raise ConnectionError(
                 f"Failed to connect to Zhihu MQTT Broker. Reason: {reason_code} (Code: {reason_code.value})"
@@ -55,10 +58,10 @@ class ZhihuMessageListener:
         else:
             client.subscribe(self.topic)
 
-    def on_message(self, client, userdata, msg):
+    def on_message(self, client: mqtt_client.Client, userdata: Any, msg: mqtt_client.MQTTMessage) -> None:
         raw_payload = msg.payload.decode("utf-8")
         data = json.loads(raw_payload)
         self.msg_queue.put(data)
 
-    def start(self):
+    def start(self) -> None:
         self.client.loop_forever()

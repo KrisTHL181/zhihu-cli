@@ -13,9 +13,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
-def detect_format(items: list[dict]) -> str:
+def detect_format(items: list[dict[str, Any]]) -> str:
     """Heuristically detect the format of the first item."""
     if not items:
         return "unknown"
@@ -31,7 +32,7 @@ def detect_format(items: list[dict]) -> str:
     return "unknown"
 
 
-def convert_items(items: list[dict], forced_type: str | None = None) -> list[dict]:
+def convert_items(items: list[dict[str, Any]], forced_type: str | None = None) -> list[dict[str, str]]:
     """Convert items to unified format: {id, type, title, url?}."""
     result = []
     fmt = detect_format(items) if not forced_type else "forced"
@@ -70,7 +71,7 @@ def convert_items(items: list[dict], forced_type: str | None = None) -> list[dic
     return result
 
 
-def load_json(file_path: str) -> list[dict]:
+def load_json(file_path: str) -> list[dict[str, Any]]:
     """Load JSON file, handling both list and object wrappers."""
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
@@ -81,7 +82,7 @@ def load_json(file_path: str) -> list[dict]:
     raise ValueError(f"Unsupported JSON structure in {file_path}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert one or more Zhihu export JSONs to unified all_assets_list.json"
     )

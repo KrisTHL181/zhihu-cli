@@ -1,11 +1,12 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from typing import Any
 
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils import markdown2html
 from zhihu_cli.content.utils.html2markdown import converter
 
-COMMENT_API = {
+COMMENT_API: dict[str, str] = {
     "answer": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
     "article": "https://www.zhihu.com/api/v4/comment_v5/articles/{item_id}/comment",
     "pin": "https://www.zhihu.com/api/v4/comment_v5/pins/{item_id}/comment",
@@ -13,7 +14,7 @@ COMMENT_API = {
 }
 
 
-def fetch_child_comments(parent_comment: dict) -> Iterable[dict]:
+def fetch_child_comments(parent_comment: dict[str, Any]) -> Iterable[dict[str, Any]]:
     child_offset = parent_comment.get("child_comment_next_offset")
     if not child_offset:
         return []
@@ -21,7 +22,7 @@ def fetch_child_comments(parent_comment: dict) -> Iterable[dict]:
     base_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
     initial_url = f"{base_url}?limit=20&offset={child_offset}"
 
-    def child_parser(data: dict):
+    def child_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for child in data.get("data", []):
             yield {
                 "author": child.get("author", {}).get("name", "匿名用户"),
@@ -34,12 +35,12 @@ def fetch_child_comments(parent_comment: dict) -> Iterable[dict]:
     return stream_handler(initial_url, child_parser)
 
 
-def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict]:
+def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]]:
     initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{item_id}/root_comment?order_by=score&limit=20"
 
-    def root_parser(data: dict):
+    def root_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for comment in data.get("data", []):
-            root = {
+            root: dict[str, Any] = {
                 "author": comment.get("author", {}).get("name", "匿名用户"),
                 "like_count": comment.get("like_count", 0),
                 "dislike_count": comment.get("dislike_count", 0),
@@ -83,7 +84,7 @@ def print_comments(item_type: str, item_id: str) -> None:
         comment_id += 1
 
 
-def comment_item(item_type: str, item_id: str, content: str) -> dict:
+def comment_item(item_type: str, item_id: str, content: str) -> dict[str, Any]:
     if item_type not in COMMENT_API:
         raise ValueError(f"Invalid item_type: '{item_type}'. Supported types are: {list(COMMENT_API.keys())}")
 
@@ -94,7 +95,7 @@ def comment_item(item_type: str, item_id: str, content: str) -> dict:
     return resp.json()
 
 
-def delete_comment(comment_id) -> None:
+def delete_comment(comment_id: str) -> None:
     resp = session.delete(f"https://www.zhihu.com/api/v4/comment_v5/comment/{comment_id}")
     if not resp.json()["success"]:
         raise RuntimeError(f"Failed to delete comment {comment_id}")

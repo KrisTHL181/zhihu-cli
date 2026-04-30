@@ -6,7 +6,7 @@ import pandas as pd
 from scipy.signal import savgol_filter
 
 
-def plot_derivative_analysis():
+def plot_derivative_analysis() -> None:
     try:
         # 1. 加载与预处理
         with open("zhihu_income_report.json", encoding="utf-8") as f:

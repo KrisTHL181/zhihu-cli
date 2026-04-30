@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+from typing import Any, Literal
 
 import jieba
 import numpy as np
@@ -15,7 +16,7 @@ from sklearn.metrics import silhouette_score
 from zhihu_cli.nlp_tools import STOP_WORDS as stop_words
 
 
-def find_best_k(X, max_k=20):
+def find_best_k(X: Any, max_k: int = 20) -> None:
     from matplotlib import pyplot as plt
 
     inertias = []
@@ -61,7 +62,7 @@ def find_best_k(X, max_k=20):
 
 
 # --- 1. 文本加载与清洗 ---
-def load_and_clean_data(source_dir):
+def load_and_clean_data(source_dir: str) -> tuple[list[str], list[str]]:
     documents = []
     file_names = []
 
@@ -103,7 +104,7 @@ def load_and_clean_data(source_dir):
 
 
 # --- 2. 向量化与聚类 ---
-def process_clusters(documents, n_clusters):
+def process_clusters(documents: list[str], n_clusters: int) -> tuple[Any, np.ndarray, TfidfVectorizer, KMeans]:
     print("正在进行 TF-IDF 向量化与 K-Means 聚类...")
     vectorizer = TfidfVectorizer(max_features=1500, min_df=2, max_df=0.95)
     X = vectorizer.fit_transform(documents)
@@ -116,8 +117,16 @@ def process_clusters(documents, n_clusters):
 
 # --- 3. 核心绘图逻辑 (Plotly版) ---
 def visualize_with_plotly(
-    X, labels, file_names, vectorizer, kmeans, n_clusters, mode="pca", output_path="cluster.png", n_terms=10
-):
+    X: Any,
+    labels: np.ndarray,
+    file_names: list[str],
+    vectorizer: TfidfVectorizer,
+    kmeans: KMeans,
+    n_clusters: int,
+    mode: Literal["pca", "tsne", "hybrid"] = "pca",
+    output_path: str = "cluster.png",
+    n_terms: int = 10,
+) -> None:
     X_dense = np.asarray(X.todense())
 
     if mode == "hybrid":

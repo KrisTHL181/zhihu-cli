@@ -1,7 +1,9 @@
+from typing import Any
+
 from zhihu_cli.content.handlers.requests import session
 
 
-def follow(user_id: str) -> dict:
+def follow(user_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/members/{user_id}/followers")
 
     data = resp.json()
@@ -11,7 +13,7 @@ def follow(user_id: str) -> dict:
     return data
 
 
-def unfollow(user_id: str) -> dict:
+def unfollow(user_id: str) -> dict[str, Any]:
     resp = session.delete(f"https://www.zhihu.com/api/v4/members/{user_id}/followers")
     return resp.json()
 

@@ -10,11 +10,10 @@ from wordcloud import WordCloud
 
 from zhihu_cli.nlp_tools import FONT_PATH, STOP_WORDS
 
-# --- 配置区 ---
-OUTPUT_FILE = "zhihu_wordcloud.png"
+OUTPUT_FILE: str = "zhihu_wordcloud.png"
 
 
-def extract_text_from_md(file_path, skip_metadata=False):
+def extract_text_from_md(file_path: str, skip_metadata: bool = False) -> str:
     """提取MD文件中的JSON元数据和正文内容"""
     try:
         with open(file_path, encoding="utf-8") as f:
@@ -46,12 +45,12 @@ def extract_text_from_md(file_path, skip_metadata=False):
         return ""
 
 
-def is_stop_word(word):
+def is_stop_word(word: str) -> bool:
     """判断是否为停用词"""
-    return word in STOP_WORDS or len(word) == 1  # 也可以过滤单字词
+    return word in STOP_WORDS or len(word) == 1
 
 
-def main(topk_words: int = 200, source_dir: str = "./downloads", only_print: bool = False):
+def main(topk_words: int = 200, source_dir: str = "./downloads", only_print: bool = False) -> None:
     all_text = []
     print(f"正在扫描 {source_dir} 下的 Markdown 文件...")
 

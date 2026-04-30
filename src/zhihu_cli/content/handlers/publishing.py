@@ -1,14 +1,15 @@
 import json
+from typing import Any
 
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils import generate_trace_context
 from zhihu_cli.content.utils.html2markdown import calculate_text_length
 from zhihu_cli.content.utils.markdown2html import markdown2html
 
-PUBLISH_API = "https://www.zhihu.com/api/v4/content/publish"
+PUBLISH_API: str = "https://www.zhihu.com/api/v4/content/publish"
 
 
-def publish_answer(question_id, content: str) -> dict:
+def publish_answer(question_id: str, content: str) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     html = markdown2html(content, scene="answer")
 
@@ -42,7 +43,7 @@ def publish_answer(question_id, content: str) -> dict:
     return resp.json()
 
 
-def modify_answer(answer_id: str, content: str) -> dict:
+def modify_answer(answer_id: str, content: str) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     html = markdown2html(content, scene="answer")
     text_length = calculate_text_length(html)
@@ -76,7 +77,7 @@ def modify_answer(answer_id: str, content: str) -> dict:
     return resp.json()
 
 
-def publish_article(title: str, content: str) -> dict:
+def publish_article(title: str, content: str) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     html = markdown2html(content, scene="article")
     text_length = calculate_text_length(html)
@@ -113,7 +114,7 @@ def publish_article(title: str, content: str) -> dict:
     return resp.json()
 
 
-def modify_article(article_id: str, title: str, content: str) -> dict:
+def modify_article(article_id: str, title: str, content: str) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     html = markdown2html(content, scene="article")
     text_length = calculate_text_length(html)

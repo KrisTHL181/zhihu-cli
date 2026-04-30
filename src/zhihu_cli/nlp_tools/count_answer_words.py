@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def count_words(filepath, no_code=False):
+def count_words(filepath: str, no_code: bool = False) -> int:
     with open(filepath, encoding="utf-8") as f:
         content = f.read()
         # 1. 拆分文件，只取正文部分

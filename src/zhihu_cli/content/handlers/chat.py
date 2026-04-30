@@ -1,8 +1,11 @@
+from collections.abc import Generator
+from typing import Any
+
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
 
 
-def get_inbox() -> list[dict]:
+def get_inbox() -> list[dict[str, Any]]:
     messages = []
     resp = session.get("https://www.zhihu.com/api/v4/inbox")
     resp.raise_for_status()
@@ -23,7 +26,9 @@ def get_inbox() -> list[dict]:
     return messages
 
 
-def _parse_messages_page(data: dict) -> tuple[list[dict], str | None, tuple]:
+def _parse_messages_page(
+    data: dict[str, Any],
+) -> tuple[list[dict[str, str]], str | None, tuple[str | None, str | None]]:
     data_obj = data.get("data", {})
     messages = data_obj.get("messages", [])
     if not messages:
@@ -46,14 +51,13 @@ def _parse_messages_page(data: dict) -> tuple[list[dict], str | None, tuple]:
     return page_msgs, last_id, (receiver_name, sender_name)
 
 
-def iter_chat_history(chat_id: str):
+def iter_chat_history(chat_id: str) -> Generator[dict[str, str], None, None]:
     current_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
 
     while current_url:
         resp = session.get(current_url)
         resp.raise_for_status()
 
-        breakpoint()
         data = resp.json()
 
         page_msgs, _, _ = _parse_messages_page(data)
@@ -70,7 +74,7 @@ def iter_chat_history(chat_id: str):
             current_url = paging.get("next")
 
 
-def send_text_message(their_id: str, content: str) -> dict:
+def send_text_message(their_id: str, content: str) -> dict[str, Any]:
     resp = session.post(
         "https://www.zhihu.com/api/v4/chat", json={"content_type": 0, "text": content, "receiver_id": their_id}
     )

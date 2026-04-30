@@ -1,9 +1,11 @@
+from typing import Any
+
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import get_page_entities
 from zhihu_cli.content.utils.html2markdown import converter
 
 
-def parse_pin_metadata(item: dict) -> dict:
+def parse_pin_metadata(item: dict[str, Any]) -> dict[str, Any]:
     pin_id = item.get("id", "")
     title = item.get("title", "") or f"想法 {pin_id}"
     excerpt = item.get("excerpt", "")
@@ -43,7 +45,7 @@ def parse_pin_metadata(item: dict) -> dict:
     }
 
 
-def scrape_pin(pin_url: str) -> tuple[dict, str]:
+def scrape_pin(pin_url: str) -> tuple[dict[str, Any], str]:
     entities = get_page_entities(pin_url)
     item = entities.get("pins", {})
     if not item:

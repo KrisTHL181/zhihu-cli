@@ -41,18 +41,18 @@ class ZhihuHTMLParser(HTMLParser):
     However, the main converter uses BeautifulSoup.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.text = []
-        self.current_tag = None
+        self.text: list[str] = []
+        self.current_tag: str | None = None
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.current_tag = tag
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         self.current_tag = None
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self.current_tag not in ("script", "style"):
             self.text.append(data.strip())
 
@@ -62,10 +62,7 @@ class ZhihuMarkdownConverter:
     Convert Zhihu HTML content to Markdown.
     """
 
-    def __init__(self, skip_empty: bool = True):
-        """
-        :param skip_empty: If True, skip empty paragraphs.
-        """
+    def __init__(self, skip_empty: bool = True) -> None:
         self.skip_empty = skip_empty
         self.link_converter = ZhihuLinkConverter()
 
@@ -389,10 +386,7 @@ class PageToMarkdown:
     Main class for converting a Zhihu page HTML to Markdown.
     """
 
-    def __init__(self, skip_empty: bool = True):
-        """
-        :param skip_empty: If True, skip empty paragraphs.
-        """
+    def __init__(self, skip_empty: bool = True) -> None:
         self.converter = ZhihuMarkdownConverter(skip_empty=skip_empty)
 
     def convert(self, html_content: str, url: str = "", strip: bool = True) -> str:
@@ -408,7 +402,7 @@ class PageToMarkdown:
         return result.strip() if strip else result
 
 
-def calculate_text_length(html_content: str):
+def calculate_text_length(html_content: str) -> int:
     soup = BeautifulSoup(html_content, "html.parser")
 
     for img in soup.find_all("img", class_=_eeimg_re):

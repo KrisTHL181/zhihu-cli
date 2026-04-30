@@ -3,6 +3,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from curl_cffi import requests
@@ -10,7 +11,7 @@ from curl_cffi import requests
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 
-def load_headers(quick_mode: bool = False):
+def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
     """从文件加载缓存的 headers，或通过粘贴 cURL 获取"""
     if quick_mode:
         headers = cache_manager.load_headers()
@@ -36,7 +37,7 @@ def load_headers(quick_mode: bool = False):
     return headers
 
 
-def extract_config_from_curl(curl_text):
+def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 命令中提取完整 URL 和 Headers"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     full_url = url_match.group(1) if url_match else ""
@@ -54,7 +55,7 @@ def extract_config_from_curl(curl_text):
     return full_url, headers
 
 
-def fmt_time(ts):
+def fmt_time(ts: int | float | None) -> str:
     if ts:
         try:
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
@@ -63,7 +64,7 @@ def fmt_time(ts):
     return "未知时间"
 
 
-def parse_answer(item):
+def parse_answer(item: dict[str, Any]) -> dict[str, Any]:
     """解析单条回答数据（直接对应 API 返回的 data 中的每一项）"""
     answer_id = item.get("id", "")
     # 回答本身没有标题，但有关联的问题
@@ -106,7 +107,7 @@ def parse_answer(item):
     }
 
 
-def fetch_user_answers():
+def fetch_user_answers() -> None:
     print("=" * 60)
     print("📝 知乎用户回答列表抓取工具")
     print("=" * 60)

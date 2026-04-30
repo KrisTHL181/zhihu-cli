@@ -4,18 +4,18 @@ import re
 import sys
 import time
 from datetime import datetime
+from typing import Any
 
 from curl_cffi import requests
 
 
-def convert_percent(data) -> float:
+def convert_percent(data: str | None) -> float:
     if data is None:
         return 0.0
-    # 兼容处理字符串百分比或直接数值
     return round(float(data.rstrip("%")) / 100, 2)
 
 
-def get_date(d):
+def get_date(d: dict[str, Any]) -> str | None:
     # 1. 优先取 p_date
     if d.get("p_date"):
         return d["p_date"]
@@ -36,7 +36,7 @@ def get_date(d):
     return None
 
 
-def extract_config(curl_text):
+def extract_config(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 中提取 Header 和 Base URL"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     base_url = url_match.group(1).split("?")[0] if url_match else ""
@@ -50,7 +50,7 @@ def extract_config(curl_text):
     return base_url, headers
 
 
-def run_batch_daily_analysis():
+def run_batch_daily_analysis() -> None:
     # 1. 确保目录存在
     os.makedirs("./content_metrics", exist_ok=True)
 

@@ -309,12 +309,10 @@ class ZSECipher:
 
     @classmethod
     def _read_u32_be(cls, data: bytes, offset: int) -> int:
-        """Read a big-endian 32-bit integer from bytes"""
         return struct.unpack(">I", data[offset : offset + 4])[0]
 
     @classmethod
     def _write_u32_be(cls, value: int) -> bytes:
-        """Write a big-endian 32-bit integer to bytes"""
         return struct.pack(">I", value)
 
     @classmethod
@@ -340,7 +338,6 @@ class ZSECipher:
 
     @classmethod
     def _r_block(cls, input16: bytes) -> bytes:
-        """Block encryption (forward)"""
         tr = [0] * 36
         tr[0] = cls._read_u32_be(input16, 0)
         tr[1] = cls._read_u32_be(input16, 4)
@@ -360,7 +357,6 @@ class ZSECipher:
 
     @classmethod
     def _r_block_decrypt(cls, input16: bytes) -> bytes:
-        """Block decryption (reverse)"""
         tr = [0] * 36
         tr[0] = cls._read_u32_be(input16, 0)
         tr[1] = cls._read_u32_be(input16, 4)
@@ -380,7 +376,6 @@ class ZSECipher:
 
     @classmethod
     def _x_blocks(cls, data: bytes, iv: bytes) -> bytes:
-        """XOR and encrypt blocks in CBC mode"""
         if not data:
             return b""
 
@@ -397,7 +392,6 @@ class ZSECipher:
 
     @classmethod
     def _encode_uri_component(cls, text: str) -> bytes:
-        """Encode a string as a URI component"""
 
         def is_unescaped(b: int) -> bool:
             return (
@@ -419,7 +413,6 @@ class ZSECipher:
 
     @classmethod
     def _decode_uri_component(cls, data: bytes) -> bytes:
-        """Decode a URI component"""
 
         def hex_val(b: int) -> int | None:
             if ord("0") <= b <= ord("9"):
@@ -449,7 +442,6 @@ class ZSECipher:
 
     @classmethod
     def _custom_encode(cls, bytes_data: bytes) -> str:
-        """Custom encoding to the specific alphabet"""
         data = bytearray(bytes_data)
         # Pad to multiple of 3
         while len(data) % 3 != 0:
@@ -489,7 +481,6 @@ class ZSECipher:
 
     @classmethod
     def _decode_custom(cls, encoded: str) -> bytes:
-        """Decode from the custom encoding"""
         if len(encoded) % 4 != 0:
             raise ValueError("Invalid encoded length")
 
@@ -534,7 +525,6 @@ class ZSECipher:
 
     @staticmethod
     def _pkcs7_unpad(data: bytes) -> bytes:
-        """Remove PKCS7 padding"""
         if not data:
             raise ValueError("Empty plaintext")
 
@@ -548,7 +538,6 @@ class ZSECipher:
         return data[:-pad]
 
     def encrypt(self, text: str) -> str:
-        """Encrypt a string using ZSE v4"""
         seed = 12  # matches the Rust implementation
 
         # Build plaintext
@@ -576,7 +565,6 @@ class ZSECipher:
         return self._custom_encode(bytes(cipher))
 
     def decrypt(self, encoded: str) -> str:
-        """Decrypt a ZSE v4 encrypted string"""
         cipher = self._decode_custom(encoded)
 
         # Decrypt first block
@@ -605,8 +593,7 @@ class ZSECipher:
         return raw.decode("utf-8")
 
 
-def main():
-    """CLI interface for the ZSE cipher"""
+def main() -> None:
     import sys
 
     if len(sys.argv) < 2:

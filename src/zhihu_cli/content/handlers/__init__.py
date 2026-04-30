@@ -31,7 +31,7 @@ def get_type_and_id(url: str) -> tuple[str | None, str | None]:
     return (None, None)
 
 
-def fmt_time(ts):
+def fmt_time(ts: int | float | None) -> str:
     if ts:
         try:
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")

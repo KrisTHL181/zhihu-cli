@@ -1,3 +1,6 @@
+from collections.abc import Generator
+from typing import Any
+
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import get_page_entities, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
@@ -6,7 +9,7 @@ from zhihu_cli.content.utils.html2markdown import converter
 NEXT_URL_API = "https://www.zhihu.com/api/v4/questions/{question_id}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
 
 
-def parse_question_metadata(item: dict) -> dict:
+def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
     author = item.get("author", {})
 
     return {
@@ -26,7 +29,7 @@ def parse_question_metadata(item: dict) -> dict:
     }
 
 
-def scrape_question_data(question_url: str) -> tuple[dict, str]:
+def scrape_question_data(question_url: str) -> tuple[dict[str, Any], str]:
     entities = get_page_entities(question_url)
     item = entities.get("questions", {})
     if not item:
@@ -36,7 +39,7 @@ def scrape_question_data(question_url: str) -> tuple[dict, str]:
     return parse_question_metadata(item_data), converter.convert(item_data.get("detail"))
 
 
-def scrape_answers(question_data):
+def scrape_answers(question_data: dict[str, Any]) -> Generator[dict[str, Any], None, None]:
     url = NEXT_URL_API.replace("{question_id}", question_data["id"])
 
     def parse_ans(data):
@@ -50,51 +53,51 @@ def scrape_answers(question_data):
     return stream_handler(url, parse_ans)
 
 
-def upvote_answer(answer_id) -> dict:
+def upvote_answer(answer_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "up"})
     return resp.json()
 
 
-def neutral_answer(answer_id) -> dict:
+def neutral_answer(answer_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "neutral"})
     return resp.json()
 
 
-def downvote_answer(answer_id) -> dict:
+def downvote_answer(answer_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/voters", json={"type": "down"})
     return resp.json()
 
 
-def thank_answer(answer_id) -> dict:
+def thank_answer(answer_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/answers/{answer_id}/thankers")
     return resp.json()
 
 
-def unthank_answer(answer_id) -> dict:
+def unthank_answer(answer_id: str) -> dict[str, Any]:
     resp = session.delete(f"https://www.zhihu.com/api/v4/answers/{answer_id}/thankers")
     return resp.json()
 
 
-def upvote_question(question_id) -> dict:
+def upvote_question(question_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters/up")
     return resp.json()
 
 
-def unvote_question(question_id) -> dict:
+def unvote_question(question_id: str) -> dict[str, Any]:
     resp = session.delete(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters")
     return resp.json()
 
 
-def downvote_quesetion(question_id) -> dict:  # 未公开接口！
+def downvote_quesetion(question_id: str) -> dict[str, Any]:  # 未公开接口！
     resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters/down")
     return resp.json()
 
 
-def follow_question(question_id) -> dict:
+def follow_question(question_id: str) -> dict[str, Any]:
     resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/followers")
     return resp.json()
 
 
-def unfollow_question(question_id) -> dict:
+def unfollow_question(question_id: str) -> dict[str, Any]:
     resp = session.delete(f"https://www.zhihu.com/api/v4/questions/{question_id}/followers")
     return resp.json()

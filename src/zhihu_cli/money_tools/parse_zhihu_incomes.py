@@ -6,15 +6,15 @@ import sys
 import time
 from datetime import datetime, timedelta
 from io import StringIO
+from typing import Any
 
 from curl_cffi import requests
 
-# 常量配置
-DB_FILE = "zhihu_income_report.json"
-DEFAULT_START_DATE = "2026-01-06"
+DB_FILE: str = "zhihu_income_report.json"
+DEFAULT_START_DATE: str = "2026-01-06"
 
 
-def extract_headers_and_cookies(curl_text):
+def extract_headers_and_cookies(curl_text: str) -> tuple[str | None, dict[str, str]]:
     headers = {}
     header_matches = re.findall(r"-H\s+'([^']+)'", curl_text)
     for h in header_matches:
@@ -26,7 +26,7 @@ def extract_headers_and_cookies(curl_text):
     return base_url, headers
 
 
-def load_existing_data():
+def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
     """读取现有数据，返回 (旧数据列表, 下一次抓取的起始日期)"""
     if os.path.exists(DB_FILE):
         try:
@@ -46,7 +46,7 @@ def load_existing_data():
     return [], datetime.strptime(DEFAULT_START_DATE, "%Y-%m-%d")
 
 
-def run_task():
+def run_task() -> None:
     # 1. 加载历史数据
     existing_details, start_dt = load_existing_data()
     end_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)

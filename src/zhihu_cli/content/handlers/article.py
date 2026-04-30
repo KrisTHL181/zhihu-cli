@@ -1,9 +1,11 @@
+from typing import Any
+
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import get_page_entities
 from zhihu_cli.content.utils.html2markdown import converter
 
 
-def parse_article_metadata(item: dict) -> dict:
+def parse_article_metadata(item: dict[str, Any]) -> dict[str, Any]:
     article_id = item.get("id", "")
     title = item.get("title", "无标题")
     excerpt = item.get("excerpt", "")
@@ -42,7 +44,7 @@ def parse_article_metadata(item: dict) -> dict:
     }
 
 
-def scrape_article(article_url: str) -> tuple[dict, str]:
+def scrape_article(article_url: str) -> tuple[dict[str, Any], str]:
     entities = get_page_entities(article_url)
     item = entities.get("articles", {})
     if not item:

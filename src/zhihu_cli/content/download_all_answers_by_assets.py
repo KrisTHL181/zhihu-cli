@@ -46,7 +46,7 @@ def load_answers_from_json(json_path: str) -> list[str]:
     return urls
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="批量下载知乎用户的所有回答（基于动态列表 JSON）")
     parser.add_argument(
         "--input",

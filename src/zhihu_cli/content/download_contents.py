@@ -11,12 +11,10 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-
-# 导入 html2markdown 模块
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
-def extract_config_from_curl(curl_text: str):
+def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 命令中提取 URL 和 Headers"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     full_url = url_match.group(1) if url_match else ""
@@ -97,7 +95,7 @@ def sanitize_filename(name: str) -> str:
 class ContentDownloader:
     """知乎内容下载器"""
 
-    def __init__(self, output_dir: str = "./downloads"):
+    def __init__(self, output_dir: str = "./downloads") -> None:
         """
         初始化下载器
         Args:
@@ -106,9 +104,9 @@ class ContentDownloader:
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
-        self.session = requests.Session()
-        self.headers = {}
-        self.md_converter = PageToMarkdown(skip_empty=True)
+        self.session: requests.Session = requests.Session()
+        self.headers: dict[str, str] = {}
+        self.md_converter: PageToMarkdown = PageToMarkdown(skip_empty=True)
 
     def load_headers_from_curl(self, quick_mode: bool = False) -> bool:
         """
@@ -484,7 +482,7 @@ class ContentDownloader:
             time.sleep(delay)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="知乎内容下载工具 (HTML → Markdown)")
 
     # 定义下载子命令/参数

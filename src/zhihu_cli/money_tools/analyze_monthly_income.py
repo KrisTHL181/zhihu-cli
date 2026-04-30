@@ -2,7 +2,7 @@ import json
 from collections import defaultdict
 
 
-def analyze_monthly_income(file_path):
+def analyze_monthly_income(file_path: str) -> None:
     try:
         with open(file_path, encoding="utf-8") as f:
             data = json.load(f)

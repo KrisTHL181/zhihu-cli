@@ -5,7 +5,7 @@ import pandas as pd
 import seaborn as sns
 
 
-def plot_weekday_analysis():
+def plot_weekday_analysis() -> None:
     try:
         # Load the data
         with open("zhihu_income_report.json", encoding="utf-8") as f:

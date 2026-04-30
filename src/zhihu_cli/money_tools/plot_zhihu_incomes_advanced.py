@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def plot_advanced_analysis():
+def plot_advanced_analysis() -> None:
     try:
         with open("zhihu_income_report.json", encoding="utf-8") as f:
             data = json.load(f)

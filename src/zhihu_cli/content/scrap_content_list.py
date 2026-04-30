@@ -3,13 +3,14 @@ import re
 import sys
 import time
 from datetime import datetime
+from typing import Any
 
 from curl_cffi import requests
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 
-def load_headers(quick_mode: bool = False):
+def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
     """Load headers from cache or via cURL paste"""
     if quick_mode:
         headers = cache_manager.load_headers()
@@ -34,7 +35,7 @@ def load_headers(quick_mode: bool = False):
     return headers
 
 
-def extract_config_from_curl(curl_text):
+def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str], re.Match[str] | None, re.Match[str] | None]:
     """从 cURL 中提取 URL 和 Headers"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     full_url = url_match.group(1) if url_match else ""
@@ -57,7 +58,7 @@ def extract_config_from_curl(curl_text):
     return base_url, headers, offset_match, after_id_match
 
 
-def parse_item(item):
+def parse_item(item: dict[str, Any]) -> dict[str, Any]:
     """解析单条动态数据"""
     target = item.get("target", {})
     verb = item.get("verb", "")
@@ -129,7 +130,7 @@ def parse_item(item):
     }
 
 
-def fetch_user_activities():
+def fetch_user_activities() -> None:
     print("=" * 60)
     print("📝 知乎用户动态抓取工具")
     print("=" * 60)

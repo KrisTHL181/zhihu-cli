@@ -4,7 +4,7 @@ from typing import Literal
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils import generate_trace_context
 
-PARSE_API = "https://zhuanlan.zhihu.com/editor/paste/parse"
+PARSE_API: str = "https://zhuanlan.zhihu.com/editor/paste/parse"
 
 
 def markdown2html(markdown: str, scene: Literal["article", "answer"]) -> str:

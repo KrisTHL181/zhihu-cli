@@ -8,7 +8,7 @@ from curl_cffi import requests
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 
-def load_headers(quick_mode: bool = False):
+def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
     """Load headers from file or via cURL paste"""
     if quick_mode:
         headers = cache_manager.load_headers()
@@ -34,7 +34,7 @@ def load_headers(quick_mode: bool = False):
     return headers
 
 
-def extract_config_from_curl(curl_text):
+def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 中提取基础信息"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     full_url = url_match.group(1) if url_match else ""
@@ -49,7 +49,7 @@ def extract_config_from_curl(curl_text):
     return base_url, headers
 
 
-def fetch_all_creation_assets():
+def fetch_all_creation_assets() -> list[dict[str, str]] | None:
     print("--- 请粘贴【所有内容列表 / creations/v2/all】的 cURL 命令 ---")
     headers = load_headers(quick_mode=True)
     if not headers:

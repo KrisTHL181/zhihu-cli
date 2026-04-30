@@ -5,7 +5,9 @@ import re
 import shutil
 import sys
 import time
+from collections.abc import Generator
 from datetime import datetime
+from typing import Any
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
@@ -17,18 +19,18 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
-def save_headers(headers):
+def save_headers(headers: dict[str, str]) -> None:
     """保存 Header 到缓存"""
     cache_manager.save_headers(headers)
     print("✅ Headers 已缓存至 .cache/headers.json")
 
 
-def load_headers():
+def load_headers() -> dict[str, str]:
     """从缓存读取 Header"""
     return cache_manager.load_headers()
 
 
-def extract_config(curl_text):
+def extract_config(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 提取 Header 和基础 URL"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     url = url_match.group(1) if url_match else ""
@@ -47,7 +49,7 @@ def extract_config(curl_text):
     return url, headers
 
 
-def parse_question(entities: dict) -> dict:
+def parse_question(entities: dict[str, Any]) -> dict[str, Any]:
     question = entities["questions"]
     q_id = next(iter(question))
     q_data = question[q_id]
@@ -63,7 +65,7 @@ def parse_question(entities: dict) -> dict:
     }
 
 
-def get_request_data(url=None):
+def get_request_data(url: str | None = None) -> tuple[str | None, dict[str, str] | None]:
     if url:
         user_input = url
     else:
@@ -98,7 +100,7 @@ def get_request_data(url=None):
     return current_url, headers
 
 
-def get_question(session, current_url, headers):
+def get_question(session: requests.Session, current_url: str, headers: dict[str, str]) -> dict[str, Any] | None:
     resp = session.get(current_url, headers=headers, impersonate="chrome110", timeout=15)
 
     if resp.status_code == 403:
@@ -118,7 +120,9 @@ def get_question(session, current_url, headers):
     return parse_question(page_data)
 
 
-def scrape_answers(session, question_data, headers):
+def scrape_answers(
+    session: requests.Session, question_data: dict[str, Any], headers: dict[str, str]
+) -> Generator[tuple[int, str, int, str], None, None]:
     # 1. API 翻页逻辑
     next_url = f"https://www.zhihu.com/api/v4/questions/{question_data['id']}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
 
@@ -157,13 +161,14 @@ def scrape_answers(session, question_data, headers):
 
 
 def get_best_pager() -> str:
+
     if shutil.which("less"):
         return "less -R"
 
     return "more"
 
 
-def main(url: str, reading_mode: bool = False, no_cache: bool = False):
+def main(url: str, reading_mode: bool = False, no_cache: bool = False) -> None:
     current_url, headers = get_request_data(url)
     if not current_url or not headers:
         return

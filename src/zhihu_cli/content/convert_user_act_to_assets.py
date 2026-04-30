@@ -2,7 +2,7 @@ import json
 import sys
 
 
-def convert_zhihu_to_assets_format(input_file, output_file):
+def convert_zhihu_to_assets_format(input_file: str, output_file: str) -> None:
     """
     Convert zhihu_user_activities.json format to all_assets_list.json format.
     """
@@ -39,7 +39,7 @@ def convert_zhihu_to_assets_format(input_file, output_file):
         sys.exit(1)
 
 
-def main():
+def main() -> None:
     # Set default file names
     input_file = "zhihu_user_activities.json"
     output_file = "all_assets_list.json"

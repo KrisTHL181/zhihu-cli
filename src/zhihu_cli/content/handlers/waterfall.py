@@ -10,7 +10,7 @@ def stream_handler(
     parser: Callable[[dict[str, Any]], Iterable[Any]],
     extract_next: Callable[[dict[str, Any]], str | None] | None = None,
     delay: float = 1.0,
-) -> Iterable:
+) -> Iterable[Any]:
     current_url = initial_url
     while current_url:
         resp = session.get(current_url)

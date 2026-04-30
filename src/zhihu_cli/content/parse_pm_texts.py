@@ -2,12 +2,13 @@ import re
 import sys
 import time
 from datetime import datetime
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from curl_cffi import requests
 
 
-def extract_config(curl_text):
+def extract_config(curl_text: str) -> tuple[str, dict[str, str]]:
     """从 cURL 提取 Header 和基础 URL"""
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     url = url_match.group(1) if url_match else ""
@@ -22,7 +23,7 @@ def extract_config(curl_text):
     return url, headers
 
 
-def build_next_url(base_url, last_msg_id):
+def build_next_url(base_url: str, last_msg_id: str) -> str:
     """
     手动构造翻页 URL
     逻辑：保留原有的 query 参数（如 sender_id），添加/更新 after_id
@@ -40,7 +41,7 @@ def build_next_url(base_url, last_msg_id):
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
 
 
-def parse_page(data_dict):
+def parse_page(data_dict: dict[str, Any]) -> tuple[list[str], str | None, tuple[str, str] | None]:
     """
     解析单页数据
     返回: (消息列表, 最后一条消息ID, 用户名元组)
@@ -67,7 +68,7 @@ def parse_page(data_dict):
     return page_msgs, last_id, (receiver_name, sender_name)
 
 
-def main():
+def main() -> None:
     print("--- 请粘贴知乎私信接口的 cURL 命令 (手动翻页版) ---")
     curl_input = sys.stdin.read()
     if not curl_input.strip():
