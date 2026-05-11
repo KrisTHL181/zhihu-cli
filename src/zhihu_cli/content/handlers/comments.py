@@ -7,10 +7,22 @@ from zhihu_cli.content.utils import markdown2html
 from zhihu_cli.content.utils.html2markdown import converter
 
 COMMENT_API: dict[str, str] = {
-    "answer": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
-    "article": "https://www.zhihu.com/api/v4/comment_v5/articles/{item_id}/comment",
-    "pin": "https://www.zhihu.com/api/v4/comment_v5/pins/{item_id}/comment",
-    "question": "https://www.zhihu.com/api/v4/comment_v5/questions/{item_id}/comment",
+    "answers": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
+    "articles": "https://www.zhihu.com/api/v4/comment_v5/articles/{item_id}/comment",
+    "pins": "https://www.zhihu.com/api/v4/comment_v5/pins/{item_id}/comment",
+    "questions": "https://www.zhihu.com/api/v4/comment_v5/questions/{item_id}/comment",
+}
+
+# Map both singular and plural forms to the correct API URL segment.
+_URL_SEGMENT: dict[str, str] = {
+    "answer": "answers",
+    "answers": "answers",
+    "article": "articles",
+    "articles": "articles",
+    "pin": "pins",
+    "pins": "pins",
+    "question": "questions",
+    "questions": "questions",
 }
 
 
@@ -36,7 +48,8 @@ def fetch_child_comments(parent_comment: dict[str, Any]) -> Iterable[dict[str, A
 
 
 def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]]:
-    initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{item_type}/{item_id}/root_comment?order_by=score&limit=20"
+    segment = _URL_SEGMENT.get(item_type, item_type)
+    initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{segment}/{item_id}/root_comment?order_by=score&limit=20"
 
     def root_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for comment in data.get("data", []):
@@ -85,10 +98,11 @@ def print_comments(item_type: str, item_id: str) -> None:
 
 
 def comment_item(item_type: str, item_id: str, content: str) -> dict[str, Any]:
-    if item_type not in COMMENT_API:
+    segment = _URL_SEGMENT.get(item_type, item_type)
+    if segment not in COMMENT_API:
         raise ValueError(f"Invalid item_type: '{item_type}'. Supported types are: {list(COMMENT_API.keys())}")
 
-    api = COMMENT_API[item_type].replace("{item_id}", item_id)
+    api = COMMENT_API[segment].replace("{item_id}", item_id)
     content = f"{markdown2html.markdown2html(content, scene='answer')}"
 
     resp = session.post(api, json={"content": content})

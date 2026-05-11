@@ -307,13 +307,7 @@ def browse_comments(url: str) -> None:
     """Print the comment tree for any Zhihu item."""
     item_type, item_id = _parse_item_url(url)
     if item_type == "answers":
-        item_type = "answer"
-    elif item_type == "articles":
-        item_type = "article"
-    elif item_type == "questions":
-        item_type = "question"
-    elif item_type == "pins":
-        item_type = "pin"
+        item_id = _resolve_answer_id(item_id)
     print_comments(item_type, item_id)
 
 
@@ -484,7 +478,7 @@ def comment_post(url: str, content: str) -> None:
     """Post a comment on an item. Use URL to identify the item."""
     item_type, item_id = _parse_item_url(url)
     if item_type == "answers":
-        item_type = "answer"
+        item_id = _resolve_answer_id(item_id)
     resp = comment_item(item_type, item_id, content)
     click.echo(resp)
 
