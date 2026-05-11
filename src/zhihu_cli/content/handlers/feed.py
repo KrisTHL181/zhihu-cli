@@ -138,17 +138,19 @@ def stream_follow_feed(limit: int = 20) -> Iterable[dict[str, Any]]:
     return stream_handler(url, _parse_feed_items)
 
 
-def fetch_feed(feed_type: str = "recommend", limit: int = 20, max_items: int = 0) -> list[dict[str, Any]]:
+def fetch_feed(feed_type: str = "recommend", limit: int = 20, max_items: int | None = 20) -> list[dict[str, Any]]:
     stream = stream_recommend_feed(limit) if feed_type == "recommend" else stream_follow_feed(limit)
-    items = []
+    items: list[dict[str, Any]] = []
     for item in stream:
         items.append(item)
-        if max_items and len(items) >= max_items:
+        if max_items is not None and len(items) >= max_items:
             break
     return items
 
 
-def fetch_feed_with_markdown(feed_type: str = "recommend", limit: int = 20, max_items: int = 0) -> list[dict[str, Any]]:
+def fetch_feed_with_markdown(
+    feed_type: str = "recommend", limit: int = 20, max_items: int | None = 20
+) -> list[dict[str, Any]]:
     from zhihu_cli.content.utils.html2markdown import converter
 
     items = fetch_feed(feed_type, limit, max_items)
@@ -166,14 +168,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Zhihu feed streamer")
     parser.add_argument("--type", choices=["recommend", "follow"], default="recommend", help="Feed type")
     parser.add_argument("--limit", type=int, default=20, help="Items per page")
-    parser.add_argument("--max", type=int, default=0, dest="max_items", help="Max total items (0=unlimited)")
+    parser.add_argument("--max", type=int, default=20, dest="max_items", help="Max total items (default: 20)")
     parser.add_argument("--output", "-o", type=str, default="", help="Output JSON file")
     parser.add_argument("--markdown", action="store_true", help="Convert HTML content to Markdown")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print items while fetching")
     args = parser.parse_args()
 
     fetch_fn = fetch_feed_with_markdown if args.markdown else fetch_feed
-    items = fetch_fn(args.type, args.limit, args.max_items or 0)
+    items = fetch_fn(args.type, args.limit, args.max_items)
 
     for item in items:
         if args.verbose:

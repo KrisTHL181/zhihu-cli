@@ -320,14 +320,14 @@ def browse_comments(url: str) -> None:
 @browse.command("feed")
 @click.option("--type", "-t", "feed_type", type=click.Choice(["recommend", "follow"]), default="recommend")
 @click.option("--limit", type=int, default=20, help="Items per page")
-@click.option("--max", "-n", "max_items", type=int, default=0, help="Max total items (0=unlimited)")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
 @click.option("--markdown/--no-markdown", default=False, help="Convert HTML to Markdown")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Print items while fetching")
-def browse_feed(feed_type: str, limit: int, max_items: int, markdown: bool, output: str, verbose: bool) -> None:
+def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: bool, output: str, verbose: bool) -> None:
     """Stream Zhihu recommend or follow feed."""
     fetch_fn = fetch_feed_with_markdown if markdown else fetch_feed
-    items = fetch_fn(feed_type, limit, max_items or 0)
+    items = fetch_fn(feed_type, limit, max_items)
 
     for item in items:
         if verbose:
