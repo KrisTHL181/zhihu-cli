@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Zhihu scraper and Markdown conversion utilities."
 requires-python = ">=3.10"
 dependencies = [
+    "click",
     "curl-cffi",
     "beautifulsoup4",
     "rich",

@@ -88,7 +88,7 @@ def unvote_question(question_id: str) -> dict[str, Any]:
     return resp.json()
 
 
-def downvote_quesetion(question_id: str) -> dict[str, Any]:  # 未公开接口！
+def downvote_question(question_id: str) -> dict[str, Any]:  # 未公开接口！
     resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters/down")
     return resp.json()
 
