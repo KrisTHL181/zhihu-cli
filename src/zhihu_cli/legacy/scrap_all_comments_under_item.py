@@ -50,13 +50,17 @@ def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str]]:
     return url, headers
 
 
-def parse_item(item_type: str, entities: dict[str, Any]) -> dict[str, Any]:
+def parse_item(item_type: str, entities: dict[str, Any], item_id: str | None = None) -> dict[str, Any]:
     """从 initialData 中提取文章信息"""
     item = entities.get(item_type, {})
     if not item:
-        raise ValueError(f"No {item} data found in entities")
+        raise ValueError(f"No {item_type} data found in entities")
 
-    q_id = next(iter(item))
+    # 优先使用指定的 ID（避免取到 initialData 中其他回答的数据）
+    if item_id and item_id in item:
+        q_id = item_id
+    else:
+        q_id = next(iter(item))
     q_data = item[q_id]
     content = q_data.get("content", q_data.get("detail", ""))
     if isinstance(content, list):  # 知乎想法的API特殊
@@ -107,12 +111,25 @@ def convert_content(content: str) -> str:
     return converted if converted.strip() else content
 
 
-def fetch_child_comments(session: requests.Session, parent_comment: dict[str, Any], headers: dict[str, str]) -> None:
-    """递归获取子评论（含翻页）"""
-    if parent_comment.get("child_comment_count", 0) == 0:
+def fetch_child_comments(
+    session: requests.Session,
+    parent_comment: dict[str, Any],
+    headers: dict[str, str],
+    seen_ids: set[str] | None = None,
+) -> None:
+    """通过翻页 API 获取子评论（跳过已在 seen_ids 中的评论）"""
+    if seen_ids is None:
+        seen_ids = set()
+
+    child_comment_count = parent_comment.get("child_comment_count", 0)
+    if child_comment_count == 0:
         return
 
     child_offset = parent_comment.get("child_comment_next_offset")
+    # offset 为 None 表示 API 未提供，尝试从 0 开始；
+    # offset 为 0 是有效值，不能用 `not child_offset` 误判
+    if child_offset is None:
+        child_offset = 0
 
     child_api_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
     child_next_url = f"{child_api_url}?limit=20&offset={child_offset}"
@@ -123,6 +140,11 @@ def fetch_child_comments(session: requests.Session, parent_comment: dict[str, An
             break
         child_json = resp.json()
         for child in child_json.get("data", []):
+            cid = child.get("id")
+            if cid and cid in seen_ids:
+                continue
+            if cid:
+                seen_ids.add(cid)
             c_author = child.get("author", {}).get("name", "匿名用户")
             c_like = child.get("like_count", 0)
             c_dislike = child.get("dislike_count", 0)
@@ -158,10 +180,29 @@ def fetch_and_print_comments(session: requests.Session, item_type: str, id: str,
             print("-" * 20)
             print(content)
 
-            # 子评论（直接展示 + 翻页）
-            if comment.get("child_comment_count") >= 1:
-                print("\n  ↳ 子评论:")
-                fetch_child_comments(session, comment, headers)
+            # 子评论（内联 + 翻页，带去重）
+            inline_children = comment.get("child_comments", [])
+            seen_ids: set[str] = set()
+            has_inline = False
+            for child in inline_children:
+                cid = child.get("id")
+                if cid and cid in seen_ids:
+                    continue
+                if cid:
+                    seen_ids.add(cid)
+                if not has_inline:
+                    print("\n  ↳ 子评论:")
+                    has_inline = True
+                c_author = child.get("author", {}).get("name", "匿名用户")
+                c_like = child.get("like_count", 0)
+                c_dislike = child.get("dislike_count", 0)
+                c_content = convert_content(child.get("content", ""))
+                print(f"    - 作者: {c_author} | 赞: {c_like} | 踩: {c_dislike}")
+                print(f"      {c_content}\n")
+            if comment.get("child_comment_count", 0) >= 1:
+                if not has_inline:
+                    print("\n  ↳ 子评论:")
+                fetch_child_comments(session, comment, headers, seen_ids)
 
             print("-" * 20)
             comment_id += 1
@@ -231,23 +272,31 @@ def main() -> None:
         current_url, headers = extract_config_from_curl(user_input)
         if headers:
             save_headers(headers)
-        url_type = get_type(current_url)[0]
+        url_type, compound_id = get_type(current_url)
     else:
-        url_type = get_type(user_input)[0]
+        url_type, compound_id = get_type(user_input)
         headers = load_headers()
-        if url_type is None:
-            print("❌ 无法识别的链接类型，请确保链接是知乎的文章、问题或想法", file=sys.stderr)
-            return
         current_url = user_input
 
+    if url_type is None:
+        print("❌ 无法识别的链接类型，请确保链接是知乎的文章、问题或想法", file=sys.stderr)
+        return
+
     assert headers is not None, "Headers 不应为空"
+
+    # 从复合 ID 中提取实体键（回答类型为 question_id/answer_id）
+    entity_id: str | None = None
+    if compound_id and "/" in compound_id:
+        entity_id = compound_id.split("/")[1]
+    elif compound_id:
+        entity_id = compound_id
 
     print(f"🚀 开始请求: {current_url}\n\n{'=' * 60}\n\n", file=sys.stderr)
 
     try:
         with requests.Session() as session:
             entities = fetch_page_data(session, current_url, headers)
-            article = parse_item(url_type, entities)
+            article = parse_item(url_type, entities, entity_id)
             print_item_info(article)
             fetch_and_print_comments(session, url_type, article["id"], headers)
 
