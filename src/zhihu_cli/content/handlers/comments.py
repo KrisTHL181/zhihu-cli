@@ -13,7 +13,6 @@ COMMENT_API: dict[str, str] = {
     "questions": "https://www.zhihu.com/api/v4/comment_v5/questions/{item_id}/comment",
 }
 
-# Map both singular and plural forms to the correct API URL segment.
 _URL_SEGMENT: dict[str, str] = {
     "answer": "answers",
     "answers": "answers",
@@ -26,22 +25,42 @@ _URL_SEGMENT: dict[str, str] = {
 }
 
 
-def fetch_child_comments(parent_comment: dict[str, Any]) -> Iterable[dict[str, Any]]:
-    child_offset = parent_comment.get("child_comment_next_offset")
-    if not child_offset:
+def _convert_content(content: str) -> str:
+    converted = converter.convert(content)
+    converted = converted.replace("\n\n\n\n\n", "\n\t")
+    return converted if converted.strip() else content
+
+
+def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | None = None) -> Iterable[dict[str, Any]]:
+    if seen_ids is None:
+        seen_ids = set()
+
+    child_comment_count = parent_comment.get("child_comment_count", 0)
+    if child_comment_count == 0:
         return []
+
+    child_offset = parent_comment.get("child_comment_next_offset")
+    # offset 为 None 表示 API 未提供，尝试从 0 开始；
+    # offset 为 0 是有效值，不能用 `not child_offset` 误判
+    if child_offset is None:
+        child_offset = 0
 
     base_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
     initial_url = f"{base_url}?limit=20&offset={child_offset}"
 
     def child_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for child in data.get("data", []):
+            cid = child.get("id")
+            if cid and cid in seen_ids:
+                continue
+            if cid:
+                seen_ids.add(cid)
             yield {
                 "author": child.get("author", {}).get("name", "匿名用户"),
                 "like_count": child.get("like_count", 0),
                 "dislike_count": child.get("dislike_count", 0),
-                "content": converter.convert(child.get("content", "")),
-                "id": child.get("id"),
+                "content": _convert_content(child.get("content", "")),
+                "id": cid,
             }
 
     return stream_handler(initial_url, child_parser)
@@ -49,7 +68,9 @@ def fetch_child_comments(parent_comment: dict[str, Any]) -> Iterable[dict[str, A
 
 def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]]:
     segment = _URL_SEGMENT.get(item_type, item_type)
-    initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{segment}/{item_id}/root_comment?order_by=score&limit=20"
+    initial_url = (
+        f"https://www.zhihu.com/api/v4/comment_v5/{segment}/{item_id}/root_comment?order_by=score&limit=20&offset="
+    )
 
     def root_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for comment in data.get("data", []):
@@ -57,22 +78,32 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
                 "author": comment.get("author", {}).get("name", "匿名用户"),
                 "like_count": comment.get("like_count", 0),
                 "dislike_count": comment.get("dislike_count", 0),
-                "content": converter.convert(comment.get("content", "")),
+                "content": _convert_content(comment.get("content", "")),
                 "id": comment.get("id"),
                 "child_comments": [],
             }
 
-            for child in comment.get("child_comments", []):
+            seen_ids: set[str] = set()
+            inline_children = comment.get("child_comments", [])
+            for child in inline_children:
+                cid = child.get("id")
+                if cid and cid in seen_ids:
+                    continue
+                if cid:
+                    seen_ids.add(cid)
                 root["child_comments"].append(
                     {
                         "author": child.get("author", {}).get("name", "匿名用户"),
                         "like_count": child.get("like_count", 0),
                         "dislike_count": child.get("dislike_count", 0),
-                        "content": converter.convert(child.get("content", "")),
+                        "content": _convert_content(child.get("content", "")),
+                        "id": cid,
                     }
                 )
 
-            root["child_comments"].extend(fetch_child_comments(comment))
+            # 翻页获取剩余的 child comments（带去重）
+            if comment.get("child_comment_count", 0) >= 1:
+                root["child_comments"].extend(fetch_child_comments(comment, seen_ids))
 
             yield root
 
@@ -80,7 +111,6 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
 
 
 def print_comments(item_type: str, item_id: str) -> None:
-    """打印所有评论（带格式）"""
     comment_id = 1
     for comment in fetch_root_comments(item_type, item_id):
         print(
