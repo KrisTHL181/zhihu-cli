@@ -406,10 +406,19 @@ def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: boo
 
     for item in items:
         if verbose:
+            ttype = item.get("target_type", "?")
             title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
             author = item.get("author", {}).get("name", "unknown")
-            click.echo(f"[{item.get('target_type', '?')}] {title[:100]}")
+            url = item.get("url", "")
+            excerpt = item.get("excerpt", "")
+
+            click.echo(f"[{ttype}] {title[:120]}")
+            if excerpt:
+                click.echo(f"  preview: {excerpt[:200]}")
             click.echo(f"  author={author}  votes={item.get('voteup_count', 0)}")
+            if url:
+                click.echo(f"  link: {url}")
+            click.echo()
 
     if output:
         with open(output, "w", encoding="utf-8") as f:

@@ -179,10 +179,18 @@ if __name__ == "__main__":
 
     for item in items:
         if args.verbose:
+            ttype = item.get("target_type", "?")
             title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
             author = item.get("author", {}).get("name", "未知")
-            print(f"[{item['target_type']}] {title[:100]}")
-            print(f"  author={author}  votes={item.get('voteup_count', 0)}  verb={item['verb']}")
+            url = item.get("url", "")
+            excerpt = item.get("excerpt", "")
+
+            print(f"[{ttype}] {title[:120]}")
+            if excerpt:
+                print(f"  preview: {excerpt[:200]}")
+            print(f"  author={author}  votes={item.get('voteup_count', 0)}  verb={item.get('verb', '')}")
+            if url:
+                print(f"  link: {url}")
             print()
 
     if args.output:
