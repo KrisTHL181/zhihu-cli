@@ -22,6 +22,14 @@ session = requests = _requests.Session(impersonate=get_browser(headers.get("User
 requests.headers.update(headers)
 
 
+def reload_session() -> None:
+    """Reload the global session with headers from the active profile."""
+    global headers, session, requests
+    headers = cache_manager.load_headers()
+    session = requests = _requests.Session(impersonate=get_browser(headers.get("User-Agent", "")))
+    requests.headers.update(headers)
+
+
 def get_page_entities(url: str) -> dict[str, Any]:
     resp = session.get(url)
 

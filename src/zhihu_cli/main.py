@@ -99,12 +99,15 @@ def auth() -> None:
 
 
 @auth.command("paste")
-def auth_paste() -> None:
+@click.option("--profile", "-p", "profile_name", default=None, help="Save to a named profile")
+def auth_paste(profile_name: str | None) -> None:
     """Paste a cURL command from browser DevTools to cache headers.
 
     \033[2m1. Open Zhihu in browser, F12 → Network tab\033[0m
     \033[2m2. Find any API request, right-click → Copy → Copy as cURL\033[0m
     \033[2m3. Paste here and press Ctrl+D\033[0m
+
+    Use --profile to save to a named profile (e.g. work, personal).
     """
     print("Paste cURL command (Ctrl+D to finish):")
     try:
@@ -129,22 +132,33 @@ def auth_paste() -> None:
         click.echo("Error: could not parse any headers from the input.", err=True)
         raise SystemExit(1)
 
-    cache_manager.save_headers(headers)
-    click.echo(f"Saved {len(headers)} headers to {cache_manager.header_file}")
+    cache_manager.save_headers(headers, profile_name=profile_name)
+    active = cache_manager.get_active_profile() or "default"
+    click.echo(f"Saved {len(headers)} headers to profile '{active}'")
 
 
 @auth.command("status")
 def auth_status() -> None:
-    """Show whether cached headers exist."""
+    """Show authentication status and active profile."""
+    active = cache_manager.get_active_profile()
+    if active:
+        click.echo(f"Active profile: {active}")
+    else:
+        click.echo("No active profile set.")
+
+    profiles = cache_manager.list_profiles()
+    if profiles:
+        click.echo(f"Saved profiles: {', '.join(profiles)}")
+
     headers = cache_manager.load_headers()
     if headers:
-        click.echo(f"Authenticated — {len(headers)} headers cached.")
+        click.echo(f"Headers: {len(headers)} cached")
         if "cookie" in {k.lower() for k in headers}:
             click.echo("Cookie: present")
         else:
             click.echo("Warning: no Cookie header found.", err=True)
     else:
-        click.echo("Not authenticated. Run 'zhihu auth paste' first.", err=True)
+        click.echo("No headers cached. Run 'zhihu auth paste' first.", err=True)
 
 
 @auth.command("clear")
@@ -152,6 +166,73 @@ def auth_clear() -> None:
     """Remove cached headers."""
     cache_manager.save_headers({})
     click.echo("Headers cache cleared.")
+
+
+# ── profile ──────────────────────────────────────────────────────────────
+
+
+@main.group()
+def profile() -> None:
+    """Manage account profiles — save and switch between multiple logins."""
+
+
+@profile.command("list")
+def profile_list() -> None:
+    """List all saved profiles."""
+    active = cache_manager.get_active_profile()
+    profiles = cache_manager.list_profiles()
+    if not profiles:
+        click.echo("No profiles found. Use 'zhihu auth paste --profile <name>' to create one.")
+        return
+    for name in profiles:
+        marker = " *" if name == active else ""
+        path = cache_manager._resolve_profile_path(name)
+        try:
+            data = json.loads(path.read_text())
+            cookie = "cookie" in {k.lower() for k in data}
+        except (json.JSONDecodeError, OSError):
+            cookie = False
+        status = "cookie" if cookie else "no cookie"
+        click.echo(f"  {name}{marker}  ({status})")
+
+
+@profile.command("switch")
+@click.argument("name")
+def profile_switch(name: str) -> None:
+    """Switch to a different profile."""
+    try:
+        cache_manager.switch_profile(name)
+        click.echo(f"Switched to profile '{name}'.")
+    except ValueError:
+        click.echo(f"Profile '{name}' does not exist. Use 'zhihu profile list' to see saved profiles.", err=True)
+        raise SystemExit(1)
+
+
+@profile.command("delete")
+@click.argument("name")
+@click.option("--force", is_flag=True, help="Skip confirmation")
+def profile_delete(name: str, force: bool) -> None:
+    """Delete a saved profile."""
+    profiles = cache_manager.list_profiles()
+    if name not in profiles:
+        click.echo(f"Profile '{name}' does not exist.", err=True)
+        raise SystemExit(1)
+
+    if not force:
+        click.confirm(f"Delete profile '{name}'?", abort=True)
+
+    cache_manager.delete_profile(name)
+    click.echo(f"Deleted profile '{name}'.")
+
+
+@profile.command("current")
+def profile_current() -> None:
+    """Show the currently active profile."""
+    active = cache_manager.get_active_profile()
+    if active:
+        click.echo(active)
+    else:
+        click.echo("No active profile set.", err=True)
 
 
 # ── download ─────────────────────────────────────────────────────────────

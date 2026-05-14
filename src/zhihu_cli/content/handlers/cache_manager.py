@@ -12,7 +12,6 @@ class CacheManager:
     _lock: threading.Lock = threading.Lock()
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "CacheManager":
-        # Thread‑safe singleton creation
         if not cls._instance:
             with cls._lock:
                 if not cls._instance:
@@ -34,9 +33,11 @@ class CacheManager:
         self.content_dir = self.cache_dir / "questions"
         self.content_dir.mkdir(exist_ok=True)
 
-        # Instance lock for all file operations
-        self._file_lock = threading.Lock()
+        self.profiles_dir = self.cache_dir / "profiles"
+        self.profiles_dir.mkdir(exist_ok=True)
+        self.active_profile_file = self.cache_dir / "active_profile"
 
+        self._file_lock = threading.RLock()
         self._initialized = True
 
     @staticmethod
@@ -55,34 +56,111 @@ class CacheManager:
         return decorator(fn)
 
     def _atomic_write(self, path: Path, data: str | bytes, mode: str = "w") -> None:
-        """原子写入文件的辅助方法"""
         tmp_path = path.with_suffix(".tmp")
         if mode == "w":
             tmp_path.write_text(data, encoding="utf-8")
-        else:  # binary mode
+        else:
             tmp_path.write_bytes(data)
         tmp_path.replace(path)
 
-    @make_thread_safe
-    def save_headers(self, headers: dict[str, str]) -> None:
-        """保存 headers.json"""
-        self._atomic_write(self.header_file, json.dumps(headers, indent=2))
+    # ── profile management ──────────────────────────────────────────────
+
+    def _resolve_profile_path(self, name: str) -> Path:
+        return self.profiles_dir / f"{name}.json"
+
+    def _migrate_legacy_headers(self) -> str | None:
+        """If old headers.json has data and no profiles exist, migrate to 'default' profile."""
+        if not self.header_file.exists():
+            return None
+        try:
+            data = json.loads(self.header_file.read_text())
+        except json.JSONDecodeError:
+            return None
+        if not data:
+            return None
+        default_path = self._resolve_profile_path("default")
+        self._atomic_write(default_path, json.dumps(data, indent=2))
+        self._atomic_write(self.active_profile_file, "default")
+        self.header_file.unlink()
+        return "default"
 
     @make_thread_safe
-    def load_headers(self) -> dict[str, str]:
-        """读取 headers.json"""
-        if self.header_file.exists():
+    def get_active_profile(self) -> str | None:
+        if self.active_profile_file.exists():
+            name = self.active_profile_file.read_text().strip()
+            if name and self._resolve_profile_path(name).exists():
+                return name
+        return None
+
+    @make_thread_safe
+    def list_profiles(self) -> list[str]:
+        return sorted(p.stem for p in self.profiles_dir.glob("*.json"))
+
+    @make_thread_safe
+    def switch_profile(self, name: str) -> None:
+        path = self._resolve_profile_path(name)
+        if not path.exists():
+            raise ValueError(f"Profile '{name}' does not exist")
+        self._atomic_write(self.active_profile_file, name)
+
+    @make_thread_safe
+    def delete_profile(self, name: str) -> None:
+        path = self._resolve_profile_path(name)
+        if path.exists():
+            path.unlink()
+        active = self.get_active_profile()
+        if active == name:
+            if self.active_profile_file.exists():
+                self.active_profile_file.unlink()
+
+    # ── header persistence ──────────────────────────────────────────────
+
+    @make_thread_safe
+    def save_headers(self, headers: dict[str, str], profile_name: str | None = None) -> None:
+        if profile_name:
+            path = self._resolve_profile_path(profile_name)
+            self._atomic_write(path, json.dumps(headers, indent=2))
+            self._atomic_write(self.active_profile_file, profile_name)
+            return
+
+        active = self.get_active_profile()
+        if active:
+            path = self._resolve_profile_path(active)
+            self._atomic_write(path, json.dumps(headers, indent=2))
+            return
+
+        migrated = self._migrate_legacy_headers()
+        if migrated:
+            path = self._resolve_profile_path(migrated)
+            self._atomic_write(path, json.dumps(headers, indent=2))
+            return
+
+        path = self._resolve_profile_path("default")
+        self._atomic_write(path, json.dumps(headers, indent=2))
+        self._atomic_write(self.active_profile_file, "default")
+
+    @make_thread_safe
+    def load_headers(self, profile_name: str | None = None) -> dict[str, str]:
+        if profile_name:
+            path = self._resolve_profile_path(profile_name)
+        else:
+            active = self.get_active_profile()
+            if active:
+                path = self._resolve_profile_path(active)
+            else:
+                path = self.header_file
+
+        if path.exists():
             try:
-                return json.loads(self.header_file.read_text())
+                return json.loads(path.read_text())
             except json.JSONDecodeError:
                 return {}
         return {}
 
+    # ── question cache ──────────────────────────────────────────────────
+
     @make_thread_safe
     def get_cached_question(self, q_id: str) -> dict[str, Any]:
-        """
-        获取一个问题的缓存，如果超过一天则认为缓存失效。
-        """
         cache_path = self.content_dir / f"{q_id}.json"
         if cache_path.exists():
             if time.time() - cache_path.stat().st_mtime < 86400:
@@ -91,7 +169,6 @@ class CacheManager:
 
     @make_thread_safe
     def save_question(self, q_id: str, data: dict[str, Any]) -> None:
-        """存储一个问题数据。"""
         cache_path = self.content_dir / f"{q_id}.json"
         self._atomic_write(cache_path, json.dumps(data, indent=2))
 
@@ -115,24 +192,21 @@ if __name__ == "__main__":
         print("❌ Error: No input detected.")
         sys.exit(1)
 
-    # 1. 提取 Headers (兼容 -H 和 --header)
     headers = {}
     header_matches = re.findall(r"(?:-H|--header)\s+['\"]([^'\"]+)['\"]", curl_text)
 
     for h in header_matches:
         if ":" in h:
             k, v = h.split(":", 1)
-            # 过滤掉一些可能引起干扰的 header
             if k.strip().lower() not in ["accept-encoding", "content-length"]:
                 headers[k.strip()] = v.strip()
 
-    # 2. 校验并保存
     if headers:
-        # 确保关键字段存在
         if "cookie" not in [k.lower() for k in headers.keys()]:
             print("⚠️  Warning: No Cookie found in headers. Some requests might fail.")
 
         cache_manager.save_headers(headers)
-        print(f"✅ Success! {len(headers)} headers saved to {cache_manager.header_file}")
+        profile = cache_manager.get_active_profile() or "default"
+        print(f"✅ Success! {len(headers)} headers saved to profile '{profile}'")
     else:
         print("❌ Error: Could not parse any headers from the input.")
