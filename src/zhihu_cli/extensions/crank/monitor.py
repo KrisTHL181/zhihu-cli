@@ -97,12 +97,19 @@ class CrankMonitor:
         self,
         registry_path: str = DEFAULT_REGISTRY_PATH,
         hall_of_flames_root: str = HALL_OF_FLAMES_ROOT,
+        *,
+        llm_api_base: str | None = None,
+        llm_api_key: str | None = None,
+        llm_model: str | None = None,
     ) -> None:
         self.registry_path = Path(registry_path)
         self.hof_root = Path(hall_of_flames_root)
         self.serial_dir = self.hof_root / "连环论文 | the paper of continuum"
         self.registry: dict[str, Any] = {"authors": []}
         self._downloader: ContentDownloader | None = None
+        self.llm_api_base = llm_api_base
+        self.llm_api_key = llm_api_key
+        self.llm_model = llm_model
 
     # ── registry management ─────────────────────────────────────────────
 
@@ -345,7 +352,13 @@ class CrankMonitor:
             print("    [error] No samples to send to LLM.", file=sys.stderr)
             return None
 
-        series_name = call_llm_for_name(author_name, samples)
+        series_name = call_llm_for_name(
+            author_name,
+            samples,
+            api_base=self.llm_api_base,
+            api_key=self.llm_api_key,
+            model=self.llm_model,
+        )
         if not series_name:
             print("    [error] LLM naming failed.", file=sys.stderr)
             return None
@@ -451,12 +464,27 @@ def register_commands(main_group: click.Group) -> None:
         mon = CrankMonitor()
         mon.run(check=True, author_filter=author_name)
 
+    # Shared LLM options used by ``fetch`` and ``archive``.
+    _llm_options = [
+        _click.option("--api-endpoint", envvar="LLM_API_BASE", help="OpenAI-compatible API endpoint"),
+        _click.option("--api-key", envvar="LLM_API_KEY", help="API key"),
+        _click.option("--model", envvar="LLM_MODEL", default="gpt-4o-mini", help="Model name (default: gpt-4o-mini)"),
+    ]
+
+    def _llm_decorator(fn):
+        for opt in reversed(_llm_options):
+            fn = opt(fn)
+        return fn
+
     @crank_group.command("fetch")
     @_click.option("--author", "-a", "author_name", default=None, help="Only fetch for a specific author")
     @_click.option("--dry-run", is_flag=True, help="Show what would be downloaded without writing files")
-    def crank_fetch(author_name: str | None, dry_run: bool) -> None:
+    @_llm_decorator
+    def crank_fetch(
+        author_name: str | None, dry_run: bool, api_endpoint: str | None, api_key: str | None, model: str
+    ) -> None:
         """Download new articles from watched authors."""
-        mon = CrankMonitor()
+        mon = CrankMonitor(llm_api_base=api_endpoint, llm_api_key=api_key, llm_model=model)
         mon.run(fetch=True, author_filter=author_name, dry_run=dry_run)
 
     @crank_group.command("archive")
@@ -469,7 +497,16 @@ def register_commands(main_group: click.Group) -> None:
     )
     @_click.option("--sample-count", "-n", type=int, default=4, help="Articles to sample for LLM naming")
     @_click.option("--dry-run", is_flag=True, help="Download but skip LLM naming")
-    def crank_archive(user_token: str, output_dir: str, sample_count: int, dry_run: bool) -> None:
+    @_llm_decorator
+    def crank_archive(
+        user_token: str,
+        output_dir: str,
+        sample_count: int,
+        dry_run: bool,
+        api_endpoint: str | None,
+        api_key: str | None,
+        model: str,
+    ) -> None:
         """One-shot: fetch ALL articles from a Zhihu user, LLM-name the series, and archive.
 
         This is the full pipeline for a newly discovered crank author.
@@ -482,6 +519,9 @@ def register_commands(main_group: click.Group) -> None:
             output_dir=output_dir,
             sample_count=sample_count,
             dry_run=dry_run,
+            api_base=api_endpoint,
+            api_key=api_key,
+            model=model,
         )
         if result:
             print(f"\nSeries created: {result}")

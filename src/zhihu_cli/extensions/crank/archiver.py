@@ -135,15 +135,27 @@ def _collect_existing_series_names() -> list[str]:
     return names
 
 
-def call_llm_for_name(author_name: str, samples: list[tuple[str, str]]) -> str | None:
-    """Send samples to LLM and get a series name back."""
-    api_base = os.environ.get("LLM_API_BASE", "https://api.openai.com/v1")
-    api_key = os.environ.get("LLM_API_KEY", "")
-    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+def call_llm_for_name(
+    author_name: str,
+    samples: list[tuple[str, str]],
+    *,
+    api_base: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> str | None:
+    """Send samples to LLM and get a series name back.
 
-    if not api_key:
-        print("Error: LLM_API_KEY environment variable is not set.", file=sys.stderr)
-        print("Set it and re-run, or use --dry-run to skip LLM naming.", file=sys.stderr)
+    Args:
+        api_base: OpenAI-compatible endpoint. Defaults to ``LLM_API_BASE`` env var or ``https://api.openai.com/v1``.
+        api_key: API key. Defaults to ``LLM_API_KEY`` env var.
+        model: Model name. Defaults to ``LLM_MODEL`` env var or ``gpt-4o-mini``.
+    """
+    _api_base = api_base or os.environ.get("LLM_API_BASE", "https://api.openai.com/v1")
+    _api_key = api_key or os.environ.get("LLM_API_KEY", "")
+    _model = model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
+
+    if not _api_key:
+        print("Error: LLM API key not provided. Use --api-key or set LLM_API_KEY env var.", file=sys.stderr)
         return None
 
     prompt = build_naming_prompt(author_name, samples)
@@ -157,12 +169,12 @@ def call_llm_for_name(author_name: str, samples: list[tuple[str, str]]) -> str |
         )
         return None
 
-    client = OpenAI(base_url=api_base, api_key=api_key)
+    client = OpenAI(base_url=_api_base, api_key=_api_key)
 
-    print(f"Calling LLM ({model}) to generate series name...")
+    print(f"Calling LLM ({_model}) to generate series name...")
     try:
         response = client.chat.completions.create(
-            model=model,
+            model=_model,
             messages=[
                 {
                     "role": "system",
@@ -196,6 +208,9 @@ def run_archiver(
     sample_count: int = 4,
     *,
     dry_run: bool = False,
+    api_base: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> str | None:
     """Fetch a user's articles, download, LLM-name the series, archive.
 
@@ -265,7 +280,7 @@ def run_archiver(
         return None
 
     # 6. LLM naming
-    series_name = call_llm_for_name(author_name, samples)
+    series_name = call_llm_for_name(author_name, samples, api_base=api_base, api_key=api_key, model=model)
 
     if not series_name:
         print("\nLLM naming failed. Falling back to manual mode.")
