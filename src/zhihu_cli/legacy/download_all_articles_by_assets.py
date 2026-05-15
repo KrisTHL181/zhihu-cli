@@ -11,10 +11,12 @@ import time
 from datetime import datetime
 from typing import Any
 
-from curl_cffi import requests
+from curl_cffi.requests.exceptions import HTTPError
+from curl_cffi.requests.exceptions import Timeout as RequestsTimeout
 
 from zhihu_cli.content.download_contents import extract_config_from_curl, extract_metadata_from_html, sanitize_filename
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
@@ -32,7 +34,6 @@ class ArticleDownloadPipeline:
         self.assets_file = assets_file
         self.output_dir = output_dir
         self.articles = []  # 文章列表
-        self.session = requests.Session()
         self.headers = {}
         self.md_converter = PageToMarkdown(skip_empty=True)
 
@@ -100,6 +101,7 @@ class ArticleDownloadPipeline:
         headers.pop("Accept-Encoding", None)
 
         self.headers = headers
+        reload_session()
         print(f"[Success] 已加载 {len(headers)} 个请求头")
         print(f"[Info] 请求来源: {url}\n")
         return True
@@ -136,7 +138,7 @@ class ArticleDownloadPipeline:
 
         try:
             # 发送请求
-            resp = self.session.get(url, headers=self.headers, impersonate="chrome110", timeout=30)
+            resp = session.get(url, timeout=30)
             resp.raise_for_status()
 
             html_content = resp.text
@@ -195,11 +197,11 @@ id: {article_id}
 
             return True
 
-        except requests.exceptions.Timeout:
+        except RequestsTimeout:
             print("  [Error] 请求超时")
             self.stats["failed_urls"].append({"id": article_id, "title": title, "error": "timeout"})
             return False
-        except requests.exceptions.HTTPError as e:
+        except HTTPError as e:
             print(f"  [Error] HTTP 错误: {e}")
             self.stats["failed_urls"].append({"id": article_id, "title": title, "error": str(e)})
             return False

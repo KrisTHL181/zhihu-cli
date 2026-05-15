@@ -4,23 +4,14 @@ import os
 import time
 from datetime import datetime, timedelta
 from io import StringIO
-from typing import Any, cast
-
-from curl_cffi import requests
-from user_agents import parse
+from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 
 DB_FILE: str = "zhihu_income_report.json"
 DEFAULT_START_DATE: str = "2026-01-06"
 BASE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/detail/download"
-
-
-def _get_browser(ua: str) -> requests.BrowserTypeLiteral:
-    family = parse(ua).browser.family.lower()
-    if family in requests.impersonate.REAL_TARGET_MAP:
-        return cast(requests.BrowserTypeLiteral, family)
-    return "chrome"
 
 
 def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
@@ -57,9 +48,6 @@ def run_task() -> None:
         return
     headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
-    ua = headers.get("User-Agent", "")
-    browser = _get_browser(ua)
-
     print(f"--- 增量模式：将从 {start_dt.strftime('%Y-%m-%d')} 开始抓取 ---")
 
     new_income_data = []
@@ -76,7 +64,7 @@ def run_task() -> None:
         print(f"\n[任务] 抓取中: {params['start_date']} -> {params['end_date']}")
 
         try:
-            resp = requests.get(BASE_URL, headers=headers, params=params, impersonate=browser, timeout=15)
+            resp = session.get(BASE_URL, headers=headers, params=params, timeout=15)
 
             if resp.status_code == 200 and resp.text.strip():
                 f = StringIO(resp.text.strip())

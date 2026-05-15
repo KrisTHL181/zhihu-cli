@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from curl_cffi import requests
+from zhihu_cli.content.handlers.requests import session
 
 
 def extract_config(curl_text: str) -> tuple[str, dict[str, str]]:
@@ -89,7 +89,7 @@ def main() -> None:
     try:
         while not is_end:
             print(f"📥 正在抓取第 {page_num} 页... URL: {current_url}")
-            resp = requests.get(current_url, headers=headers, impersonate="chrome110", timeout=15)
+            resp = session.get(current_url, headers=headers, timeout=15)
 
             if resp.status_code != 200:
                 print(f"❌ 请求失败: {resp.status_code}")

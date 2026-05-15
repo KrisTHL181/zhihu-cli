@@ -2,22 +2,13 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Any, cast
-
-from curl_cffi import requests
-from user_agents import parse
+from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 
 DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/daily"
 AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/aggr"
-
-
-def _get_browser(ua: str) -> requests.BrowserTypeLiteral:
-    family = parse(ua).browser.family.lower()
-    if family in requests.impersonate.REAL_TARGET_MAP:
-        return cast(requests.BrowserTypeLiteral, family)
-    return "chrome"
 
 
 def convert_percent(data: str | None) -> float:
@@ -61,8 +52,6 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
         return
     headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
-    ua = headers.get("User-Agent", "")
-    browser = _get_browser(ua)
     base_url = AGGR_URL if use_aggr else DAILY_URL
 
     success_count = 0
@@ -77,7 +66,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
         }
 
         try:
-            resp = requests.get(base_url, headers=headers, params=params, impersonate=browser, timeout=15)
+            resp = session.get(base_url, headers=headers, params=params, timeout=15)
 
             if resp.status_code == 200:
                 data = resp.json()

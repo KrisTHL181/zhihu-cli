@@ -38,6 +38,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_answer,
     upvote_question,
 )
+from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.extensions import discover_extensions
 
@@ -765,8 +766,6 @@ def scrape() -> None:
 def scrape_creations(output: str) -> None:
     """Fetch all user creation IDs (answers, articles, pins) → JSON."""
 
-    import requests as curl_cffi_requests
-
     headers = cache_manager.load_headers()
     if not headers:
         click.echo("No cached headers. Run 'zhihu auth paste' first.", err=True)
@@ -781,7 +780,7 @@ def scrape_creations(output: str) -> None:
     while True:
         params = {"start": 0, "end": 0, "limit": limit, "offset": offset, "need_co_creation": 1, "sort_type": "created"}
         try:
-            resp = curl_cffi_requests.get(base_url, headers=headers, params=params, impersonate="chrome110", timeout=15)
+            resp = session.get(base_url, headers=headers, params=params, timeout=15)
             if resp.status_code != 200:
                 click.echo(f"Error: HTTP {resp.status_code}", err=True)
                 break
@@ -815,8 +814,6 @@ def scrape_creations(output: str) -> None:
 def _generic_list_scrape(api_description: str, output_file: str) -> None:
     """Generic stdin-based list scraper. User pastes the API's cURL command."""
     import re
-
-    import requests as curl_cffi_requests
 
     headers = cache_manager.load_headers()
     if not headers:
@@ -857,7 +854,7 @@ def _generic_list_scrape(api_description: str, output_file: str) -> None:
         query["offset"] = offset_val
         request_url = f"{base_url}?{urlencode(query, doseq=True)}"
         try:
-            resp = curl_cffi_requests.get(request_url, headers=headers, impersonate="chrome110", timeout=15)
+            resp = session.get(request_url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 click.echo(f"Error: HTTP {resp.status_code}", err=True)
                 break

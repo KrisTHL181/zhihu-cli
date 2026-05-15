@@ -20,10 +20,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from curl_cffi import requests as cffi_requests
-
 from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.universal_converter import convert_items
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
@@ -36,13 +35,9 @@ SERIAL_PAPERS_DIR = os.path.join(HALL_OF_FLAMES_ROOT, "连环论文 | the paper 
 
 def fetch_article_list(user_token: str) -> list[dict[str, Any]]:
     """Paginate through a user's articles API, return raw items."""
-    headers = cache_manager.load_headers()
-    if not headers:
+    if not cache_manager.load_headers():
         print("No cached headers. Run 'zhihu auth paste' first.", file=sys.stderr)
         sys.exit(1)
-
-    session = cffi_requests.Session()
-    session.headers.update(headers)
 
     all_items: list[dict[str, Any]] = []
     offset = 0
@@ -53,7 +48,7 @@ def fetch_article_list(user_token: str) -> list[dict[str, Any]]:
         url = ARTICLES_API.format(token=user_token)
         params = {"offset": offset, "limit": limit, "sort_by": "created"}
         try:
-            resp = session.get(url, params=params, impersonate="chrome110", timeout=15)
+            resp = session.get(url, params=params, timeout=15)
             if resp.status_code != 200:
                 print(f"Error: HTTP {resp.status_code} at offset {offset}", file=sys.stderr)
                 break

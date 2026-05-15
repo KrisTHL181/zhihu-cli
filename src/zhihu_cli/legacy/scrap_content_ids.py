@@ -3,9 +3,8 @@ import re
 import sys
 import time
 
-from curl_cffi import requests
-
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 
 
 def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
@@ -69,7 +68,7 @@ def fetch_all_creation_assets() -> list[dict[str, str]] | None:
         params = {"start": 0, "end": 0, "limit": limit, "offset": offset, "need_co_creation": 1, "sort_type": "created"}
 
         try:
-            resp = requests.get(base_url, headers=headers, params=params, impersonate="chrome110", timeout=15)
+            resp = session.get(base_url, headers=headers, params=params, timeout=15)
 
             if resp.status_code == 200:
                 res_json = resp.json()

@@ -5,9 +5,10 @@ import time
 from datetime import datetime
 from typing import Any
 
-from curl_cffi import requests
+from curl_cffi.requests.exceptions import Timeout as RequestsTimeout
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 
 
 def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
@@ -196,7 +197,7 @@ def fetch_user_activities() -> None:
         while retry_count < max_retries and not success:
             try:
                 print(f"\n  📄 第 {page} 页请求中...", end=" ")
-                resp = requests.get(request_url, headers=headers, impersonate="chrome110", timeout=15)
+                resp = session.get(request_url, headers=headers, timeout=15)
 
                 if resp.status_code == 200:
                     res_json = resp.json()
@@ -245,7 +246,7 @@ def fetch_user_activities() -> None:
                         is_end = True
                         break
 
-            except requests.exceptions.Timeout:
+            except RequestsTimeout:
                 print("⏰ 请求超时")
                 retry_count += 1
                 if retry_count < max_retries:

@@ -10,12 +10,12 @@ from datetime import datetime
 from typing import Any
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import track
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
@@ -100,8 +100,8 @@ def get_request_data(url: str | None = None) -> tuple[str | None, dict[str, str]
     return current_url, headers
 
 
-def get_question(session: requests.Session, current_url: str, headers: dict[str, str]) -> dict[str, Any] | None:
-    resp = session.get(current_url, headers=headers, impersonate="chrome110", timeout=15)
+def get_question(current_url: str, headers: dict[str, str]) -> dict[str, Any] | None:
+    resp = session.get(current_url, headers=headers, timeout=15)
 
     if resp.status_code == 403:
         print("❌ 403 Forbidden: 缓存的 Headers 可能已过期，请重新粘贴 cURL")
@@ -121,7 +121,7 @@ def get_question(session: requests.Session, current_url: str, headers: dict[str,
 
 
 def scrape_answers(
-    session: requests.Session, question_data: dict[str, Any], headers: dict[str, str]
+    question_data: dict[str, Any], headers: dict[str, str]
 ) -> Generator[tuple[int, str, int, str], None, None]:
     # 1. API 翻页逻辑
     next_url = f"https://www.zhihu.com/api/v4/questions/{question_data['id']}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
@@ -131,7 +131,7 @@ def scrape_answers(
 
     try:
         while not is_end and next_url:
-            resp = session.get(next_url, headers=headers, impersonate="chrome110", timeout=15)
+            resp = session.get(next_url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 print(f"❌ API 请求失败: {resp.status_code}")
                 break
@@ -173,8 +173,7 @@ def main(url: str, reading_mode: bool = False, no_cache: bool = False) -> None:
     if not current_url or not headers:
         return
 
-    session = requests.Session()
-    question_data = get_question(session, current_url, headers)
+    question_data = get_question(current_url, headers)
     if not question_data:
         return
 
@@ -184,7 +183,7 @@ def main(url: str, reading_mode: bool = False, no_cache: bool = False) -> None:
         print(f"⏰ 创建时间: {datetime.fromtimestamp(question_data['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"📝 详情:\n{question_data['detail']}\n")
 
-        for answer_num, author, vote, content in scrape_answers(session, question_data, headers):
+        for answer_num, author, vote, content in scrape_answers(question_data, headers):
             print(f"\n[{answer_num}] 作者: {author} | 赞同: {vote}")
             print("-" * 20)
             print(content)
@@ -199,7 +198,7 @@ def main(url: str, reading_mode: bool = False, no_cache: bool = False) -> None:
     if answers is None:
         answers = []
         for item in track(
-            scrape_answers(session, question_data, headers),
+            scrape_answers(question_data, headers),
             total=question_data["answer_count"],
             description="抓取答案中...",
         ):

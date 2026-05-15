@@ -8,9 +8,9 @@ import time
 from datetime import datetime
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
@@ -104,7 +104,6 @@ class ContentDownloader:
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
-        self.session: requests.Session = requests.Session()
         self.headers: dict[str, str] = {}
         self.md_converter: PageToMarkdown = PageToMarkdown(skip_empty=True)
 
@@ -137,6 +136,7 @@ class ContentDownloader:
 
         self.headers = headers
         cache_manager.save_headers(headers)
+        reload_session()
         print("[Success] Headers configured and cached.")
         return True
 
@@ -246,7 +246,7 @@ class ContentDownloader:
 
         for url in urls:
             try:
-                resp = self.session.get(url, headers=self.headers, impersonate="chrome110", timeout=15)
+                resp = session.get(url, timeout=15)
                 resp.raise_for_status()
                 html_content = resp.text
 
@@ -308,7 +308,7 @@ class ContentDownloader:
         """Fetch and convert a single article. Returns (metadata, markdown_content)."""
         if not self.headers:
             raise RuntimeError("Headers not loaded")
-        resp = self.session.get(url, headers=self.headers, impersonate="chrome110", timeout=15)
+        resp = session.get(url, timeout=15)
         resp.raise_for_status()
         html_content = resp.text
         metadata = extract_metadata_from_html(html_content)
@@ -372,7 +372,7 @@ class ContentDownloader:
 
         for url in urls:
             try:
-                resp = self.session.get(url, headers=self.headers, impersonate="chrome110", timeout=15)
+                resp = session.get(url, timeout=15)
                 resp.raise_for_status()
                 html_content = resp.text
                 soup = BeautifulSoup(html_content, "html.parser")
