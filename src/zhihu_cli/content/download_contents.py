@@ -304,6 +304,17 @@ class ContentDownloader:
                 continue
             time.sleep(delay)
 
+    def fetch_article(self, url: str) -> tuple[dict[str, str], str]:
+        """Fetch and convert a single article. Returns (metadata, markdown_content)."""
+        if not self.headers:
+            raise RuntimeError("Headers not loaded")
+        resp = self.session.get(url, headers=self.headers, impersonate="chrome110", timeout=15)
+        resp.raise_for_status()
+        html_content = resp.text
+        metadata = extract_metadata_from_html(html_content)
+        markdown_content = self.md_converter.convert(html_content, url)
+        return metadata, markdown_content
+
     def download_articles(self, urls: list[str], delay: float = 1.0) -> None:
         """
         下载文章页面 HTML 并转换为 Markdown
@@ -317,16 +328,7 @@ class ContentDownloader:
 
         for url in urls:
             try:
-                resp = self.session.get(url, headers=self.headers, impersonate="chrome110", timeout=15)
-                resp.raise_for_status()
-
-                html_content = resp.text
-
-                # 提取元数据
-                metadata = extract_metadata_from_html(html_content)
-
-                # 转换为 Markdown
-                markdown_content = self.md_converter.convert(html_content, url)
+                metadata, markdown_content = self.fetch_article(url)
 
                 # 生成文件名：内容标题_作者名_时间.md
                 title = sanitize_filename(metadata["title"])

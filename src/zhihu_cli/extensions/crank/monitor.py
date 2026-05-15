@@ -1,0 +1,498 @@
+#!/usr/bin/env python3
+"""Fully automated crank paper monitor — incremental fetch of new articles from watched authors.
+
+Core workflow:
+  1. Load author registry (name → zhihu_token → series_dir)
+  2. For each author, fetch article list from Zhihu API
+  3. Diff against already-downloaded papers (by parsing YAML frontmatter ``source`` IDs)
+  4. Download only NEW articles with Hall-of-Flames-compatible naming + YAML frontmatter
+  5. Optionally trigger AI review regeneration for authors with new papers
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename
+from zhihu_cli.extensions.crank.archiver import call_llm_for_name, fetch_article_list
+
+if TYPE_CHECKING:
+    import click
+
+HALL_OF_FLAMES_ROOT = os.path.expanduser("~/Zhihu-Hall-of-Flames")
+SERIAL_PAPERS_DIR = os.path.join(HALL_OF_FLAMES_ROOT, "连环论文 | the paper of continuum")
+DEFAULT_REGISTRY_PATH = os.path.join(os.path.dirname(__file__), "authors_registry.json")
+
+# ── article ID extraction ───────────────────────────────────────────────────
+
+
+def extract_article_id(url: str | None) -> str | None:
+    """Extract numeric article ID from a Zhihu article URL.
+
+    >>> extract_article_id('https://zhuanlan.zhihu.com/p/638541668')
+    '638541668'
+    """
+    if not url:
+        return None
+    m = re.search(r"/p/(\d+)", url)
+    return m.group(1) if m else None
+
+
+# ── YAML frontmatter helpers ────────────────────────────────────────────────
+
+
+def parse_frontmatter_field(filepath: Path, field: str) -> str | None:
+    """Extract a single field value from YAML frontmatter of a .md file.
+
+    Only handles simple ``key: value`` lines — sufficient for the Hall of Flames format.
+    """
+    try:
+        text = filepath.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        end = text.find("---", 3)
+    if end == -1:
+        return None
+    fm = text[3:end]
+    for line in fm.split("\n"):
+        if line.startswith(f"{field}:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def build_yaml_frontmatter(title: str, author: str, created: str, source: str) -> str:
+    """Build YAML frontmatter block matching the Hall of Flames convention."""
+    return f"---\ntitle: {title}\nauthor: {author}\ncreated: {created}\nsource: {source}\n---\n\n"
+
+
+def generate_filename(author: str, title: str, created: str) -> str:
+    """Generate Hall-of-Flames-style filename: {YYYY-MM-DD}_{author}_{title}.md"""
+    safe_author = sanitize_filename(author)
+    safe_title = sanitize_filename(title)
+    date_str = created if created else "unknown"
+    filename = f"{date_str}_{safe_author}_{safe_title}.md"
+    if len(filename) > 200:
+        filename = filename[:200]
+    return filename
+
+
+# ── CrankMonitor ────────────────────────────────────────────────────────────
+
+
+class CrankMonitor:
+    """Monitors watched crank authors for new papers and downloads them incrementally."""
+
+    def __init__(
+        self,
+        registry_path: str = DEFAULT_REGISTRY_PATH,
+        hall_of_flames_root: str = HALL_OF_FLAMES_ROOT,
+    ) -> None:
+        self.registry_path = Path(registry_path)
+        self.hof_root = Path(hall_of_flames_root)
+        self.serial_dir = self.hof_root / "连环论文 | the paper of continuum"
+        self.registry: dict[str, Any] = {"authors": []}
+        self._downloader: ContentDownloader | None = None
+
+    # ── registry management ─────────────────────────────────────────────
+
+    def load_registry(self) -> dict[str, Any]:
+        """Load the author registry from JSON, returning defaults if missing."""
+        if self.registry_path.exists():
+            try:
+                with open(self.registry_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                if "authors" in data:
+                    self.registry = data
+                    return data
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"Warning: failed to load registry: {e}", file=sys.stderr)
+        self.registry = {"authors": []}
+        return self.registry
+
+    def save_registry(self) -> None:
+        """Persist the registry to disk."""
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.registry_path, "w", encoding="utf-8") as f:
+            json.dump(self.registry, f, ensure_ascii=False, indent=2)
+
+    def bootstrap_registry(self) -> int:
+        """Scan serial papers directories and build initial registry entries.
+
+        Each discovered author gets an entry with ``zhihu_token`` left empty
+        for manual filling.  Existing entries (matched by name) are preserved.
+
+        Returns the number of newly bootstrapped authors.
+        """
+        self.load_registry()
+        existing_names = {a["name"] for a in self.registry["authors"]}
+        new_count = 0
+
+        if not self.serial_dir.is_dir():
+            print(f"Serial papers directory not found: {self.serial_dir}", file=sys.stderr)
+            return 0
+
+        for entry in sorted(self.serial_dir.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            # Extract author name from dir name: {Author}-{TheoryName}
+            author_name = (entry.name.split("-")[0] if "-" in entry.name else entry.name).strip()
+            if author_name in existing_names:
+                continue
+            self.registry["authors"].append(
+                {
+                    "name": author_name,
+                    "zhihu_token": "",
+                    "series_dir": entry.name,
+                    "enabled": True,
+                }
+            )
+            existing_names.add(author_name)
+            new_count += 1
+            print(f"  + {author_name} → {entry.name}")
+
+        self.save_registry()
+        print(f"Bootstrapped {new_count} new author(s).  Total: {len(self.registry['authors'])}")
+        print("Fill in the 'zhihu_token' fields before fetching.")
+        return new_count
+
+    def _get_enabled_authors(self, author_filter: str | None = None) -> list[dict[str, Any]]:
+        """Return enabled author entries, optionally filtered by name."""
+        authors = self.registry.get("authors", [])
+        result = []
+        for a in authors:
+            if not a.get("enabled", True):
+                continue
+            if author_filter and a["name"] != author_filter:
+                continue
+            result.append(a)
+        return result
+
+    # ── incremental detection ───────────────────────────────────────────
+
+    def _get_existing_article_ids(self, series_dir_name: str) -> set[str]:
+        """Scan a series directory and return all article IDs found in YAML frontmatter."""
+        series_path = self.serial_dir / series_dir_name
+        if not series_path.is_dir():
+            return set()
+
+        ids: set[str] = set()
+        for md_file in sorted(series_path.glob("*.md")):
+            if md_file.name == "README.md":
+                continue
+            source = parse_frontmatter_field(md_file, "source")
+            if source:
+                aid = extract_article_id(source)
+                if aid:
+                    ids.add(aid)
+        return ids
+
+    # ── per-author operations ───────────────────────────────────────────
+
+    def check_author(self, author_entry: dict[str, Any]) -> list[dict[str, Any]]:
+        """Fetch article list and return only articles NOT already downloaded.
+
+        Returns a list of raw article dicts from the API.
+        """
+        token = author_entry.get("zhihu_token", "")
+        if not token:
+            print(f"  [skip] {author_entry['name']}: no zhihu_token set")
+            return []
+
+        series_dir = author_entry.get("series_dir", "")
+        existing_ids: set[str] = set()
+        if series_dir:
+            existing_ids = self._get_existing_article_ids(series_dir)
+
+        print(f"  Fetching article list for {author_entry['name']} (token={token})...")
+        try:
+            all_articles = fetch_article_list(token)
+        except Exception as e:
+            print(f"  [error] Failed to fetch articles for {author_entry['name']}: {e}", file=sys.stderr)
+            return []
+
+        new_articles: list[dict[str, Any]] = []
+        for art in all_articles:
+            art_url = art.get("url", "")
+            aid = extract_article_id(art_url) if art_url else None
+            if aid and aid in existing_ids:
+                continue
+            new_articles.append(art)
+
+        return new_articles
+
+    def _get_downloader(self) -> ContentDownloader:
+        """Lazy-init a ContentDownloader with cached headers."""
+        if self._downloader is not None:
+            return self._downloader
+
+        tmpdir = tempfile.mkdtemp(prefix="crank_monitor_")
+        dl = ContentDownloader(output_dir=tmpdir)
+        if not dl.load_headers_from_curl(quick_mode=True):
+            raise RuntimeError("No cached headers. Run 'zhihu auth paste' first.")
+        self._downloader = dl
+        return dl
+
+    def fetch_author(
+        self,
+        author_entry: dict[str, Any],
+        new_articles: list[dict[str, Any]],
+        *,
+        dry_run: bool = False,
+    ) -> list[Path]:
+        """Download *new_articles* for one author and save to their series directory.
+
+        If the author has no ``series_dir`` yet, LLM naming is invoked.
+        Returns paths of newly saved files.
+        """
+        author_name = author_entry["name"]
+        series_dir = author_entry.get("series_dir", "")
+        saved: list[Path] = []
+
+        # Resolve series directory — possibly via LLM naming
+        if not series_dir:
+            if dry_run:
+                print(f"    [dry-run] Would download {len(new_articles)} articles to temp, then LLM-name the series")
+                return saved
+            series_dir = self._name_and_create_series(author_entry, new_articles)
+            if not series_dir:
+                print(f"    [error] Failed to name series for {author_name}", file=sys.stderr)
+                return saved
+            author_entry["series_dir"] = series_dir
+            self.save_registry()
+
+        target_dir = self.serial_dir / series_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        downloader = self._get_downloader()
+
+        for i, art in enumerate(new_articles):
+            art_url = art.get("url", "")
+            if not art_url:
+                continue
+
+            print(f"    [{i + 1}/{len(new_articles)}] {art_url}")
+
+            if dry_run:
+                title = art.get("title", "(unknown)")
+                print(f"      [dry-run] {title}")
+                continue
+
+            try:
+                metadata, markdown = downloader.fetch_article(art_url)
+            except Exception as e:
+                print(f"      [error] Download failed: {e}", file=sys.stderr)
+                continue
+
+            title = metadata.get("title") or art.get("title") or "untitled"
+            author = metadata.get("author") or author_name
+            created = metadata.get("created") or "unknown"
+
+            filename = generate_filename(author, title, created)
+            filepath = target_dir / filename
+
+            yaml_block = build_yaml_frontmatter(title, author, created, art_url)
+            filepath.write_text(yaml_block + markdown, encoding="utf-8")
+
+            print(f"      → {filepath}")
+            saved.append(filepath)
+            time.sleep(1.0)
+
+        return saved
+
+    def _name_and_create_series(self, author_entry: dict[str, Any], articles: list[dict[str, Any]]) -> str | None:
+        """Download articles, sample for LLM, create a named series directory.
+
+        Returns the directory basename, or None on failure.
+        """
+        author_name = author_entry["name"]
+        print(f"    Naming new series for {author_name} ({len(articles)} articles)...")
+
+        # Download article samples for LLM review
+        downloader = self._get_downloader()
+        samples: list[tuple[str, str]] = []
+
+        # Take up to 4 random samples for the LLM
+        import random
+
+        sample_articles = random.sample(articles, min(4, len(articles)))
+
+        for art in sample_articles:
+            art_url = art.get("url", "")
+            if not art_url:
+                continue
+            try:
+                metadata, markdown = downloader.fetch_article(art_url)
+            except Exception as e:
+                print(f"      [error] Sample download failed: {e}", file=sys.stderr)
+                continue
+            title = metadata.get("title") or art.get("title") or "untitled"
+            filename = generate_filename(author_name, title, metadata.get("created") or "unknown")
+            samples.append((filename, markdown))
+            time.sleep(1.0)
+
+        if not samples:
+            print("    [error] No samples to send to LLM.", file=sys.stderr)
+            return None
+
+        series_name = call_llm_for_name(author_name, samples)
+        if not series_name:
+            print("    [error] LLM naming failed.", file=sys.stderr)
+            return None
+
+        safe_name = sanitize_filename(series_name)
+        series_path = self.serial_dir / safe_name
+        series_path.mkdir(parents=True, exist_ok=True)
+        print(f"    Created series directory: {safe_name}")
+        return safe_name
+
+    # ── main entry ──────────────────────────────────────────────────────
+
+    def run(
+        self,
+        *,
+        check: bool = False,
+        fetch: bool = False,
+        author_filter: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Main entry point.
+
+        Args:
+            check: Only report new articles, don't download.
+            fetch: Download new articles.
+            author_filter: Only process this author (by name).
+            dry_run: Don't actually write files.
+
+        Returns a summary dict ``{author_name: new_count}``.
+        """
+        self.load_registry()
+        authors = self._get_enabled_authors(author_filter)
+
+        if not authors:
+            print("No enabled authors found in registry.")
+            if author_filter:
+                print(f'  Filter: "{author_filter}"')
+            print(f"  Registry: {self.registry_path}")
+            return {}
+
+        print(f"Processing {len(authors)} author(s)...")
+        summary: dict[str, Any] = {}
+
+        for author_entry in authors:
+            name = author_entry["name"]
+            print(f"\n── {name} ──")
+
+            new_articles = self.check_author(author_entry)
+            summary[name] = {
+                "new_count": len(new_articles),
+                "articles": [a.get("title", "") for a in new_articles],
+            }
+
+            if not new_articles:
+                print("  No new articles.")
+                continue
+
+            print(f"  Found {len(new_articles)} new article(s):")
+            for art in new_articles:
+                print(f"    - {art.get('title', '(untitled)')}  ({art.get('url', '')})")
+
+            if check:
+                continue  # check-only mode: report but don't download
+
+            if fetch:
+                saved = self.fetch_author(author_entry, new_articles, dry_run=dry_run)
+                summary[name]["saved"] = len(saved)
+
+        # Print final summary
+        print("\n" + "=" * 50)
+        print("Summary:")
+        total_new = 0
+        for name, info in summary.items():
+            cnt = info["new_count"]
+            total_new += cnt
+            status = f"{cnt} new"
+            if "saved" in info:
+                status += f", {info['saved']} saved"
+            print(f"  {name}: {status}")
+        print(f"Total: {total_new} new article(s) across {len(summary)} author(s)")
+
+        if dry_run:
+            print("\n[dry-run] No files were written.")
+
+        return summary
+
+
+# ── CLI registration ────────────────────────────────────────────────────────
+
+
+def register_commands(main_group: click.Group) -> None:
+    """Register ``zhihu crank`` command group and its subcommands."""
+    import click as _click
+
+    @main_group.group(name="crank")
+    def crank_group() -> None:
+        """Crank paper monitor & archiver."""
+
+    @crank_group.command("check")
+    @_click.option("--author", "-a", "author_name", default=None, help="Only check a specific author")
+    def crank_check(author_name: str | None) -> None:
+        """Check for new articles from watched authors (report only)."""
+        mon = CrankMonitor()
+        mon.run(check=True, author_filter=author_name)
+
+    @crank_group.command("fetch")
+    @_click.option("--author", "-a", "author_name", default=None, help="Only fetch for a specific author")
+    @_click.option("--dry-run", is_flag=True, help="Show what would be downloaded without writing files")
+    def crank_fetch(author_name: str | None, dry_run: bool) -> None:
+        """Download new articles from watched authors."""
+        mon = CrankMonitor()
+        mon.run(fetch=True, author_filter=author_name, dry_run=dry_run)
+
+    @crank_group.command("archive")
+    @_click.option("--user-token", "-u", required=True, help="Zhihu user URL token (e.g. chen-bao-qun)")
+    @_click.option(
+        "--output-dir",
+        "-o",
+        default=SERIAL_PAPERS_DIR,
+        help=f"Output directory for the new series (default: {SERIAL_PAPERS_DIR})",
+    )
+    @_click.option("--sample-count", "-n", type=int, default=4, help="Articles to sample for LLM naming")
+    @_click.option("--dry-run", is_flag=True, help="Download but skip LLM naming")
+    def crank_archive(user_token: str, output_dir: str, sample_count: int, dry_run: bool) -> None:
+        """One-shot: fetch ALL articles from a Zhihu user, LLM-name the series, and archive.
+
+        This is the full pipeline for a newly discovered crank author.
+        For known authors with a series_dir already in the registry, use ``crank fetch`` instead.
+        """
+        from zhihu_cli.extensions.crank.archiver import run_archiver
+
+        result = run_archiver(
+            user_token=user_token,
+            output_dir=output_dir,
+            sample_count=sample_count,
+            dry_run=dry_run,
+        )
+        if result:
+            print(f"\nSeries created: {result}")
+            print("Run 'zhihu crank bootstrap' to add this author to the registry.")
+
+    @crank_group.command("bootstrap")
+    def crank_bootstrap() -> None:
+        """Scan serial papers directories and generate initial authors_registry.json.
+
+        Authors are discovered from existing series subdirectories.
+        Fill in 'zhihu_token' fields manually before running fetch.
+        """
+        mon = CrankMonitor()
+        mon.bootstrap_registry()

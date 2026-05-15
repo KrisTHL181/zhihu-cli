@@ -39,6 +39,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_question,
 )
 from zhihu_cli.content.universal_converter import convert_items, load_json
+from zhihu_cli.extensions import discover_extensions
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -949,6 +950,13 @@ def convert_user_act(input_file: str, output_file: str) -> None:
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(converted, f, ensure_ascii=False, indent=2)
     click.echo(f"Converted {len(converted)} items → {output_file}")
+
+
+# ── extensions ────────────────────────────────────────────────────────────
+
+# Auto-discover and register extension command groups.
+for _ext_mod in discover_extensions():
+    _ext_mod.register_cli(main)
 
 
 # ── tools ────────────────────────────────────────────────────────────────

@@ -187,29 +187,27 @@ def call_llm_for_name(author_name: str, samples: list[tuple[str, str]]) -> str |
         return None
 
 
-# ── main pipeline ──────────────────────────────────────────────────────────
+# ── pipeline core ───────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="民科论文自动归档与LLM命名")
-    parser.add_argument("--user-token", "-u", required=True, help="知乎用户 URL token")
-    parser.add_argument(
-        "--output-dir",
-        "-o",
-        default=SERIAL_PAPERS_DIR,
-        help=f"系列输出目录 (默认: {SERIAL_PAPERS_DIR})",
-    )
-    parser.add_argument("--sample-count", "-n", type=int, default=4, help="随机抽样文件数 (默认: 4)")
-    parser.add_argument("--dry-run", action="store_true", help="跳过LLM命名，仅下载并输出抽样路径")
-    args = parser.parse_args()
+def run_archiver(
+    user_token: str,
+    output_dir: str = SERIAL_PAPERS_DIR,
+    sample_count: int = 4,
+    *,
+    dry_run: bool = False,
+) -> str | None:
+    """Fetch a user's articles, download, LLM-name the series, archive.
 
-    user_token = args.user_token.strip()
+    Returns the final series directory path, or *None* on failure / dry-run.
+    """
+    user_token = user_token.strip()
 
     # 1. Fetch article list
     raw_articles = fetch_article_list(user_token)
     if not raw_articles:
         print("No articles found. Exiting.", file=sys.stderr)
-        sys.exit(1)
+        return None
 
     # Determine author name from first article
     first = raw_articles[0]
@@ -227,7 +225,7 @@ def main() -> None:
     downloader = ContentDownloader(output_dir=temp_dir)
     if not downloader.load_headers_from_curl(quick_mode=True):
         print("Failed to load headers.", file=sys.stderr)
-        sys.exit(1)
+        return None
     downloader.download_articles(article_urls, delay=1.0)
 
     # 4. Gather downloaded files
@@ -238,15 +236,15 @@ def main() -> None:
 
     if not md_files:
         print("No markdown files downloaded. Exiting.", file=sys.stderr)
-        sys.exit(1)
+        return None
 
     print(f"Downloaded {len(md_files)} articles.")
 
     # 5. Random sample for LLM
-    sample_count = min(args.sample_count, len(md_files))
-    sampled = random.sample(md_files, sample_count)
-    samples = []
-    print(f"\nSampled {sample_count} files for LLM review:")
+    n_samples = min(sample_count, len(md_files))
+    sampled = random.sample(md_files, n_samples)
+    samples: list[tuple[str, str]] = []
+    print(f"\nSampled {n_samples} files for LLM review:")
     for fname in sampled:
         fpath = os.path.join(temp_dir, fname)
         try:
@@ -257,14 +255,14 @@ def main() -> None:
         except Exception as e:
             print(f"  - {fname}  ERROR: {e}")
 
-    if args.dry_run:
+    if dry_run:
         print(f"\n[dry-run] Articles downloaded to: {temp_dir}")
         print("[dry-run] Skipping LLM naming. Files remain in temp dir for inspection.")
-        return
+        return None
 
     if not samples:
         print("No valid samples to send to LLM.", file=sys.stderr)
-        sys.exit(1)
+        return None
 
     # 6. LLM naming
     series_name = call_llm_for_name(author_name, samples)
@@ -273,12 +271,12 @@ def main() -> None:
         print("\nLLM naming failed. Falling back to manual mode.")
         print(f"Articles are in: {temp_dir}")
         print("Please name the series manually and move the files.")
-        print(f"Suggested output: {args.output_dir}/<作者名>-<理论核心名>/")
-        return
+        print(f"Suggested output: {output_dir}/<AuthorName>-<TheoryCoreName>/")
+        return None
 
     # 7. Move files to output directory
     safe_series = sanitize_filename(series_name)
-    final_dir = os.path.join(args.output_dir, safe_series)
+    final_dir = os.path.join(output_dir, safe_series)
     os.makedirs(final_dir, exist_ok=True)
 
     for fname in md_files:
@@ -294,6 +292,32 @@ def main() -> None:
         os.rmdir(temp_dir)
     except OSError:
         pass
+
+    return final_dir
+
+
+# ── standalone CLI (also exposed as ``zhihu crank archive``) ─────────────────
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Crank paper auto-archiver with LLM naming")
+    parser.add_argument("--user-token", "-u", required=True, help="Zhihu user URL token")
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        default=SERIAL_PAPERS_DIR,
+        help=f"Output directory for series (default: {SERIAL_PAPERS_DIR})",
+    )
+    parser.add_argument("--sample-count", "-n", type=int, default=4, help="Number of random samples (default: 4)")
+    parser.add_argument("--dry-run", action="store_true", help="Skip LLM naming, only download and show sample paths")
+    args = parser.parse_args()
+
+    run_archiver(
+        user_token=args.user_token,
+        output_dir=args.output_dir,
+        sample_count=args.sample_count,
+        dry_run=args.dry_run,
+    )
 
 
 if __name__ == "__main__":
