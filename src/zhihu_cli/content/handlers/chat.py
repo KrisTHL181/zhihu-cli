@@ -1,5 +1,7 @@
+import time
 from collections.abc import Generator
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
@@ -24,6 +26,17 @@ def get_inbox() -> list[dict[str, Any]]:
             }
         )
     return messages
+
+
+def _build_next_url(base_url: str, after_id: str) -> str:
+    """Construct the next page URL by adding/updating after_id and limit query params."""
+    parsed = urlparse(base_url)
+    query = parse_qs(parsed.query)
+    params = {k: v[0] for k, v in query.items()}
+    params["after_id"] = after_id
+    params["limit"] = "20"
+    new_query = urlencode(params)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
 
 
 def _parse_messages_page(
@@ -53,25 +66,38 @@ def _parse_messages_page(
 
 def iter_chat_history(chat_id: str) -> Generator[dict[str, str], None, None]:
     current_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
+    all_messages: list[dict[str, str]] = []
 
     while current_url:
-        resp = session.get(current_url)
-        resp.raise_for_status()
+        resp = session.get(current_url, timeout=15)
 
-        data = resp.json()
+        if resp.status_code != 200:
+            raise RuntimeError(f"Chat history request failed: {resp.status_code} for {current_url}")
 
-        page_msgs, _, _ = _parse_messages_page(data)
+        try:
+            data = resp.json()
+        except Exception:
+            raise RuntimeError(f"Chat history returned invalid JSON for {current_url}")
+
+        page_msgs, last_id, _ = _parse_messages_page(data)
         if not page_msgs:
             break
 
-        yield from page_msgs
+        all_messages.extend(page_msgs)
 
         paging = data.get("paging", {})
 
-        if paging.get("is_end", True) or len(page_msgs) < 20:
-            current_url = None
+        if paging.get("is_end", True):
+            break
+
+        if last_id:
+            current_url = _build_next_url(current_url, last_id)
+            time.sleep(0.6)
         else:
-            current_url = paging.get("next")
+            break
+
+    # API returns messages newest-first; reverse to chronological order
+    yield from reversed(all_messages)
 
 
 def send_text_message(their_id: str, content: str) -> dict[str, Any]:
