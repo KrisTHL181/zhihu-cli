@@ -3,8 +3,32 @@ from collections.abc import Generator
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+from bs4 import BeautifulSoup
+
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter
+
+
+def _sanitize_html(raw: str) -> str:
+    """Convert chat message HTML to clean text.
+
+    Zhihu chat messages contain raw HTML with link wrappers
+    (link.zhihu.com redirects, invisible/visible spans, etc.).
+    This extracts readable text and resolves link targets.
+    """
+    soup = BeautifulSoup(raw, "html.parser")
+
+    for a_tag in soup.find_all("a"):
+        href = ZhihuLinkConverter.normalize_link(str(a_tag.get("href", "")))
+        text = a_tag.get_text(strip=True)
+        if text == href or not text:
+            replacement = href
+        else:
+            replacement = f"[{text}]({href})"
+        a_tag.replace_with(replacement)
+
+    return soup.get_text()
 
 
 def get_inbox() -> list[dict[str, Any]]:
@@ -55,10 +79,10 @@ def _parse_messages_page(
         if msg.get("type") != "message":
             continue
 
-        role = "them" if msg.get("user_type") == "sender" else "me"
-        content = msg.get("text", "")
+        sender = sender_name if msg.get("user_type") == "sender" else receiver_name
+        content = _sanitize_html(msg.get("text", ""))
         time_str = fmt_time(msg.get("created_time"))
-        page_msgs.append({"role": role, "content": content, "time": time_str})
+        page_msgs.append({"sender": sender, "content": content, "time": time_str})
 
     last_id = messages[-1].get("id")
     return page_msgs, last_id, (receiver_name, sender_name)

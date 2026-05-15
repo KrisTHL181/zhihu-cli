@@ -713,8 +713,7 @@ def chat_history(chat_id: str, limit: int) -> None:
     """Read messages from a chat conversation."""
     count = 0
     for msg in iter_chat_history(chat_id):
-        role = "them" if msg["role"] == "them" else " me"
-        click.echo(f"[{msg['time']}]{role}: {msg['content']}")
+        click.echo(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
         count += 1
         if count >= limit:
             break
