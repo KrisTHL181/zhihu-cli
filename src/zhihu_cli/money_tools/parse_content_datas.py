@@ -1,12 +1,23 @@
 import json
 import os
-import re
-import sys
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from curl_cffi import requests
+from user_agents import parse
+
+from zhihu_cli.content.handlers.cache_manager import cache_manager
+
+DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/daily"
+AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/aggr"
+
+
+def _get_browser(ua: str) -> requests.BrowserTypeLiteral:
+    family = parse(ua).browser.family.lower()
+    if family in requests.impersonate.REAL_TARGET_MAP:
+        return cast(requests.BrowserTypeLiteral, family)
+    return "chrome"
 
 
 def convert_percent(data: str | None) -> float:
@@ -16,12 +27,9 @@ def convert_percent(data: str | None) -> float:
 
 
 def get_date(d: dict[str, Any]) -> str | None:
-    # 1. 优先取 p_date
     if d.get("p_date"):
         return d["p_date"]
 
-    # 2. 依次检查不同的嵌套结构
-    # 利用 dict.get('', {}) 确保即使找不到 key 也能返回空字典，避免报错
     if d.get("answer"):
         ts = d["answer"].get("created_time")
     elif d.get("pin"):
@@ -36,25 +44,9 @@ def get_date(d: dict[str, Any]) -> str | None:
     return None
 
 
-def extract_config(curl_text: str) -> tuple[str, dict[str, str]]:
-    """从 cURL 中提取 Header 和 Base URL"""
-    url_match = re.search(r"curl\s+'([^']+)'", curl_text)
-    base_url = url_match.group(1).split("?")[0] if url_match else ""
-
-    headers = {}
-    for h in re.findall(r"-H\s+'([^']+)'", curl_text):
-        if ":" in h:
-            k, v = h.split(":", 1)
-            headers[k.strip()] = v.strip()
-    headers.pop("Accept-Encoding", None)
-    return base_url, headers
-
-
-def run_batch_daily_analysis() -> None:
-    # 1. 确保目录存在
+def run_batch_daily_analysis(use_aggr: bool = False) -> None:
     os.makedirs("./content_metrics", exist_ok=True)
 
-    # 2. 读取 ID 列表
     try:
         with open("all_assets_list.json", encoding="utf-8") as f:
             answer_ids = json.load(f)
@@ -63,14 +55,16 @@ def run_batch_daily_analysis() -> None:
         print("❌ 错误：找不到 all_assets_list.json，请先运行资产盘点脚本。")
         return
 
-    # 3. 获取 cURL 配置
-    print("\n--- 请粘贴任意一个【daily 或 aggr 接口】的 cURL 命令 (用于同步 Header 签名) ---")
-    curl_input = sys.stdin.read()
-    if not curl_input:
+    headers = cache_manager.load_headers()
+    if not headers:
+        print("❌ 未找到缓存的鉴权凭证，请先运行: zhihu auth paste")
         return
-    base_url, headers = extract_config(curl_input)
+    headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
-    # 4. 循环收割数据
+    ua = headers.get("User-Agent", "")
+    browser = _get_browser(ua)
+    base_url = AGGR_URL if use_aggr else DAILY_URL
+
     success_count = 0
     for i, token in enumerate(answer_ids):
         print(f"\n[任务 {i + 1}/{len(answer_ids)}] 正在处理 ID: {token} ...")
@@ -78,18 +72,18 @@ def run_batch_daily_analysis() -> None:
         params = {
             "type": token["type"],
             "token": token["id"],
-            "start": "2026-01-06",  # 建议对齐你的收益数据起点
+            "start": "2026-01-06",
             "end": datetime.now().strftime("%Y-%m-%d"),
         }
 
         try:
-            resp = requests.get(base_url, headers=headers, params=params, impersonate="chrome110", timeout=15)
+            resp = requests.get(base_url, headers=headers, params=params, impersonate=browser, timeout=15)
 
             if resp.status_code == 200:
                 data = resp.json()
                 clean_data = []
-                if base_url.endswith("aggr"):
-                    data = [data]  # aggr has only 1 day
+                if use_aggr:
+                    data = [data]
                 for d in data:
                     clean_data.append(
                         {
@@ -120,7 +114,6 @@ def run_batch_daily_analysis() -> None:
         except Exception as e:
             print(f"  ⚠️ 异常: {e}")
 
-        # 5. 频率控制（极其重要，避免被知乎反爬封禁）
         time.sleep(1.2)
 
     print("\n" + "=" * 40)

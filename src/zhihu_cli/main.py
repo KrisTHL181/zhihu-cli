@@ -1026,11 +1026,12 @@ def income_weekday() -> None:
 
 
 @tools_income.command("metrics")
-def income_metrics() -> None:
+@click.option("--aggr", is_flag=True, help="Use aggregated endpoint (single datapoint per content)")
+def income_metrics(aggr: bool) -> None:
     """Fetch per-content daily metrics from Zhihu API."""
     from zhihu_cli.money_tools.parse_content_datas import run_batch_daily_analysis
 
-    run_batch_daily_analysis()
+    run_batch_daily_analysis(use_aggr=aggr)
 
 
 @tools.group("nlp")

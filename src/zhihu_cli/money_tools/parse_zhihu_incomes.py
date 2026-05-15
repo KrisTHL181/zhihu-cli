@@ -1,29 +1,26 @@
 import csv
 import json
 import os
-import re
-import sys
 import time
 from datetime import datetime, timedelta
 from io import StringIO
-from typing import Any
+from typing import Any, cast
 
 from curl_cffi import requests
+from user_agents import parse
+
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 
 DB_FILE: str = "zhihu_income_report.json"
 DEFAULT_START_DATE: str = "2026-01-06"
+BASE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/detail/download"
 
 
-def extract_headers_and_cookies(curl_text: str) -> tuple[str | None, dict[str, str]]:
-    headers = {}
-    header_matches = re.findall(r"-H\s+'([^']+)'", curl_text)
-    for h in header_matches:
-        if ":" in h:
-            k, v = h.split(":", 1)
-            headers[k.strip()] = v.strip()
-    url_match = re.search(r"curl\s+'([^']+)'", curl_text)
-    base_url = url_match.group(1).split("?")[0] if url_match else None
-    return base_url, headers
+def _get_browser(ua: str) -> requests.BrowserTypeLiteral:
+    family = parse(ua).browser.family.lower()
+    if family in requests.impersonate.REAL_TARGET_MAP:
+        return cast(requests.BrowserTypeLiteral, family)
+    return "chrome"
 
 
 def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
@@ -34,8 +31,6 @@ def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
                 data = json.load(f)
                 details = data.get("details", [])
                 if details:
-                    # 假设数据是按日期排序的，找到最新的一天
-                    # 如果之前是 reverse=True (降序)，则第一条是最新
                     last_date_str = max(item["date"] for item in details)
                     last_dt = datetime.strptime(last_date_str, "%Y-%m-%d")
                     next_start = last_dt + timedelta(days=1)
@@ -55,18 +50,17 @@ def run_task() -> None:
         print(f"✅ 数据已是最新 (最后记录: {start_dt - timedelta(days=1)})，无需更新。")
         return
 
-    # 2. 获取接口信息
-    print(f"--- 增量模式：将从 {start_dt.strftime('%Y-%m-%d')} 开始抓取 ---")
-    print("--- 请粘贴完整的 cURL 命令 (回车后 Ctrl+D/Ctrl+Z 结束) ---")
-    curl_input = sys.stdin.read()
-    if not curl_input:
+    # 2. 从缓存加载鉴权凭证
+    headers = cache_manager.load_headers()
+    if not headers:
+        print("❌ 未找到缓存的鉴权凭证，请先运行: zhihu auth paste")
         return
+    headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
-    base_url, headers = extract_headers_and_cookies(curl_input)
-    if not base_url:
-        print("❌ 未能识别 cURL 中的 URL，请检查格式。")
-        return
-    headers.pop("Accept-Encoding", None)
+    ua = headers.get("User-Agent", "")
+    browser = _get_browser(ua)
+
+    print(f"--- 增量模式：将从 {start_dt.strftime('%Y-%m-%d')} 开始抓取 ---")
 
     new_income_data = []
 
@@ -74,7 +68,6 @@ def run_task() -> None:
     current_dt = start_dt
     while current_dt < end_dt:
         batch_end = min(current_dt + timedelta(days=30), end_dt - timedelta(days=1))
-        # 如果 batch_end 小于 current_dt，说明已经追平了
         if batch_end < current_dt:
             batch_end = current_dt
 
@@ -83,7 +76,7 @@ def run_task() -> None:
         print(f"\n[任务] 抓取中: {params['start_date']} -> {params['end_date']}")
 
         try:
-            resp = requests.get(base_url, headers=headers, params=params, impersonate="chrome110", timeout=15)
+            resp = requests.get(BASE_URL, headers=headers, params=params, impersonate=browser, timeout=15)
 
             if resp.status_code == 200 and resp.text.strip():
                 f = StringIO(resp.text.strip())
