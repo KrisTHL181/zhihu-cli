@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+from pathlib import Path
 from typing import Any, Literal
 
 import jieba
@@ -14,6 +15,8 @@ from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_score
 
 from zhihu_cli.nlp_tools import STOP_WORDS as stop_words
+
+DATA_DIR = Path.home() / ".zhihu-cli"
 
 
 def find_best_k(X: Any, max_k: int = 20) -> None:
@@ -124,7 +127,7 @@ def visualize_with_plotly(
     kmeans: KMeans,
     n_clusters: int,
     mode: Literal["pca", "tsne", "hybrid"] = "pca",
-    output_path: str = "cluster.png",
+    output_path: str = str(DATA_DIR / "plots" / "cluster.png"),
     n_terms: int = 10,
 ) -> None:
     X_dense = np.asarray(X.todense())
@@ -196,8 +199,9 @@ def visualize_with_plotly(
 
     # 保存为静态图片
     try:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         fig.write_image(output_path, scale=2, width=1200, height=800)
-        print(f"\n静态图片已保存至: {output_path}")
+        print(f"\nImage saved to: {output_path}")
     except Exception:
         print("\n提示: 未安装 kaleido，无法自动保存 PNG。")
 
@@ -207,8 +211,8 @@ def visualize_with_plotly(
 # --- 主流程 ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="知乎文章文本聚类工具")
-    parser.add_argument("--source_dir", default="./downloads/", help="源数据目录")
-    parser.add_argument("--output", default="zhihu_clusters.png", help="输出图像路径")
+    parser.add_argument("--source_dir", default=str(DATA_DIR / "downloads"), help="Source data directory")
+    parser.add_argument("--output", default=str(DATA_DIR / "plots" / "zhihu_clusters.png"), help="Output image path")
     parser.add_argument("--n_clusters", type=int, default=8, help="聚类数量")
     parser.add_argument("--n_terms", type=int, default=10, help="每个簇显示的关键词数量")
     parser.add_argument(

@@ -1,14 +1,20 @@
 import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+DATA_DIR = Path.home() / ".zhihu-cli"
+INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
+OUTPUT_FILE = DATA_DIR / "plots" / "weekday_income_analysis.png"
+
 
 def plot_weekday_analysis() -> None:
     try:
+        OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
         # Load the data
-        with open("zhihu_income_report.json", encoding="utf-8") as f:
+        with open(INPUT_FILE, encoding="utf-8") as f:
             data = json.load(f)
 
         df = pd.DataFrame(data["details"])
@@ -51,7 +57,7 @@ def plot_weekday_analysis() -> None:
         print(f"\n💡 Insight: Your most profitable day on average is {best_day}.")
 
         plt.tight_layout()
-        plt.savefig("weekday_income_analysis.png", dpi=500, bbox_inches="tight")
+        plt.savefig(OUTPUT_FILE, dpi=500, bbox_inches="tight")
         print("\n✅ Box plot saved as: weekday_income_analysis.png")
         plt.show()
 

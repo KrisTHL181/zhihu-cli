@@ -92,8 +92,8 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        default="all_assets_list.json",
-        help="Output unified assets file (default: all_assets_list.json)",
+        default=str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json"),
+        help="Output unified assets file",
     )
     parser.add_argument("--type", "-t", help="Force a specific type for all items (e.g., 'article', 'answer', 'pin')")
     args = parser.parse_args()

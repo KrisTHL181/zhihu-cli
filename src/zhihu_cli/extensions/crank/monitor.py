@@ -26,9 +26,10 @@ from zhihu_cli.extensions.crank.archiver import call_llm_for_name, fetch_article
 if TYPE_CHECKING:
     import click
 
-HALL_OF_FLAMES_ROOT = os.path.expanduser("~/Zhihu-Hall-of-Flames")
-SERIAL_PAPERS_DIR = os.path.join(HALL_OF_FLAMES_ROOT, "连环论文 | the paper of continuum")
-DEFAULT_REGISTRY_PATH = os.path.join(os.path.dirname(__file__), "authors_registry.json")
+CRANK_DIR = str(Path.home() / ".zhihu-cli" / "crank")
+HALL_OF_FLAMES_ROOT = CRANK_DIR
+SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
+DEFAULT_REGISTRY_PATH = os.path.join(CRANK_DIR, "authors_registry.json")
 
 # ── article ID extraction ───────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ class CrankMonitor:
     ) -> None:
         self.registry_path = Path(registry_path)
         self.hof_root = Path(hall_of_flames_root)
-        self.serial_dir = self.hof_root / "连环论文 | the paper of continuum"
+        self.serial_dir = self.hof_root / "papers"
         self.registry: dict[str, Any] = {"authors": []}
         self._downloader: ContentDownloader | None = None
         self.llm_api_base = llm_api_base

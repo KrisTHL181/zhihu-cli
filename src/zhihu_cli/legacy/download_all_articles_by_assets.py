@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from curl_cffi.requests.exceptions import HTTPError
@@ -23,7 +24,7 @@ from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 class ArticleDownloadPipeline:
     """全自动文章下载流水线"""
 
-    def __init__(self, assets_file: str = "all_assets_list.json", output_dir: str = "./downloads/articles"):
+    def __init__(self, assets_file: str | None = None, output_dir: str | None = None):
         """
         初始化下载流水线
 
@@ -31,6 +32,10 @@ class ArticleDownloadPipeline:
             assets_file: 资产列表文件路径
             output_dir: 输出目录
         """
+        if assets_file is None:
+            assets_file = str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json")
+        if output_dir is None:
+            output_dir = str(Path.home() / ".zhihu-cli" / "downloads" / "articles")
         self.assets_file = assets_file
         self.output_dir = output_dir
         self.articles = []  # 文章列表
@@ -329,7 +334,7 @@ def save_headers(headers: dict[str, str]) -> None:
 class QuickDownloadPipeline(ArticleDownloadPipeline):
     """快速下载流水线 - 简化版，直接使用已有 headers"""
 
-    def __init__(self, assets_file: str = "all_assets_list.json", output_dir: str = "./downloads/articles"):
+    def __init__(self, assets_file: str | None = None, output_dir: str | None = None):
         super().__init__(assets_file, output_dir)
         self.headers_loaded = False
 
@@ -357,7 +362,7 @@ class QuickDownloadPipeline(ArticleDownloadPipeline):
         save = input("\n是否保存请求头以便下次使用？(y/n): ").strip().lower()
         if save == "y":
             save_headers(self.headers)
-            print("[Info] 请求头已保存到 .cache/headers.json")
+            print("[Info] Headers cached")
 
         return True
 
@@ -392,10 +397,16 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="全自动下载 all_assets_list.json 中的所有文章")
     parser.add_argument(
-        "--assets-file", "-a", default="all_assets_list.json", help="资产列表文件路径 (默认: all_assets_list.json)"
+        "--assets-file",
+        "-a",
+        default=str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json"),
+        help="Assets JSON file",
     )
     parser.add_argument(
-        "--output-dir", "-o", default="./downloads/articles", help="输出目录 (默认: ./downloads/articles)"
+        "--output-dir",
+        "-o",
+        default=str(Path.home() / ".zhihu-cli" / "downloads" / "articles"),
+        help="Output directory",
     )
     parser.add_argument("--delay", "-d", type=float, default=1.5, help="请求间隔秒数 (默认: 1.5)")
     parser.add_argument("--resume", "-r", type=int, default=0, help="从第几个文章开始下载 (默认: 0)")

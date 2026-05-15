@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import re
+from pathlib import Path
 
 import jieba
 import jieba.analyse
@@ -10,7 +11,8 @@ from wordcloud import WordCloud
 
 from zhihu_cli.nlp_tools import FONT_PATH, STOP_WORDS
 
-OUTPUT_FILE: str = "zhihu_wordcloud.png"
+DATA_DIR = Path.home() / ".zhihu-cli"
+OUTPUT_FILE: str = str(DATA_DIR / "plots" / "zhihu_wordcloud.png")
 
 
 def extract_text_from_md(file_path: str, skip_metadata: bool = False) -> str:
@@ -50,7 +52,9 @@ def is_stop_word(word: str) -> bool:
     return word in STOP_WORDS or len(word) == 1
 
 
-def main(topk_words: int = 200, source_dir: str = "./downloads", only_print: bool = False) -> None:
+def main(topk_words: int = 200, source_dir: str | None = None, only_print: bool = False) -> None:
+    if source_dir is None:
+        source_dir = str(DATA_DIR / "downloads")
     all_text = []
     print(f"正在扫描 {source_dir} 下的 Markdown 文件...")
 
@@ -116,15 +120,16 @@ def main(topk_words: int = 200, source_dir: str = "./downloads", only_print: boo
     plt.figure(figsize=(16, 9))
     plt.imshow(wordcloud, interpolation="bilinear")
     plt.axis("off")
+    Path(OUTPUT_FILE).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(OUTPUT_FILE, dpi=300)
     plt.show()
-    print(f"完成！词云已保存至: {OUTPUT_FILE}")
+    print(f"Word cloud saved to: {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="生成词云图")
     parser.add_argument("--topk", type=int, default=200, help="要显示的关键词数量 (默认: 200)")
-    parser.add_argument("--source_dir", type=str, default="./downloads", help="Markdown文件所在目录 (默认: downloads)")
+    parser.add_argument("--source_dir", type=str, default=str(DATA_DIR / "downloads"), help="Markdown file directory")
     parser.add_argument("--only_print", action="store_true", help="仅打印关键词，不生成词云图")
 
     args = parser.parse_args()

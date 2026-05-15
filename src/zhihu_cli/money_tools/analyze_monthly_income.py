@@ -34,4 +34,6 @@ def analyze_monthly_income(file_path: str) -> None:
 
 
 if __name__ == "__main__":
-    analyze_monthly_income("zhihu_income_report.json")
+    from pathlib import Path
+
+    analyze_monthly_income(str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_income_report.json"))

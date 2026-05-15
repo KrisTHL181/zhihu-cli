@@ -1,15 +1,21 @@
 import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.signal import savgol_filter
 
+DATA_DIR = Path.home() / ".zhihu-cli"
+INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
+OUTPUT_FILE = DATA_DIR / "plots" / "derivative_analysis.png"
+
 
 def plot_derivative_analysis() -> None:
     try:
+        OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
         # 1. 加载与预处理
-        with open("zhihu_income_report.json", encoding="utf-8") as f:
+        with open(INPUT_FILE, encoding="utf-8") as f:
             data = json.load(f)
 
         df = pd.DataFrame(data["details"])
@@ -58,7 +64,7 @@ def plot_derivative_analysis() -> None:
 
         plt.xlabel("Date")
         plt.tight_layout()
-        plt.savefig("derivative_analysis.png", dpi=300)
+        plt.savefig(OUTPUT_FILE, dpi=300)
         plt.show()
 
     except Exception as e:

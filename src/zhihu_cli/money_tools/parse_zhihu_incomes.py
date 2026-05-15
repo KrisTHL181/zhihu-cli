@@ -4,12 +4,13 @@ import os
 import time
 from datetime import datetime, timedelta
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 
-DB_FILE: str = "zhihu_income_report.json"
+DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_income_report.json")
 DEFAULT_START_DATE: str = "2026-01-06"
 BASE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/detail/download"
 

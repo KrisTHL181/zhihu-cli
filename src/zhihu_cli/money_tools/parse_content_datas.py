@@ -2,6 +2,7 @@ import json
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -36,10 +37,13 @@ def get_date(d: dict[str, Any]) -> str | None:
 
 
 def run_batch_daily_analysis(use_aggr: bool = False) -> None:
-    os.makedirs("./content_metrics", exist_ok=True)
+    data_dir = Path.home() / ".zhihu-cli" / "exports"
+    metrics_dir = data_dir / "content_metrics"
+    os.makedirs(metrics_dir, exist_ok=True)
+    assets_file = data_dir / "all_assets_list.json"
 
     try:
-        with open("all_assets_list.json", encoding="utf-8") as f:
+        with open(assets_file, encoding="utf-8") as f:
             answer_ids = json.load(f)
         print(f"📋 已加载 {len(answer_ids)} 个待分析资产（IDs）")
     except FileNotFoundError:
@@ -91,7 +95,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                         }
                     )
 
-                output_file = f"./content_metrics/metrics_full_{token['type']}_{token['id']}.json"
+                output_file = metrics_dir / f"metrics_full_{token['type']}_{token['id']}.json"
                 with open(output_file, "w", encoding="utf-8") as f:
                     json.dump(clean_data, f, indent=4)
 

@@ -22,7 +22,7 @@ from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 def save_headers(headers: dict[str, str]) -> None:
     """保存 Header 到缓存"""
     cache_manager.save_headers(headers)
-    print("✅ Headers 已缓存至 .cache/headers.json")
+    print("✅ Headers cached")
 
 
 def load_headers() -> dict[str, str]:

@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 
 def convert_zhihu_to_assets_format(input_file: str, output_file: str) -> None:
@@ -41,8 +42,8 @@ def convert_zhihu_to_assets_format(input_file: str, output_file: str) -> None:
 
 def main() -> None:
     # Set default file names
-    input_file = "zhihu_user_activities.json"
-    output_file = "all_assets_list.json"
+    input_file = str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_user_activities.json")
+    output_file = str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json")
 
     # Allow command-line arguments for custom file names
     if len(sys.argv) > 1:

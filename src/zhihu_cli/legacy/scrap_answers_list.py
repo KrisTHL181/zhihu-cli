@@ -3,6 +3,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -17,7 +18,7 @@ def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
     if quick_mode:
         headers = cache_manager.load_headers()
         if headers:
-            print("[Success] Loaded cached headers from .cache/headers.json")
+            print("[Success] Loaded cached headers")
             return headers
 
     print("\n--- Please paste cURL from any Zhihu Answers API request ---")
@@ -255,7 +256,7 @@ def fetch_user_answers() -> None:
 
     # --- 保存数据 ---
     if all_answers:
-        output_file = "zhihu_answers.json"
+        output_file = str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_answers.json")
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(all_answers, f, indent=4, ensure_ascii=False)
 

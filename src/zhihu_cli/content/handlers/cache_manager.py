@@ -24,11 +24,11 @@ class CacheManager:
             return
 
         if cache_dir is None:
-            self.cache_dir = Path(__file__).parent.resolve() / ".cache"
+            self.cache_dir = Path.home() / ".zhihu-cli" / "cache"
         else:
             self.cache_dir = Path(cache_dir).resolve()
 
-        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.header_file = self.cache_dir / "headers.json"
         self.content_dir = self.cache_dir / "questions"
         self.content_dir.mkdir(exist_ok=True)
@@ -36,6 +36,8 @@ class CacheManager:
         self.profiles_dir = self.cache_dir / "profiles"
         self.profiles_dir.mkdir(exist_ok=True)
         self.active_profile_file = self.cache_dir / "active_profile"
+
+        self._migrate_old_cache()
 
         self._file_lock = threading.RLock()
         self._initialized = True
@@ -67,6 +69,51 @@ class CacheManager:
 
     def _resolve_profile_path(self, name: str) -> Path:
         return self.profiles_dir / f"{name}.json"
+
+    def _migrate_old_cache(self) -> None:
+        """Migrate cache files from old location (handlers/.cache/) to new (~/.zhihu-cli/cache/)."""
+        old_cache = Path(__file__).parent.resolve() / ".cache"
+        if not old_cache.exists() or old_cache == self.cache_dir:
+            return
+
+        import shutil
+
+        migrated = False
+        # profiles
+        old_profiles = old_cache / "profiles"
+        if old_profiles.is_dir():
+            for f in old_profiles.iterdir():
+                dst = self.profiles_dir / f.name
+                if not dst.exists():
+                    shutil.copy2(f, dst)
+                    migrated = True
+
+        # active_profile
+        old_active = old_cache / "active_profile"
+        if old_active.exists() and not self.active_profile_file.exists():
+            shutil.copy2(old_active, self.active_profile_file)
+            migrated = True
+
+        # questions
+        old_questions = old_cache / "questions"
+        if old_questions.is_dir():
+            for f in old_questions.iterdir():
+                dst = self.content_dir / f.name
+                if not dst.exists():
+                    shutil.copy2(f, dst)
+                    migrated = True
+
+        # legacy headers.json
+        old_headers = old_cache / "headers.json"
+        if old_headers.exists():
+            default_path = self._resolve_profile_path("default")
+            if not default_path.exists():
+                shutil.copy2(old_headers, default_path)
+                migrated = True
+
+        if migrated:
+            # Leave old cache in place as backup; user can delete manually.
+            pass
 
     def _migrate_legacy_headers(self) -> str | None:
         """If old headers.json has data and no profiles exist, migrate to 'default' profile."""

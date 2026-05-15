@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 # 导入已有的下载模块
 from zhihu_cli.content.download_contents import ContentDownloader
@@ -52,11 +53,15 @@ def main() -> None:
         "--input",
         "-i",
         type=str,
-        default="all_assets_list.json",
-        help="all_assets_list.json 文件路径 (默认: all_assets_list.json)",
+        default=str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json"),
+        help="all_assets_list.json file path",
     )
     parser.add_argument(
-        "--output-dir", "-o", type=str, default="./downloads/answers", help="输出目录 (默认: ./downloads/answers)"
+        "--output-dir",
+        "-o",
+        type=str,
+        default=str(Path.home() / ".zhihu-cli" / "downloads" / "answers"),
+        help="Output directory",
     )
     parser.add_argument("--delay", "-d", type=float, default=1.0, help="请求间隔秒数 (默认: 1.0)")
     parser.add_argument("--no-cache-headers", action="store_true", help="不使用缓存的 headers，强制重新粘贴 cURL")

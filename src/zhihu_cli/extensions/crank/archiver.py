@@ -27,8 +27,9 @@ from zhihu_cli.content.universal_converter import convert_items
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 
-HALL_OF_FLAMES_ROOT = os.path.expanduser("~/Zhihu-Hall-of-Flames")
-SERIAL_PAPERS_DIR = os.path.join(HALL_OF_FLAMES_ROOT, "连环论文 | the paper of continuum")
+CRANK_DIR = str(Path.home() / ".zhihu-cli" / "crank")
+HALL_OF_FLAMES_ROOT = CRANK_DIR
+SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
 
 # ── article list scraping ──────────────────────────────────────────────────
 

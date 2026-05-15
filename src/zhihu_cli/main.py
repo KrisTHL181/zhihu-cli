@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename
-from zhihu_cli.content.handlers import get_type_and_id
+from zhihu_cli.content.handlers import get_data_dir, get_type_and_id
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.chat import get_inbox, iter_chat_history, send_text_message
@@ -248,7 +248,7 @@ def download() -> None:
 
 @download.command("article")
 @click.argument("url")
-@click.option("--output-dir", "-o", default="./downloads/articles", help="Output directory")
+@click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "articles"), help="Output directory")
 def download_article(url: str, output_dir: str) -> None:
     """Download a single Zhihu article as Markdown."""
     metadata, markdown = scrape_article(url)
@@ -259,7 +259,7 @@ def download_article(url: str, output_dir: str) -> None:
 
 @download.command("question")
 @click.argument("url")
-@click.option("--output-dir", "-o", default="./downloads/questions", help="Output directory")
+@click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "questions"), help="Output directory")
 def download_question(url: str, output_dir: str) -> None:
     """Download a Zhihu question and all its answers as Markdown."""
     q_meta, q_detail_md = scrape_question_data(url)
@@ -286,7 +286,7 @@ def download_question(url: str, output_dir: str) -> None:
 
 @download.command("pin")
 @click.argument("url")
-@click.option("--output-dir", "-o", default="./downloads/pins", help="Output directory")
+@click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "pins"), help="Output directory")
 def download_pin(url: str, output_dir: str) -> None:
     """Download a single Zhihu pin (想法) as Markdown."""
     metadata, markdown = scrape_pin(url)
@@ -296,8 +296,14 @@ def download_pin(url: str, output_dir: str) -> None:
 
 
 @download.command("batch-answers")
-@click.option("--input", "-i", "input_file", default="all_assets_list.json", help="Assets JSON file")
-@click.option("--output-dir", "-o", default="./downloads/answers", help="Output directory")
+@click.option(
+    "--input",
+    "-i",
+    "input_file",
+    default=str(get_data_dir() / "exports" / "all_assets_list.json"),
+    help="Assets JSON file",
+)
+@click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "answers"), help="Output directory")
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests (seconds)")
 @click.option("--no-cache-headers", is_flag=True, help="Force re-paste of cURL")
 def download_batch_answers(input_file: str, output_dir: str, delay: float, no_cache_headers: bool) -> None:
@@ -322,8 +328,14 @@ def download_batch_answers(input_file: str, output_dir: str, delay: float, no_ca
 
 
 @download.command("batch-articles")
-@click.option("--input", "-i", "input_file", default="all_assets_list.json", help="Assets JSON file")
-@click.option("--output-dir", "-o", default="./downloads/articles", help="Output directory")
+@click.option(
+    "--input",
+    "-i",
+    "input_file",
+    default=str(get_data_dir() / "exports" / "all_assets_list.json"),
+    help="Assets JSON file",
+)
+@click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "articles"), help="Output directory")
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests (seconds)")
 @click.option("--no-cache-headers", is_flag=True, help="Force re-paste of cURL")
 def download_batch_articles(input_file: str, output_dir: str, delay: float, no_cache_headers: bool) -> None:
@@ -763,7 +775,9 @@ def scrape() -> None:
 
 
 @scrape.command("creations")
-@click.option("--output", "-o", default="all_assets_list.json", help="Output JSON file")
+@click.option(
+    "--output", "-o", default=str(get_data_dir() / "exports" / "all_assets_list.json"), help="Output JSON file"
+)
 def scrape_creations(output: str) -> None:
     """Fetch all user creation IDs (answers, articles, pins) → JSON."""
 
@@ -883,21 +897,25 @@ def _generic_list_scrape(api_description: str, output_file: str) -> None:
 
 
 @scrape.command("activities")
-@click.option("--output", "-o", default="zhihu_user_activities.json", help="Output JSON file")
+@click.option(
+    "--output", "-o", default=str(get_data_dir() / "exports" / "zhihu_user_activities.json"), help="Output JSON file"
+)
 def scrape_activities(output: str) -> None:
     """Fetch user activity feed → JSON. Requires pasting the activities API cURL."""
     _generic_list_scrape("activities", output)
 
 
 @scrape.command("answers")
-@click.option("--output", "-o", default="zhihu_answers.json", help="Output JSON file")
+@click.option("--output", "-o", default=str(get_data_dir() / "exports" / "zhihu_answers.json"), help="Output JSON file")
 def scrape_answers_list(output: str) -> None:
     """Fetch user's answer list → JSON. Requires pasting the answers API cURL."""
     _generic_list_scrape("answers list", output)
 
 
 @scrape.command("articles")
-@click.option("--output", "-o", default="zhihu_articles.json", help="Output JSON file")
+@click.option(
+    "--output", "-o", default=str(get_data_dir() / "exports" / "zhihu_articles.json"), help="Output JSON file"
+)
 def scrape_articles_list(output: str) -> None:
     """Fetch user's article list → JSON. Requires pasting the articles API cURL."""
     _generic_list_scrape("articles list", output)
@@ -913,7 +931,7 @@ def convert() -> None:
 
 @convert.command("universal")
 @click.argument("inputs", nargs=-1, required=True)
-@click.option("--output", "-o", default="all_assets_list.json", help="Output file")
+@click.option("--output", "-o", default=str(get_data_dir() / "exports" / "all_assets_list.json"), help="Output file")
 @click.option("--type", "-t", "forced_type", default=None, help="Force a specific type")
 def convert_universal(inputs: tuple[str, ...], output: str, forced_type: str | None) -> None:
     """Normalize multiple JSON export files into a unified assets list."""
@@ -932,8 +950,8 @@ def convert_universal(inputs: tuple[str, ...], output: str, forced_type: str | N
 
 
 @convert.command("user-act")
-@click.argument("input_file", default="zhihu_user_activities.json")
-@click.argument("output_file", default="all_assets_list.json")
+@click.argument("input_file", default=str(get_data_dir() / "exports" / "zhihu_user_activities.json"))
+@click.argument("output_file", default=str(get_data_dir() / "exports" / "all_assets_list.json"))
 def convert_user_act(input_file: str, output_file: str) -> None:
     """Convert zhihu_user_activities.json to all_assets_list.json format."""
     if not os.path.exists(input_file):
@@ -1002,7 +1020,13 @@ def income_fetch() -> None:
 
 
 @tools_income.command("monthly")
-@click.option("--file", "-f", "file_path", default="zhihu_income_report.json", help="Income report JSON")
+@click.option(
+    "--file",
+    "-f",
+    "file_path",
+    default=str(get_data_dir() / "exports" / "zhihu_income_report.json"),
+    help="Income report JSON",
+)
 def income_monthly(file_path: str) -> None:
     """Print monthly income summary table."""
     from zhihu_cli.money_tools.analyze_monthly_income import analyze_monthly_income
@@ -1016,7 +1040,7 @@ def income_plot() -> None:
     from zhihu_cli.money_tools.plot_zhihu_incomes import plot_analysis
 
     plot_analysis()
-    click.echo("Saved income_analysis.png")
+    click.echo(f"Saved {get_data_dir() / 'plots' / 'income_analysis.png'}")
 
 
 @tools_income.command("advanced")
@@ -1025,7 +1049,7 @@ def income_advanced() -> None:
     from zhihu_cli.money_tools.plot_zhihu_incomes_advanced import plot_advanced_analysis
 
     plot_advanced_analysis()
-    click.echo("Saved income_advanced_analysis.png")
+    click.echo(f"Saved {get_data_dir() / 'plots' / 'income_advanced_analysis.png'}")
 
 
 @tools_income.command("derivative")
@@ -1034,7 +1058,7 @@ def income_derivative() -> None:
     from zhihu_cli.money_tools.derivative_analysis import plot_derivative_analysis
 
     plot_derivative_analysis()
-    click.echo("Saved derivative_analysis.png")
+    click.echo(f"Saved {get_data_dir() / 'plots' / 'derivative_analysis.png'}")
 
 
 @tools_income.command("weekday")
@@ -1043,7 +1067,7 @@ def income_weekday() -> None:
     from zhihu_cli.money_tools.weekday_income_analysis import plot_weekday_analysis
 
     plot_weekday_analysis()
-    click.echo("Saved weekday_income_analysis.png")
+    click.echo(f"Saved {get_data_dir() / 'plots' / 'weekday_income_analysis.png'}")
 
 
 @tools_income.command("metrics")
@@ -1061,7 +1085,7 @@ def tools_nlp() -> None:
 
 
 @tools_nlp.command("count")
-@click.option("--folder", default="./downloads/answers", help="Folder with Markdown files")
+@click.option("--folder", default=str(get_data_dir() / "downloads" / "answers"), help="Folder with Markdown files")
 @click.option("--no-code", is_flag=True, help="Exclude code blocks")
 def nlp_count(folder: str, no_code: bool) -> None:
     """Count words in downloaded Markdown files."""
@@ -1085,7 +1109,7 @@ def nlp_count(folder: str, no_code: bool) -> None:
 
 
 @tools_nlp.command("wordcloud")
-@click.option("--source-dir", default="./downloads", help="Directory with Markdown files")
+@click.option("--source-dir", default=str(get_data_dir() / "downloads"), help="Directory with Markdown files")
 @click.option("--topk", type=int, default=200, help="Top K keywords")
 @click.option("--only-print", is_flag=True, help="Only print keywords, skip image generation")
 def nlp_wordcloud(source_dir: str, topk: int, only_print: bool) -> None:
@@ -1096,8 +1120,8 @@ def nlp_wordcloud(source_dir: str, topk: int, only_print: bool) -> None:
 
 
 @tools_nlp.command("cluster")
-@click.option("--source-dir", default="./downloads", help="Directory with Markdown files")
-@click.option("--output", "-o", default="zhihu_clusters.png", help="Output image")
+@click.option("--source-dir", default=str(get_data_dir() / "downloads"), help="Directory with Markdown files")
+@click.option("--output", "-o", default=str(get_data_dir() / "plots" / "zhihu_clusters.png"), help="Output image")
 @click.option("--n-clusters", type=int, default=8, help="Number of clusters")
 @click.option("--n-terms", type=int, default=10, help="Top terms per cluster")
 @click.option("--mode", type=click.Choice(["pca", "tsne", "hybrid"]), default="pca", help="Dimensionality reduction")

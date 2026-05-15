@@ -3,6 +3,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from curl_cffi.requests.exceptions import Timeout as RequestsTimeout
@@ -16,7 +17,7 @@ def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
     if quick_mode:
         headers = cache_manager.load_headers()
         if headers:
-            print("[Success] Loaded cached headers from .cache/headers.json")
+            print("[Success] Loaded cached headers")
             return headers
 
     print("\n--- Please paste cURL from any Zhihu Articles API request ---")
@@ -251,7 +252,7 @@ def fetch_user_articles() -> None:
 
     # --- 保存数据 ---
     if all_articles:
-        output_file = "zhihu_articles.json"
+        output_file = str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_articles.json")
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(all_articles, f, indent=4, ensure_ascii=False)
 

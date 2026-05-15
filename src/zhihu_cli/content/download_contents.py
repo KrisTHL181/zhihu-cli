@@ -6,6 +6,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 
@@ -95,12 +96,14 @@ def sanitize_filename(name: str) -> str:
 class ContentDownloader:
     """知乎内容下载器"""
 
-    def __init__(self, output_dir: str = "./downloads") -> None:
+    def __init__(self, output_dir: str | None = None) -> None:
         """
         初始化下载器
         Args:
             output_dir: 输出目录
         """
+        if output_dir is None:
+            output_dir = str(Path.home() / ".zhihu-cli" / "downloads")
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -117,7 +120,7 @@ class ContentDownloader:
             headers = cache_manager.load_headers()
             if headers:
                 self.headers = headers
-                print("[Success] Loaded cached headers from .cache/headers.json")
+                print("[Success] Loaded cached headers")
                 return True
 
         print("--- 请粘贴【获取文章页面】的 cURL 命令 ---")
@@ -493,7 +496,9 @@ def main() -> None:
     )
     parser.add_argument("--download-answers", nargs="+", metavar="URL", help="下载回答页面")
     parser.add_argument("--download-pins", nargs="+", metavar="URL", help="下载想法页面")
-    parser.add_argument("--output-dir", type=str, default="./downloads", help="输出目录 (默认：./downloads)")
+    parser.add_argument(
+        "--output-dir", type=str, default=str(Path.home() / ".zhihu-cli" / "downloads"), help="Output directory"
+    )
 
     args = parser.parse_args()
 

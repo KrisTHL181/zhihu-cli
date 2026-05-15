@@ -1,5 +1,14 @@
 import re
 from datetime import datetime
+from pathlib import Path
+
+
+def get_data_dir() -> Path:
+    """Return ~/.zhihu-cli/ data directory, creating it if needed."""
+    data_dir = Path.home() / ".zhihu-cli"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
 
 ZHIHU_ARTICLE_PATTERN = r"https?://zhuanlan\.zhihu\.com/p/(\d+)"
 ZHIHU_QUESTION_PATTERN = r"https?://(?:www\.)?zhihu\.com/question/(\d+)"

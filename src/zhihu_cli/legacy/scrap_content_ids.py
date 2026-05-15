@@ -2,6 +2,7 @@ import json
 import re
 import sys
 import time
+from pathlib import Path
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
@@ -12,7 +13,7 @@ def load_headers(quick_mode: bool = False) -> dict[str, str] | None:
     if quick_mode:
         headers = cache_manager.load_headers()
         if headers:
-            print("[Success] Loaded cached headers from .cache/headers.json")
+            print("[Success] Loaded cached headers")
             return headers
 
     print("\n--- Please paste cURL from any Zhihu Article Page ---")
@@ -115,7 +116,7 @@ def fetch_all_creation_assets() -> list[dict[str, str]] | None:
         for a in all_assets:
             stats[a["type"]] = stats.get(a["type"], 0) + 1
 
-        output_file = "all_assets_list.json"
+        output_file = str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json")
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(all_assets, f, indent=4, ensure_ascii=False)
 

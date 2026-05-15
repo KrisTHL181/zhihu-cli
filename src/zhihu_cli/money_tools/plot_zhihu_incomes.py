@@ -1,13 +1,19 @@
 import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+DATA_DIR = Path.home() / ".zhihu-cli"
+INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
+OUTPUT_FILE = DATA_DIR / "plots" / "income_analysis.png"
+
 
 def plot_analysis() -> None:
     try:
-        with open("zhihu_income_report.json", encoding="utf-8") as f:
+        OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(INPUT_FILE, encoding="utf-8") as f:
             data = json.load(f)
 
         # 转换数据为 Pandas DataFrame
@@ -59,7 +65,7 @@ def plot_analysis() -> None:
         )
 
         plt.tight_layout()
-        plt.savefig("income_analysis.png", dpi=500, bbox_inches="tight")
+        plt.savefig(OUTPUT_FILE, dpi=500, bbox_inches="tight")
         plt.show()
 
     except Exception as e:

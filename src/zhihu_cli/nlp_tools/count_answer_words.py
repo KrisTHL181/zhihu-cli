@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,7 +29,11 @@ def count_words(filepath: str, no_code: bool = False) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Count words in Markdown files")
-    parser.add_argument("--folder", default="./downloads/answers", help="Folder containing Markdown files")
+    parser.add_argument(
+        "--folder",
+        default=str(Path.home() / ".zhihu-cli" / "downloads" / "answers"),
+        help="Folder containing Markdown files",
+    )
     parser.add_argument("--no-code", action="store_true", help="Only count text, ignore code blocks")
     args = parser.parse_args()
 

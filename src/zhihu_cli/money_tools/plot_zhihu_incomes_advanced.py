@@ -1,12 +1,18 @@
 import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
+DATA_DIR = Path.home() / ".zhihu-cli"
+INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
+OUTPUT_FILE = DATA_DIR / "plots" / "income_advanced_analysis.png"
+
 
 def plot_advanced_analysis() -> None:
     try:
-        with open("zhihu_income_report.json", encoding="utf-8") as f:
+        OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(INPUT_FILE, encoding="utf-8") as f:
             data = json.load(f)
 
         # 1. 数据准备
@@ -78,7 +84,7 @@ def plot_advanced_analysis() -> None:
         )
 
         plt.tight_layout()
-        plt.savefig("income_advanced_analysis.png", dpi=300, bbox_inches="tight")
+        plt.savefig(OUTPUT_FILE, dpi=300, bbox_inches="tight")
         print("✅ 高级分析图表已生成: income_advanced_analysis.png")
         plt.show()
 
