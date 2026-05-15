@@ -21,6 +21,7 @@ from zhihu_cli.content.handlers.collection import (
     delete_to_collection,
 )
 from zhihu_cli.content.handlers.comments import comment_item, delete_comment, print_comments
+from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
 from zhihu_cli.content.handlers.people import block, follow, unblock, unfollow
 from zhihu_cli.content.handlers.pin import scrape_pin
@@ -947,6 +948,29 @@ def convert_user_act(input_file: str, output_file: str) -> None:
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(converted, f, ensure_ascii=False, indent=2)
     click.echo(f"Converted {len(converted)} items → {output_file}")
+
+
+@convert.command("draft")
+@click.argument("url")
+@click.option("--output", "-o", default=None, help="Save Markdown to file instead of printing")
+def convert_draft(url: str, output: str | None) -> None:
+    """Convert the latest draft of a Zhihu question/answer to Markdown.
+
+    Provide a Zhihu question URL (e.g. https://www.zhihu.com/question/123456)
+    to fetch and convert your unpublished draft to Markdown.
+    """
+    try:
+        metadata, markdown = draft_to_markdown(url)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(markdown)
+        click.echo(f"Draft saved to {output}")
+    else:
+        click.echo(markdown)
 
 
 # ── extensions ────────────────────────────────────────────────────────────
