@@ -1,36 +1,19 @@
 """Draft history listing and draft-to-markdown conversion."""
 
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 from zhihu_cli.content.handlers import fmt_time, get_type_and_id
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.html2markdown import converter
-from zhihu_cli.content.utils.zse import ZSECipher
 
 DRAFT_HISTORIES_URL = "https://www.zhihu.com/api/v4/draft-histories"
 DRAFT_URL = "https://www.zhihu.com/api/v4/draft-history"
 
 
-def _zse_sign(url: str) -> dict[str, str]:
-    """Generate x-zse signing headers for a Zhihu API request."""
-    parsed = urlparse(url)
-    path_and_query = parsed.path
-    if parsed.query:
-        path_and_query += "?" + parsed.query
-
-    cipher = ZSECipher()
-    signature = cipher.encrypt(path_and_query)
-
-    return {
-        "x-zse-93": "101_3_3.0",
-        "x-zse-96": f"2.0_{signature}",
-    }
-
-
 def list_drafts(object_type: str, object_id: str) -> list[dict]:
     """List draft histories for a question/answer/article."""
     url = f"{DRAFT_HISTORIES_URL}?{urlencode({'object_type': object_type, 'object_id': object_id})}"
-    resp = session.get(url, headers=_zse_sign(url))
+    resp = session.get(url)
     resp.raise_for_status()
     return resp.json().get("data", [])
 
@@ -38,7 +21,7 @@ def list_drafts(object_type: str, object_id: str) -> list[dict]:
 def get_draft(draft_id: str, version_type: str = "current") -> dict:
     """Get a specific draft by ID."""
     url = f"{DRAFT_URL}?{urlencode({'version_type': version_type, 'id': draft_id})}"
-    resp = session.get(url, headers=_zse_sign(url))
+    resp = session.get(url)
     resp.raise_for_status()
     return resp.json()
 
