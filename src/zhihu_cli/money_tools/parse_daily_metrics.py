@@ -1,0 +1,132 @@
+import csv
+import json
+import os
+import time
+from datetime import datetime, timedelta
+from io import StringIO
+from pathlib import Path
+from typing import Any
+
+from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
+
+DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "daily_metrics.json")
+DEFAULT_START_DATE: str = "2026-01-06"
+DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/daily"
+
+
+def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+                details = data.get("details", [])
+                if details:
+                    last_date_str = max(item["date"] for item in details)
+                    last_dt = datetime.strptime(last_date_str, "%Y-%m-%d")
+                    next_start = last_dt + timedelta(days=1)
+                    return details, next_start
+        except Exception as e:
+            print(f"[!] 读取旧文件失败: {e}，将重新抓取")
+
+    return [], datetime.strptime(DEFAULT_START_DATE, "%Y-%m-%d")
+
+
+def run_task() -> None:
+    existing_details, start_dt = load_existing_data()
+    end_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if start_dt >= end_dt:
+        print(f"✅ 数据已是最新 (最后记录: {start_dt - timedelta(days=1)})，无需更新。")
+        return
+
+    headers = cache_manager.load_headers()
+    if not headers:
+        print("❌ 未找到缓存的鉴权凭证，请先运行: zhihu auth paste")
+        return
+    headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
+
+    print(f"--- 增量模式：将从 {start_dt.strftime('%Y-%m-%d')} 开始抓取 ---")
+
+    new_records: list[dict[str, Any]] = []
+
+    current_dt = start_dt
+    while current_dt < end_dt:
+        batch_end = min(current_dt + timedelta(days=30), end_dt - timedelta(days=1))
+        if batch_end < current_dt:
+            batch_end = current_dt
+
+        params = {
+            "tab": "all",
+            "start": current_dt.strftime("%Y-%m-%d"),
+            "end": batch_end.strftime("%Y-%m-%d"),
+            "format": "csv",
+        }
+
+        print(f"\n[任务] 抓取中: {params['start']} -> {params['end']}")
+
+        try:
+            resp = session.get(DAILY_URL, headers=headers, params=params, timeout=15)
+
+            if resp.status_code == 200 and resp.text.strip():
+                f = StringIO(resp.text.strip())
+                reader = csv.reader(f)
+
+                count = 0
+                for row in reader:
+                    if not row or "日期" in row[0]:
+                        continue
+
+                    new_records.append(
+                        {
+                            "date": row[0],
+                            "views": int(row[1]) if len(row) > 1 else 0,
+                            "plays": int(row[2]) if len(row) > 2 else 0,
+                            "likes": int(row[3]) if len(row) > 3 else 0,
+                            "hearts": int(row[4]) if len(row) > 4 else 0,
+                            "comments": int(row[5]) if len(row) > 5 else 0,
+                            "collects": int(row[6]) if len(row) > 6 else 0,
+                            "shares": int(row[7]) if len(row) > 7 else 0,
+                        }
+                    )
+                    count += 1
+                print(f"  [成功] 新提取 {count} 天数据")
+            else:
+                print(f"  [跳过] 状态码: {resp.status_code}，可能该时段无数据")
+
+        except Exception as e:
+            print(f"  [异常] {e}")
+
+        if batch_end >= end_dt - timedelta(days=1):
+            break
+        current_dt = batch_end + timedelta(days=1)
+        time.sleep(1.5)
+
+    all_details = existing_details + new_records
+    unique_data = {item["date"]: item for item in all_details}
+    sorted_details = sorted(unique_data.values(), key=lambda x: x["date"], reverse=True)
+
+    if new_records or existing_details:
+        output = {
+            "summary": {
+                "total_days": len(sorted_details),
+                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            "details": sorted_details,
+        }
+
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(output, f, ensure_ascii=False, indent=4)
+
+        print("\n" + "=" * 40)
+        print("✅ 更新完成！")
+        print(f"📈 新增天数: {len(new_records)} 天")
+        print(f"📊 总计天数: {len(sorted_details)} 天")
+        print(f"📁 文件已同步: {DB_FILE}")
+        print("=" * 40)
+    else:
+        print("\n[!] 未能获取任何新数据。")
+
+
+if __name__ == "__main__":
+    run_task()
