@@ -39,7 +39,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_answer,
     upvote_question,
 )
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.extensions import discover_extensions
 
@@ -138,6 +138,36 @@ def auth_paste(profile_name: str | None) -> None:
     cache_manager.save_headers(headers, profile_name=profile_name)
     active = cache_manager.get_active_profile() or "default"
     click.echo(f"Saved {len(headers)} headers to profile '{active}'")
+
+
+@auth.command("login")
+@click.option("--profile", "-p", "profile_name", default=None, help="Save to a named profile")
+def auth_login(profile_name: str | None) -> None:
+    """Login to Zhihu via QR code. Scan with the Zhihu App to authenticate.
+
+    Displays a QR code in the terminal. Open the Zhihu App, go to
+    \033[2mMy → Settings → Scan\033[0m, and scan the code to log in.
+
+    This generates fresh cookies and saves them as a profile, so you
+    don't need to manually paste cURL headers.
+    """
+    from zhihu_cli.content.handlers.auth_login import qr_login
+
+    click.echo("Starting QR code login...")
+    try:
+        headers = qr_login()
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+    if not headers:
+        click.echo("Login failed.", err=True)
+        raise SystemExit(1)
+
+    cache_manager.save_headers(headers, profile_name=profile_name)
+    active = cache_manager.get_active_profile() or "default"
+    click.echo(f"Saved credentials to profile '{active}'")
+    reload_session()
 
 
 @auth.command("status")
