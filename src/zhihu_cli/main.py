@@ -40,6 +40,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_question,
 )
 from zhihu_cli.content.handlers.requests import reload_session, session
+from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.extensions import discover_extensions
 
@@ -472,6 +473,87 @@ def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: boo
         click.echo(f"Saved {len(items)} items to {output}")
     elif not verbose:
         click.echo(f"Fetched {len(items)} items (use --verbose to print, --output to save)")
+
+
+# ── search ────────────────────────────────────────────────────────────────
+
+
+@main.group()
+def search() -> None:
+    """Search Zhihu for questions, articles, users, and topics."""
+
+
+@search.command("question")
+@click.argument("query")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+def search_question_cmd(query: str, limit: int, max_items: int | None) -> None:
+    """Search Zhihu questions by keyword."""
+    items = search_questions(query, limit=limit, max_items=max_items)
+    for i, q in enumerate(items, 1):
+        click.echo(f"[{i}] {q['title']}")
+        click.echo(f"    {q['answer_count']} answers  {q['follower_count']} followers")
+        click.echo(f"    updated: {q['updated_time']}")
+        click.echo(f"    {q['url']}")
+        click.echo()
+    if not items:
+        click.echo(f"No questions found for '{query}'.")
+
+
+@search.command("article")
+@click.argument("query")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+def search_article_cmd(query: str, limit: int, max_items: int | None) -> None:
+    """Search Zhihu articles by keyword."""
+    items = search_articles(query, limit=limit, max_items=max_items)
+    for i, a in enumerate(items, 1):
+        click.echo(f"[{i}] {a['title']}")
+        click.echo(f"    by {a['author']['name']}  {a['voteup_count']} upvotes")
+        if a["excerpt"]:
+            click.echo(f"    {a['excerpt'][:120]}")
+        click.echo(f"    {a['created_time']}")
+        click.echo(f"    {a['url']}")
+        click.echo()
+    if not items:
+        click.echo(f"No articles found for '{query}'.")
+
+
+@search.command("user")
+@click.argument("query")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+def search_user_cmd(query: str, limit: int, max_items: int | None) -> None:
+    """Search Zhihu users by keyword."""
+    items = search_users(query, limit=limit, max_items=max_items)
+    for i, u in enumerate(items, 1):
+        click.echo(f"[{i}] {u['name']}  ({u['gender']})")
+        if u["headline"]:
+            click.echo(f"    {u['headline']}")
+        click.echo(f"    {u['follower_count']} followers  {u['answer_count']} answers  {u['articles_count']} articles")
+        click.echo(f"    {u['url']}")
+        click.echo()
+    if not items:
+        click.echo(f"No users found for '{query}'.")
+
+
+@search.command("topic")
+@click.argument("query")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+def search_topic_cmd(query: str, limit: int, max_items: int | None) -> None:
+    """Search Zhihu topics by keyword."""
+    items = search_topics(query, limit=limit, max_items=max_items)
+    for i, t in enumerate(items, 1):
+        click.echo(f"[{i}] {t['name']}")
+        intro = t["introduction"] or t["excerpt"]
+        if intro:
+            click.echo(f"    {intro[:120]}")
+        click.echo(f"    {t['questions_count']} questions  {t['followers_count']} followers")
+        click.echo(f"    {t['url']}")
+        click.echo()
+    if not items:
+        click.echo(f"No topics found for '{query}'.")
 
 
 # ── interact ─────────────────────────────────────────────────────────────
