@@ -23,6 +23,7 @@ from zhihu_cli.content.handlers.collection import (
 from zhihu_cli.content.handlers.comments import comment_item, delete_comment, print_comments
 from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
+from zhihu_cli.content.handlers.hot import fetch_hot_list
 from zhihu_cli.content.handlers.people import block, follow, unblock, unfollow
 from zhihu_cli.content.handlers.pin import scrape_pin
 from zhihu_cli.content.handlers.publishing import modify_answer, modify_article, publish_answer, publish_article
@@ -473,6 +474,56 @@ def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: boo
         click.echo(f"Saved {len(items)} items to {output}")
     elif not verbose:
         click.echo(f"Fetched {len(items)} items (use --verbose to print, --output to save)")
+
+
+@browse.command("hot")
+@click.option("--limit", "-n", type=int, default=30, help="Number of hot items to show (default: 30)")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+@click.option("--verbose", "-v", is_flag=True, help="Show excerpt and details")
+def browse_hot(limit: int, output: str, verbose: bool) -> None:
+    """View the Zhihu real-time hot list (热榜)."""
+    items = fetch_hot_list(limit=50)
+
+    if limit and len(items) > limit:
+        items = items[:limit]
+
+    for i, item in enumerate(items, 1):
+        title = item["title"] or "(no title)"
+        heat = item["heat"]
+        ttype = item["target_type"]
+        url = item["url"]
+        card_label = item["card_label"]
+        answer_count = item["answer_count"]
+        follower_count = item["follower_count"]
+
+        label_str = f" [{card_label}]" if card_label else ""
+        click.echo(f"[{i}] {heat}{label_str}  {ttype}")
+        click.echo(f"    {title}")
+        if verbose:
+            excerpt = item["excerpt"]
+            if excerpt:
+                click.echo(f"    preview: {excerpt[:200]}")
+            author = item["author"]
+            if author and author != "用户":
+                click.echo(f"    author: {author}")
+        if answer_count or follower_count:
+            parts = []
+            if answer_count:
+                parts.append(f"{answer_count} 回答")
+            if follower_count:
+                parts.append(f"{follower_count} 关注")
+            click.echo(f"    {'  '.join(parts)}")
+        if url:
+            click.echo(f"    {url}")
+        click.echo()
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        click.echo(f"Saved {len(items)} items to {output}")
+
+    if not items:
+        click.echo("No hot items found. Try logging in first: zhihu auth login")
 
 
 # ── search ────────────────────────────────────────────────────────────────
