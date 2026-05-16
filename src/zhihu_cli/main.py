@@ -386,10 +386,11 @@ def browse_answers(url: str, reading_mode: bool) -> None:
     question_md = f"# {q_meta['title']}\n\n{q_detail_md}"
     if reading_mode:
         console = Console()
-        console.print(Markdown(question_md))
-        for i, ans in enumerate(answers, 1):
-            console.print(f"\n--- Answer {i} by {ans['author']} (+{ans['vote']}) ---")
-            console.print(Markdown(ans["content"]))
+        with console.pager(styles=True, links=True):
+            console.print(Markdown(question_md))
+            for i, ans in enumerate(answers, 1):
+                console.print(f"\n--- Answer {i} by {ans['author']} (+{ans['vote']}) ---")
+                console.print(Markdown(ans["content"]))
     else:
         click.echo(question_md)
         for i, ans in enumerate(answers, 1):
