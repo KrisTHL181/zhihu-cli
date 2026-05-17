@@ -36,19 +36,96 @@ def get_date(d: dict[str, Any]) -> str | None:
     return None
 
 
+def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
+    """Scrape all user creations and save to output_path. Returns the asset list."""
+    headers = cache_manager.load_headers()
+    if not headers:
+        print("❌ 未找到鉴权凭证，请先运行: zhihu auth paste")
+        return []
+
+    base_url = "https://www.zhihu.com/api/v4/creations/all"
+    all_assets: list[dict[str, str]] = []
+    offset = 0
+    limit = 20
+
+    print("🔍 正在扫描你的知乎创作内容...")
+    while True:
+        params = {
+            "start": 0,
+            "end": 0,
+            "limit": limit,
+            "offset": offset,
+            "need_co_creation": 1,
+            "sort_type": "created",
+        }
+        try:
+            resp = session.get(base_url, headers=headers, params=params, timeout=15)
+            if resp.status_code != 200:
+                print(f"  ⚠️ HTTP {resp.status_code}，已中断")
+                break
+
+            data = resp.json()
+            for item in data.get("data", []):
+                asset_type = item.get("type")
+                asset_id = item.get("data", {}).get("id")
+                if asset_id and asset_type in ("answer", "pin", "article"):
+                    all_assets.append(
+                        {
+                            "id": asset_id,
+                            "type": asset_type,
+                            "title": item.get("data", {}).get("title", ""),
+                        }
+                    )
+
+            paging = data.get("paging", {})
+            totals = paging.get("totals", 0)
+            offset += limit
+            print(f"  {min(offset, totals)}/{totals} — 已收集 {len(all_assets)} 条")
+
+            if paging.get("is_end", True) or offset >= totals:
+                break
+        except Exception as e:
+            print(f"  ⚠️ 异常: {e}")
+            break
+        time.sleep(1.2)
+
+    os.makedirs(output_path.parent, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(all_assets, f, ensure_ascii=False, indent=2)
+    print(f"✅ 已保存 {len(all_assets)} 条资产 → {output_path}")
+    return all_assets
+
+
 def run_batch_daily_analysis(use_aggr: bool = False) -> None:
     data_dir = Path.home() / ".zhihu-cli" / "exports"
     metrics_dir = data_dir / "content_metrics"
     os.makedirs(metrics_dir, exist_ok=True)
     assets_file = data_dir / "all_assets_list.json"
 
-    try:
+    answer_ids = []
+    if assets_file.exists():
         with open(assets_file, encoding="utf-8") as f:
             answer_ids = json.load(f)
-        print(f"📋 已加载 {len(answer_ids)} 个待分析资产（IDs）")
-    except FileNotFoundError:
-        print("❌ 错误：找不到 all_assets_list.json，请先运行资产盘点脚本。")
-        return
+        print(f"📋 已加载 {len(answer_ids)} 个待分析资产")
+    else:
+        print("❌ 找不到 all_assets_list.json")
+        print("   这个文件是你知乎创作内容的资产清单，metrics 命令通过它知道要分析哪些内容。")
+        print()
+        try:
+            choice = input("  ▶ 是否现在自动生成？[Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if choice in ("", "y", "yes"):
+            print()
+            answer_ids = generate_assets_file(assets_file)
+            if not answer_ids:
+                return
+        else:
+            print()
+            print("  请手动运行: zhihu scrape creations")
+            print("  生成后再执行: zhihu tools income metrics")
+            return
 
     headers = cache_manager.load_headers()
     if not headers:

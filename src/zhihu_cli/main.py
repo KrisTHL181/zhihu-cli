@@ -944,50 +944,9 @@ def scrape() -> None:
 )
 def scrape_creations(output: str) -> None:
     """Fetch all user creation IDs (answers, articles, pins) → JSON."""
+    from zhihu_cli.money_tools.parse_content_datas import generate_assets_file
 
-    headers = cache_manager.load_headers()
-    if not headers:
-        click.echo("No cached headers. Run 'zhihu auth paste' first.", err=True)
-        raise SystemExit(1)
-
-    base_url = "https://www.zhihu.com/api/v4/creations/all"
-    all_assets: list[dict[str, str]] = []
-    offset = 0
-    limit = 20
-
-    click.echo("Scanning creations...")
-    while True:
-        params = {"start": 0, "end": 0, "limit": limit, "offset": offset, "need_co_creation": 1, "sort_type": "created"}
-        try:
-            resp = session.get(base_url, headers=headers, params=params, timeout=15)
-            if resp.status_code != 200:
-                click.echo(f"Error: HTTP {resp.status_code}", err=True)
-                break
-
-            data = resp.json()
-            for item in data.get("data", []):
-                asset_type = item.get("type")
-                asset_id = item.get("data", {}).get("id")
-                if asset_id and asset_type in ("answer", "pin", "article"):
-                    all_assets.append(
-                        {"id": asset_id, "type": asset_type, "title": item.get("data", {}).get("title", "")}
-                    )
-
-            paging = data.get("paging", {})
-            totals = paging.get("totals", 0)
-            offset += limit
-            click.echo(f"  {min(offset, totals)}/{totals} — collected {len(all_assets)}")
-
-            if paging.get("is_end", True) or offset >= totals:
-                break
-        except Exception as e:
-            click.echo(f"Error: {e}", err=True)
-            break
-        time.sleep(1.2)
-
-    with open(output, "w", encoding="utf-8") as f:
-        json.dump(all_assets, f, ensure_ascii=False, indent=2)
-    click.echo(f"Saved {len(all_assets)} assets to {output}")
+    generate_assets_file(Path(output))
 
 
 def _generic_list_scrape(api_description: str, output_file: str) -> None:
