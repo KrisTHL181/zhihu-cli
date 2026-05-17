@@ -526,6 +526,48 @@ def browse_hot(limit: int, output: str, verbose: bool) -> None:
         click.echo("No hot items found. Try logging in first: zhihu auth login")
 
 
+@browse.command("notifications")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+@click.option("--verbose", "-v", is_flag=True, help="Show comment content")
+def browse_notifications(limit: int, max_items: int | None, output: str, verbose: bool) -> None:
+    """View your Zhihu notifications."""
+    from zhihu_cli.content.handlers.notifications import fetch_notifications
+
+    items = fetch_notifications(limit=limit, max_items=max_items)
+
+    for i, item in enumerate(items, 1):
+        marker = " " if item["is_read"] else "*"
+        verb = item["verb"]
+        actor = item["actor_name"]
+        target_text = item["target_text"]
+        target_link = item["target_link"]
+        rtype = item["resource_type"]
+        time_str = item["time"]
+        merge = item["merge_count"]
+
+        merge_str = f" (+{merge - 1})" if merge > 1 else ""
+
+        click.echo(f"[{i}]{marker} {actor} {verb}{merge_str}  ({rtype}: {target_text})")
+        if verbose:
+            comment = item["comment_text"]
+            if comment:
+                click.echo(f"    > {comment}")
+        if target_link:
+            click.echo(f"    {target_link}")
+        click.echo(f"    {time_str}")
+        click.echo()
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        click.echo(f"Saved {len(items)} items to {output}")
+
+    if not items:
+        click.echo("No notifications found. Try logging in first: zhihu auth login")
+
+
 # ── search ────────────────────────────────────────────────────────────────
 
 
