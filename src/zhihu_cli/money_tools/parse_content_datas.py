@@ -43,7 +43,7 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
         print("❌ 未找到鉴权凭证，请先运行: zhihu auth paste")
         return []
 
-    base_url = "https://www.zhihu.com/api/v4/creations/all"
+    base_url = "https://www.zhihu.com/api/v4/creators/creations/v2/all"
     all_assets: list[dict[str, str]] = []
     offset = 0
     limit = 20
