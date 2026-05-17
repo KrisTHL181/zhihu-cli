@@ -1,5 +1,6 @@
 """Search Zhihu via the search_v3 API."""
 
+import re
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import quote
@@ -10,6 +11,12 @@ from zhihu_cli.content.handlers.question import parse_question_metadata
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 SEARCH_URL = "https://www.zhihu.com/api/v4/search_v3"
+
+
+def replace_em(text: str) -> str:
+    """Replace <em> tags with terminal color codes."""
+    text = re.sub(r"<em>", "\033[1;31m", text)
+    return re.sub(r"</em>", "\033[0m", text)
 
 
 def _parse_question(item: dict[str, Any]) -> dict[str, Any]:
@@ -113,6 +120,14 @@ def _build_search(
     parser = _make_parser(item_parser)
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, parser, delay=1.0):
+        if item.get("name"):
+            item["name"] = replace_em(item["name"])
+        if item.get("title"):
+            item["title"] = replace_em(item["title"])
+        if item.get("excerpt"):
+            item["excerpt"] = replace_em(item["excerpt"])
+        if item.get("description"):
+            item["description"] = replace_em(item["description"])
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
