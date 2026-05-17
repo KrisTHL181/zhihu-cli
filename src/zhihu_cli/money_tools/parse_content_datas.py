@@ -8,8 +8,8 @@ from typing import Any
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 
-DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/daily"
-AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/aggr"
+DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/daily"
+AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/aggr"
 
 
 def convert_percent(data: str | None) -> float:
@@ -74,6 +74,7 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
                             "id": asset_id,
                             "type": asset_type,
                             "title": item.get("data", {}).get("title", ""),
+                            "created_time": item.get("data", {}).get("created_time", 0),
                         }
                     )
 
@@ -94,6 +95,27 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
         json.dump(all_assets, f, ensure_ascii=False, indent=2)
     print(f"✅ 已保存 {len(all_assets)} 条资产 → {output_path}")
     return all_assets
+
+
+def _extract_daily_item(d: dict[str, Any] | None) -> dict | None:
+    """Extract metrics from a single daily item (used for aggr yesterday/today)."""
+    if not d:
+        return None
+    advanced = d.get("advanced") or {}
+    return {
+        "date": d.get("p_date"),
+        "pv": d.get("pv", 0),
+        "show": d.get("show", 0),
+        "play": d.get("play", 0),
+        "upvote": d.get("upvote", 0),
+        "like": d.get("like", 0),
+        "collect": d.get("collect", 0),
+        "comment": d.get("comment", 0),
+        "share": d.get("share", 0),
+        "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
+        "positive_interact_percent": convert_percent(advanced.get("positive_interact_percent", "0.0%")),
+        "follower_translate": advanced.get("follower_translate", 0),
+    }
 
 
 def run_batch_daily_analysis(use_aggr: bool = False) -> None:
@@ -139,10 +161,12 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
     for i, token in enumerate(answer_ids):
         print(f"\n[任务 {i + 1}/{len(answer_ids)}] 正在处理 ID: {token} ...")
 
+        created_ts = token.get("created_time", 0)
+        start_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
         params = {
             "type": token["type"],
             "token": token["id"],
-            "start": "2026-01-06",
+            "start": start_date,
             "end": datetime.now().strftime("%Y-%m-%d"),
         }
 
@@ -151,32 +175,62 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
 
             if resp.status_code == 200:
                 data = resp.json()
-                clean_data = []
+
                 if use_aggr:
-                    data = [data]
-                for d in data:
-                    clean_data.append(
-                        {
-                            "type": token["type"],
-                            "date": get_date(d),
-                            "pv": d.get("pv", 0),
-                            "upvote": d.get("upvote", 0),
-                            "collect": d.get("collect", 0),
-                            "comment": d.get("comment", 0),
-                            "share": d.get("share", 0),
-                            "finish_read_percent": convert_percent(d["advanced"].get("finish_read_percent", "0.0%")),
+                    advanced = data.get("advanced") or {}
+                    clean_data = {
+                        "type": token["type"],
+                        "totals": {
+                            "pv": data.get("pv", 0),
+                            "show": data.get("show", 0),
+                            "play": data.get("play", 0),
+                            "upvote": data.get("upvote", 0),
+                            "like": data.get("like", 0),
+                            "collect": data.get("collect", 0),
+                            "comment": data.get("comment", 0),
+                            "share": data.get("share", 0),
+                        },
+                        "advanced": {
+                            "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
                             "positive_interact_percent": convert_percent(
-                                d["advanced"].get("positive_interact_percent", "0.0%")
+                                advanced.get("positive_interact_percent", "0.0%")
                             ),
-                            "follower_translate": d["advanced"].get("follower_translate", "0"),
-                        }
-                    )
+                            "follower_translate": advanced.get("follower_translate", 0),
+                        },
+                        "yesterday": _extract_daily_item(data.get("yesterday")),
+                        "today": _extract_daily_item(data.get("today")),
+                    }
+                    entries_label = "聚合"
+                else:
+                    clean_data = []
+                    for d in data:
+                        advanced = d.get("advanced") or {}
+                        clean_data.append(
+                            {
+                                "type": token["type"],
+                                "date": get_date(d),
+                                "pv": d.get("pv", 0),
+                                "show": d.get("show", 0),
+                                "play": d.get("play", 0),
+                                "upvote": d.get("upvote", 0),
+                                "like": d.get("like", 0),
+                                "collect": d.get("collect", 0),
+                                "comment": d.get("comment", 0),
+                                "share": d.get("share", 0),
+                                "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
+                                "positive_interact_percent": convert_percent(
+                                    advanced.get("positive_interact_percent", "0.0%")
+                                ),
+                                "follower_translate": advanced.get("follower_translate", "0"),
+                            }
+                        )
+                    entries_label = f"{len(clean_data)} 条"
 
                 output_file = metrics_dir / f"metrics_full_{token['type']}_{token['id']}.json"
                 with open(output_file, "w", encoding="utf-8") as f:
                     json.dump(clean_data, f, indent=4)
 
-                print(f"  ✅ 已保存: {output_file}")
+                print(f"  ✅ 已保存: {output_file} ({entries_label} 记录)")
                 success_count += 1
             else:
                 print(f"  ❌ 抓取失败 (Code: {resp.status_code})。可能是 token 对应内容已删除或签名过期。")
