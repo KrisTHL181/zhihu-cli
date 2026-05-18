@@ -134,6 +134,59 @@ class CrankMonitor:
         with open(self.registry_path, "w", encoding="utf-8") as f:
             json.dump(self.registry, f, ensure_ascii=False, indent=2)
 
+    def upsert_author(self, name: str, zhihu_token: str, series_dir: str) -> None:
+        """Add a new author or update an existing one in the registry.
+
+        Unlike ``bootstrap_registry``, this fills in *zhihu_token* immediately
+        so the author is ready for ``crank fetch`` without manual editing.
+        """
+        self.load_registry()
+        for a in self.registry["authors"]:
+            if a["name"] == name:
+                a["zhihu_token"] = zhihu_token
+                a["series_dir"] = series_dir
+                self.save_registry()
+                print(f"Updated author in registry: {name} (token: {zhihu_token})")
+                return
+        self.registry["authors"].append(
+            {
+                "name": name,
+                "zhihu_token": zhihu_token,
+                "series_dir": series_dir,
+                "enabled": True,
+            }
+        )
+        self.save_registry()
+        print(f"Added author to registry: {name} (token: {zhihu_token})")
+
+    def list_authors(self) -> None:
+        """Print all authors in the registry."""
+        self.load_registry()
+        authors = self.registry.get("authors", [])
+        if not authors:
+            print("No authors in registry. Run 'zhihu crank bootstrap' or 'zhihu crank archive' first.")
+            return
+        print(f"{'Name':<20} {'Token':<24} {'Series':<30} {'Enabled':<8}")
+        print("-" * 82)
+        for a in authors:
+            enabled = "yes" if a.get("enabled", True) else "no"
+            print(f"{a['name']:<20} {a.get('zhihu_token', ''):<24} {a.get('series_dir', ''):<30} {enabled:<8}")
+
+    def remove_author(self, name: str) -> bool:
+        """Remove an author from the registry by name.
+
+        Returns True if the author was found and removed.
+        """
+        self.load_registry()
+        for i, a in enumerate(self.registry["authors"]):
+            if a["name"] == name:
+                removed = self.registry["authors"].pop(i)
+                self.save_registry()
+                print(f"Removed author from registry: {name} (series: {removed['series_dir']})")
+                return True
+        print(f"Author not found in registry: {name}", file=sys.stderr)
+        return False
+
     def bootstrap_registry(self) -> int:
         """Scan serial papers directories and build initial registry entries.
 
@@ -525,8 +578,11 @@ def register_commands(main_group: click.Group) -> None:
             model=model,
         )
         if result:
+            series_dir_name = os.path.basename(result)
+            author_name = (series_dir_name.split("-")[0] if "-" in series_dir_name else series_dir_name).strip()
+            mon = CrankMonitor()
+            mon.upsert_author(author_name, user_token, series_dir_name)
             print(f"\nSeries created: {result}")
-            print("Run 'zhihu crank bootstrap' to add this author to the registry.")
 
     @crank_group.command("bootstrap")
     def crank_bootstrap() -> None:
@@ -537,3 +593,16 @@ def register_commands(main_group: click.Group) -> None:
         """
         mon = CrankMonitor()
         mon.bootstrap_registry()
+
+    @crank_group.command("list")
+    def crank_list() -> None:
+        """List all authors in the monitor registry."""
+        mon = CrankMonitor()
+        mon.list_authors()
+
+    @crank_group.command("remove")
+    @_click.option("--author", "-a", "author_name", required=True, help="Author name to remove from registry")
+    def crank_remove(author_name: str) -> None:
+        """Remove an author from the monitor registry."""
+        mon = CrankMonitor()
+        mon.remove_author(author_name)
