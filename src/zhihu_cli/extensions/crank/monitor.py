@@ -15,12 +15,12 @@ import json
 import os
 import re
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename
+from zhihu_cli.content.download_contents import sanitize_filename
+from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.extensions.crank.archiver import call_llm_for_name, fetch_article_list
 
 if TYPE_CHECKING:
@@ -107,7 +107,6 @@ class CrankMonitor:
         self.hof_root = Path(hall_of_flames_root)
         self.serial_dir = self.hof_root / "papers"
         self.registry: dict[str, Any] = {"authors": []}
-        self._downloader: ContentDownloader | None = None
         self.llm_api_base = llm_api_base
         self.llm_api_key = llm_api_key
         self.llm_model = llm_model
@@ -292,18 +291,6 @@ class CrankMonitor:
 
         return new_articles
 
-    def _get_downloader(self) -> ContentDownloader:
-        """Lazy-init a ContentDownloader with cached headers."""
-        if self._downloader is not None:
-            return self._downloader
-
-        tmpdir = tempfile.mkdtemp(prefix="crank_monitor_")
-        dl = ContentDownloader(output_dir=tmpdir)
-        if not dl.load_headers_from_curl(quick_mode=True):
-            raise RuntimeError("No cached headers. Run 'zhihu auth paste' first.")
-        self._downloader = dl
-        return dl
-
     def fetch_author(
         self,
         author_entry: dict[str, Any],
@@ -335,8 +322,6 @@ class CrankMonitor:
         target_dir = self.serial_dir / series_dir
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        downloader = self._get_downloader()
-
         for i, art in enumerate(new_articles):
             art_url = art.get("url", "")
             if not art_url:
@@ -350,14 +335,14 @@ class CrankMonitor:
                 continue
 
             try:
-                metadata, markdown = downloader.fetch_article(art_url)
+                metadata, markdown = scrape_article(art_url)
             except Exception as e:
                 print(f"      [error] Download failed: {e}", file=sys.stderr)
                 continue
 
             title = metadata.get("title") or art.get("title") or "untitled"
-            author = metadata.get("author") or author_name
-            created = metadata.get("created") or "unknown"
+            author = metadata.get("author", {}).get("name") or author_name
+            created = (metadata.get("created_time") or "")[:10] or "unknown"
 
             filename = generate_filename(author, title, created)
             filepath = target_dir / filename
@@ -380,7 +365,6 @@ class CrankMonitor:
         print(f"    Naming new series for {author_name} ({len(articles)} articles)...")
 
         # Download article samples for LLM review
-        downloader = self._get_downloader()
         samples: list[tuple[str, str]] = []
 
         # Take up to 4 random samples for the LLM
@@ -393,12 +377,12 @@ class CrankMonitor:
             if not art_url:
                 continue
             try:
-                metadata, markdown = downloader.fetch_article(art_url)
+                metadata, markdown = scrape_article(art_url)
             except Exception as e:
                 print(f"      [error] Sample download failed: {e}", file=sys.stderr)
                 continue
             title = metadata.get("title") or art.get("title") or "untitled"
-            filename = generate_filename(author_name, title, metadata.get("created") or "unknown")
+            filename = generate_filename(author_name, title, (metadata.get("created_time") or "")[:10] or "unknown")
             samples.append((filename, markdown))
             time.sleep(1.0)
 

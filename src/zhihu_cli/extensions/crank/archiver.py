@@ -20,9 +20,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename
+from zhihu_cli.content.download_contents import sanitize_filename
+from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.universal_converter import convert_items
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
@@ -35,39 +36,20 @@ SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
 
 
 def fetch_article_list(user_token: str) -> list[dict[str, Any]]:
-    """Paginate through a user's articles API, return raw items."""
+    """Paginate through a user's articles API using the standard waterfall streamer."""
     if not cache_manager.load_headers():
         print("No cached headers. Run 'zhihu auth paste' first.", file=sys.stderr)
         sys.exit(1)
 
-    all_items: list[dict[str, Any]] = []
-    offset = 0
-    limit = 20
+    initial_url = ARTICLES_API.format(token=user_token) + "?offset=0&limit=20&sort_by=created"
+
+    def parser(data: dict[str, Any]):
+        yield from data.get("data", [])
 
     print(f"Fetching article list for user: {user_token}")
-    while True:
-        url = ARTICLES_API.format(token=user_token)
-        params = {"offset": offset, "limit": limit, "sort_by": "created"}
-        try:
-            resp = session.get(url, params=params, timeout=15)
-            if resp.status_code != 200:
-                print(f"Error: HTTP {resp.status_code} at offset {offset}", file=sys.stderr)
-                break
-            data = resp.json()
-            items = data.get("data", [])
-            all_items.extend(items)
-            paging = data.get("paging", {})
-            print(f"  Page: {len(items)} items (total: {len(all_items)})")
-            if paging.get("is_end", True):
-                break
-            offset += limit
-        except Exception as e:
-            print(f"Error fetching article list: {e}", file=sys.stderr)
-            break
-        time.sleep(1.2)
-
-    print(f"Fetched {len(all_items)} articles total.")
-    return all_items
+    items = list(stream_handler(initial_url, parser, delay=1.2))
+    print(f"Fetched {len(items)} articles total.")
+    return items
 
 
 # ── LLM naming ─────────────────────────────────────────────────────────────
@@ -229,16 +211,27 @@ def run_archiver(
     assets = convert_items(raw_articles, forced_type="article")
     print(f"Converted to {len(assets)} unified assets.")
 
-    # 3. Download articles to temp dir
+    # 3. Download articles to temp dir via scrape_article (js-initialData-based, no cURL headers needed)
     temp_dir = tempfile.mkdtemp(prefix="zhihu_articles_")
     print(f"Downloading articles to: {temp_dir}")
 
     article_urls = [f"https://zhuanlan.zhihu.com/p/{a['id']}" for a in assets]
-    downloader = ContentDownloader(output_dir=temp_dir)
-    if not downloader.load_headers_from_curl(quick_mode=True):
-        print("Failed to load headers.", file=sys.stderr)
-        return None
-    downloader.download_articles(article_urls, delay=1.0)
+    for url in article_urls:
+        try:
+            metadata, markdown = scrape_article(url)
+            title = sanitize_filename(metadata["title"])
+            author = sanitize_filename(metadata["author"]["name"])
+            created = metadata.get("created_time", "")[:10] or "unknown"
+            filename = f"{title}_{author}_{created}.md"
+            if len(filename) > 200:
+                filename = filename[:200]
+            filepath = os.path.join(temp_dir, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(markdown)
+            print(f"  [OK] {url} → {filename}")
+        except Exception as e:
+            print(f"  [Error] {url}: {e}", file=sys.stderr)
+        time.sleep(1.0)
 
     # 4. Gather downloaded files
     md_files = sorted(
