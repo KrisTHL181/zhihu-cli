@@ -180,6 +180,7 @@ def call_llm_for_name(
             ],
             temperature=0.7,
             max_tokens=64,
+            extra_body={"thinking": {"type": "disabled"}},
         )
         raw = response.choices[0].message.content
         if not raw:
