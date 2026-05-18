@@ -2,11 +2,10 @@
 """
 Generic converter: unify different Zhihu export JSONs into all_assets_list.json.
 Supported inputs:
-  - zhihu_user_activities.json (from scrap-content-list.py) – uses 'type', 'id', 'title'
-  - zhihu_articles.json       (from scrap-article-list.py) – type='article'
-  - zhihu_answers.json        (from scrap-answers-list.py) – type='answer', title from 'question_title'
-  - any file with items containing 'id' and 'type' (direct use)
-  - any file with items containing 'id' and 'title' (assumes type from context or --type)
+  - Raw API answer list (question.title -> answer type)
+  - Raw API article list (id + title -> article type)
+  - Activity/user-act format (items with 'type', 'id', 'title')
+  - Any file with items containing 'id' and 'title' (use --type to force)
 """
 
 import argparse
@@ -21,14 +20,12 @@ def detect_format(items: list[dict[str, Any]]) -> str:
     if not items:
         return "unknown"
     first = items[0]
+    if "question" in first and isinstance(first["question"], dict):
+        return "answers"  # raw API answer format: title under question.title
     if "type" in first:
-        return "typed"  # already has 'type' field
-    if "question_title" in first and "id" in first:
-        return "answers"
-    if "title" in first and "id" in first and "stats" in first:
-        return "articles"
+        return "typed"  # already has 'type' field (user-act format)
     if "title" in first and "id" in first:
-        return "generic_title"
+        return "generic_title"  # raw API article format
     return "unknown"
 
 
@@ -50,14 +47,14 @@ def convert_items(items: list[dict[str, Any]], forced_type: str | None = None) -
             asset_type = item.get("type", "unknown")
         elif fmt == "answers":
             asset_type = "answer"
-        elif fmt in ("articles", "generic_title"):
+        elif fmt == "generic_title":
             asset_type = "article"
         else:
             asset_type = "unknown"
 
         # Determine title
         if fmt == "answers":
-            title = item.get("question_title", "untitled answer")
+            title = item.get("question", {}).get("title", "untitled answer")
         else:
             title = item.get("title", f"{asset_type}_{asset_id}")
 
@@ -86,9 +83,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert one or more Zhihu export JSONs to unified all_assets_list.json"
     )
-    parser.add_argument(
-        "inputs", nargs="+", help="Input JSON files (e.g., zhihu_user_activities.json, zhihu_articles.json, ...)"
-    )
+    parser.add_argument("inputs", nargs="+", help="Input JSON files (export outputs or raw API data)")
     parser.add_argument(
         "--output",
         "-o",

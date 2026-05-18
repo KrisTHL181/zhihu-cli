@@ -1123,10 +1123,7 @@ def convert_user_act(input_file: str, output_file: str) -> None:
         click.echo(f"Error: file not found: {input_file}", err=True)
         raise SystemExit(1)
 
-    with open(input_file, encoding="utf-8") as f:
-        activities = json.load(f)
-
-    converted = [{"id": a.get("id", ""), "type": a.get("type", ""), "title": a.get("title", "")} for a in activities]
+    converted = convert_items(load_json(input_file))
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(converted, f, ensure_ascii=False, indent=2)
