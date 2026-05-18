@@ -115,6 +115,7 @@ def reload_session() -> None:
 
 
 def get_page_entities(url: str) -> dict[str, Any]:
+    url = url.replace("http://", "https://")
     resp = session.get(url)
 
     if resp.status_code == 403:
