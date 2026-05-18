@@ -2,7 +2,7 @@
 Zhihu Backup to Markdown Converter
 
 Convert Zhihu HTML content (answers, articles, pins) to Markdown format.
-Adapted from the Tampermonkey script "知乎备份剪藏" (zhihu-backup-collect).
+Adapted from the Tampermonkey script "zhihu-backup-collect".
 """
 
 import re
@@ -84,12 +84,12 @@ class ZhihuMarkdownConverter:
 
         soup = BeautifulSoup(content, "html.parser")
 
-        # 查找所有 eeimg="1" 且带有 alt 属性的 img 标签
+        # Find all img tags with eeimg="1" and alt attribute (inline formulas)
         for img in soup.find_all("img", eeimg="1"):
             latex_content = img.get("alt", "")
             if latex_content:
                 img.replace_with(f"${latex_content}$")
-        # 处理块级/显示模式公式 (eeimg="2")
+        # Handle block/display mode formulas (eeimg="2")
         for img in soup.find_all("img", eeimg="2"):
             latex_content = img.get("alt", "")
             if latex_content:
@@ -106,11 +106,11 @@ class ZhihuMarkdownConverter:
         """
         soup = BeautifulSoup(html_content, "html.parser")
 
-        # 移除无用内容
+        # Remove useless elements
         for element in soup(["script", "style"]):
             element.decompose()
 
-        # 处理知乎完整页面（有 .RichText 容器）
+        # Handle Zhihu full pages (with .RichText container)
         rich_texts = soup.select(".RichText")
         if rich_texts:
             markdown_parts = []
@@ -120,7 +120,7 @@ class ZhihuMarkdownConverter:
                     markdown_parts.append(md)
             return "\n\n".join(markdown_parts)
 
-        # 处理纯 HTML 片段（如 API 返回的 content 字段）
+        # Handle raw HTML fragments (e.g. API content field)
         parts = []
         for child in soup.children:
             if isinstance(child, NavigableString):
@@ -242,21 +242,21 @@ class ZhihuMarkdownConverter:
             a_tag = element.find("a")
             if a_tag:
                 href = a_tag.get("href", "")
-                # 优先使用 data-text 属性（知乎链接卡片中的标题）
+                # Prefer data-text attribute (Zhihu link card title)
                 text = a_tag.get("data-text") or a_tag.get_text(strip=True)
                 if not text:
                     text = href
                 href = self.link_converter.normalize_link(href)
                 return f"[{text}]({href})"
-            # 若无 a 标签，递归处理内部内容
+            # No a tag, recurse into children
             return self._process_inline(element)
 
-        # 拦截知乎广告卡片和付费咨询卡片
-        if tag == "a" and (  # 付费咨询
+        # Block Zhihu ad cards and paid-consult cards
+        if tag == "a" and (  # Paid consult ad
             element.get("data-draft-type") == "ad-link-card" or element.get("data-ad-id") is not None
         ):
             return None
-        if tag == "a" and (  # 知学堂广告
+        if tag == "a" and (  # Zhixuetang ad
             element.get("data-draft-type") == "edu-card" or element.get("data-edu-card-id") is not None
         ):
             return None
@@ -264,7 +264,7 @@ class ZhihuMarkdownConverter:
         if tag == "a":
             href = element.get("href", "")
             text = element.get_text(strip=True)
-            # 若文本为空，尝试使用 title 或 data-text 属性
+            # If text is empty, try title or data-text attribute
             if not text:
                 text = element.get("title") or element.get("data-text") or href
             href = self.link_converter.normalize_link(href)
@@ -292,10 +292,10 @@ class ZhihuMarkdownConverter:
         # Math (Zhihu specific)
         if tag == "span" and element.get("class") and "ztext-math" in element.get("class", []):
             tex = element.get("data-tex", "")
-            eeimg = element.get("data-eeimg", "")  # 获取知乎官方的公式类型标识
+            eeimg = element.get("data-eeimg", "")  # Zhihu formula type identifier
 
             if tex:
-                # data-eeimg="2" 代表整行/块级公式
+                # data-eeimg="2" means block/display formula
                 if eeimg == "2" or "\\tag" in tex:
                     return f"\n$$\n{tex}\n$$\n"
                 else:

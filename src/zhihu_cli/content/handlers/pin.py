@@ -7,7 +7,7 @@ from zhihu_cli.content.utils.html2markdown import converter
 
 def parse_pin_metadata(item: dict[str, Any]) -> dict[str, Any]:
     pin_id = item.get("id", "")
-    title = item.get("title", "") or f"想法 {pin_id}"
+    title = item.get("title", "") or f"pin {pin_id}"
     excerpt = item.get("excerpt", "")
     content_preview = excerpt or (item.get("content", "")[:200] if item.get("content") else "")
 
@@ -18,9 +18,9 @@ def parse_pin_metadata(item: dict[str, Any]) -> dict[str, Any]:
     updated = item.get("updated", 0)
 
     author = item.get("author", {})
-    author_name = author.get("name", "未知用户")
+    author_name = author.get("name", "unknown")
 
-    # 想法内容可能是列表格式
+    # Pin content may be in list format
     content_raw = item.get("content", "")
     if isinstance(content_raw, list) and content_raw:
         content_raw = content_raw[0].get("content", "")
@@ -53,7 +53,7 @@ def scrape_pin(pin_url: str) -> tuple[dict[str, Any], str]:
 
     item_data = next(iter(item.values()))
 
-    content = item_data.get("content", "")  # 想法内容可能嵌套
+    content = item_data.get("content", "")  # Pin content may be nested
     if isinstance(content, list) and content:
         content = content[0].get("content", "")
     return parse_pin_metadata(item_data), converter.convert(content)

@@ -10,17 +10,16 @@ import numpy as np
 def count_words(filepath: str, no_code: bool = False) -> int:
     with open(filepath, encoding="utf-8") as f:
         content = f.read()
-        # 1. 拆分文件，只取正文部分
+        # Split file, extract body only
         parts = content.split("---", 1)
         if len(parts) < 2:
             return 0
         body = parts[1]
 
-        # 2. 清洗数据：去除LaTeX公式标记、空白字符等
-        # 简单去除 $...$ 和 \begin...\end 等结构，只统计纯文字
-        clean_text = re.sub(r"\$.*?\$", "", body)  # 去除行内公式
+        # Clean: remove LaTeX markers, whitespace
+        clean_text = re.sub(r"\$.*?\$", "", body)
         clean_text = re.sub(r"\\begin\{.*?\}.*?\\end\{.*?\}", "", clean_text, flags=re.DOTALL)
-        clean_text = re.sub(r"\s+", "", clean_text)  # 去除所有空白
+        clean_text = re.sub(r"\s+", "", clean_text)
         if no_code:
             clean_text = re.sub(r"```.*?```", "", clean_text, flags=re.DOTALL)
 
@@ -47,15 +46,15 @@ def main() -> None:
         print("No markdown files found.")
         return
 
-    print(f"统计了 {len(word_counts)} 个回答的字数")
-    print(f"平均字数: {np.mean(word_counts):.2f}")
-    print(f"标准差: {np.std(word_counts):.2f}")
+    print(f"Analyzed {len(word_counts)} answers")
+    print(f"Mean: {np.mean(word_counts):.2f}")
+    print(f"Std: {np.std(word_counts):.2f}")
     print(f"CV: {(np.std(word_counts) / np.mean(word_counts)):.2f}")
-    print(f"10% 分位数: {np.percentile(word_counts, 10)}")
-    print(f"50% 分位数: {np.percentile(word_counts, 50)}")
-    print(f"90% 分位数: {np.percentile(word_counts, 90)}")
-    print(f"99% 分位数: {np.percentile(word_counts, 99)}")
-    print(f"最大字数: {max(word_counts)}")
+    print(f"P10: {np.percentile(word_counts, 10)}")
+    print(f"P50: {np.percentile(word_counts, 50)}")
+    print(f"P90: {np.percentile(word_counts, 90)}")
+    print(f"P99: {np.percentile(word_counts, 99)}")
+    print(f"Max: {max(word_counts)}")
 
     file_counts = {}
     for filename in os.listdir(args.folder):
@@ -63,14 +62,12 @@ def main() -> None:
             count = count_words(os.path.join(args.folder, filename), no_code=args.no_code)
             file_counts[filename] = count
 
-    # 按字数降序排列
     sorted_files = sorted(file_counts.items(), key=lambda item: item[1], reverse=True)
 
-    print("\n--- 字数最多的前 10 篇回答 ---")
+    print("\n--- Top 10 Longest Answers ---")
     for filename, count in sorted_files[:10]:
-        print(f"{count} 字: {filename}")
+        print(f"{count} words: {filename}")
 
-    # 绘图
     plt.figure(figsize=(10, 6))
     plt.hist(word_counts, bins=15, color="skyblue", edgecolor="black", alpha=0.7)
     plt.axvline(

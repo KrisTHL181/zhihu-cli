@@ -16,7 +16,7 @@ OUTPUT_FILE: str = str(DATA_DIR / "plots" / "zhihu_wordcloud.png")
 
 
 def extract_text_from_md(file_path: str, skip_metadata: bool = False) -> str:
-    """提取MD文件中的JSON元数据和正文内容"""
+    """Extract JSON metadata and body text from a Markdown file."""
     try:
         with open(file_path, encoding="utf-8") as f:
             content = f.read()
@@ -24,31 +24,28 @@ def extract_text_from_md(file_path: str, skip_metadata: bool = False) -> str:
             if not skip_metadata:
                 return content
 
-            # 1. 提取头部JSON
             parts = content.split("---", 1)
             text_to_analyze = ""
 
             if len(parts) >= 1:
                 try:
                     meta = json.loads(parts[0])
-                    # 合并问题标题和描述
                     text_to_analyze += meta.get("question_name", "") + " "
                     text_to_analyze += meta.get("question_detail", "") + " "
                 except json.JSONDecodeError:
                     pass
 
-            # 2. 提取正文
             if len(parts) > 1:
                 text_to_analyze += parts[1]
 
             return text_to_analyze
     except Exception as e:
-        print(f"读取失败 {file_path}: {e}")
+        print(f"Read failed {file_path}: {e}")
         return ""
 
 
 def is_stop_word(word: str) -> bool:
-    """判断是否为停用词"""
+    """Check if word is a stop word."""
     return word in STOP_WORDS or len(word) == 1
 
 
@@ -56,9 +53,8 @@ def main(topk_words: int = 200, source_dir: str | None = None, only_print: bool 
     if source_dir is None:
         source_dir = str(DATA_DIR / "downloads")
     all_text = []
-    print(f"正在扫描 {source_dir} 下的 Markdown 文件...")
+    print(f"Scanning {source_dir} for Markdown files...")
 
-    # 递归遍历所有文件夹
     for root, _, files in os.walk(source_dir):
         for file in files:
             if file.endswith(".md"):
@@ -67,45 +63,39 @@ def main(topk_words: int = 200, source_dir: str | None = None, only_print: bool 
 
     text = " ".join(all_text)
 
-    # 清洗掉特殊字符、代码块标签等
+    # Clean special chars, code blocks, etc.
     text = re.sub(r"\$\$.*?\$\$", "", text, flags=re.DOTALL)
     text = re.sub(r"\$.*?\$", "", text)
     text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
     text = re.sub(r"<.*?>", "", text)
-    full_content = re.sub(r"[^\u4e00-\u9fa5]", "", text)  # 只保留中文字符
+    full_content = re.sub(r"[^一-龥]", "", text)
 
     keywords_raw = jieba.analyse.extract_tags(
         full_content,
-        topK=topk_words * 2,  # 提取两倍数量，以便过滤后有足够词汇
+        topK=topk_words * 2,
         withWeight=True,
     )
 
-    # 过滤停用词
     keywords = [(word, weight) for word, weight in keywords_raw if not is_stop_word(word)]
 
-    # 如果过滤后不够 topk_words，可以再提取一些
     if len(keywords) < topk_words:
-        print(f"警告：过滤后只剩 {len(keywords)} 个词，少于 {topk_words}")
+        print(f"Warning: only {len(keywords)} words left after filtering, fewer than {topk_words}")
 
-    # 只取前 topk_words 个
     keywords = keywords[:topk_words]
 
-    # 转换为词云需要的频率字典
     word_freq = {word: weight for word, weight in keywords}
 
-    # 可选：打印前20个关键词供检查
     if only_print:
-        print("\n关键词：")
+        print("\nKeywords:")
         for i, (word, weight) in enumerate(keywords, 1):
             print(f"{i}. {word} ({weight:.4f})")
         return
 
-    print("\n前20个关键词（已过滤停用词）：")
+    print("\nTop 20 keywords (stop words filtered):")
     for i, (word, weight) in enumerate(keywords[:20], 1):
         print(f"{i}. {word} ({weight:.4f})")
 
-    # 生成词云
-    print("\n生成词云图中...")
+    print("\nGenerating word cloud...")
     wordcloud = WordCloud(
         font_path=FONT_PATH if os.path.exists(FONT_PATH) else None,
         width=1600,
@@ -116,7 +106,6 @@ def main(topk_words: int = 200, source_dir: str | None = None, only_print: bool 
         stopwords=STOP_WORDS,
     ).generate_from_frequencies(word_freq)
 
-    # 保存并显示
     plt.figure(figsize=(16, 9))
     plt.imshow(wordcloud, interpolation="bilinear")
     plt.axis("off")
@@ -127,10 +116,10 @@ def main(topk_words: int = 200, source_dir: str | None = None, only_print: bool 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="生成词云图")
-    parser.add_argument("--topk", type=int, default=200, help="要显示的关键词数量 (默认: 200)")
+    parser = argparse.ArgumentParser(description="Generate word cloud image")
+    parser.add_argument("--topk", type=int, default=200, help="Number of keywords (default: 200)")
     parser.add_argument("--source_dir", type=str, default=str(DATA_DIR / "downloads"), help="Markdown file directory")
-    parser.add_argument("--only_print", action="store_true", help="仅打印关键词，不生成词云图")
+    parser.add_argument("--only_print", action="store_true", help="Only print keywords, skip image generation")
 
     args = parser.parse_args()
 

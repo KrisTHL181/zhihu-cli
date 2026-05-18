@@ -103,7 +103,7 @@ def build_naming_prompt(author_name: str, samples: list[tuple[str, str]]) -> str
 
 
 def _collect_existing_series_names() -> list[str]:
-    """Collect existing series directory names from 连环论文."""
+    """Collect existing series directory names from serial papers dir."""
     names = []
     if os.path.isdir(SERIAL_PAPERS_DIR):
         for entry in sorted(os.listdir(SERIAL_PAPERS_DIR)):

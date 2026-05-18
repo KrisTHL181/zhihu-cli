@@ -54,15 +54,15 @@ def plot_weekday_analysis() -> None:
         print(stats)
 
         best_day = stats["mean"].idxmax()
-        print(f"\n💡 Insight: Your most profitable day on average is {best_day}.")
+        print(f"\nInsight: Your most profitable day on average is {best_day}.")
 
         plt.tight_layout()
         plt.savefig(OUTPUT_FILE, dpi=500, bbox_inches="tight")
-        print("\n✅ Box plot saved as: weekday_income_analysis.png")
+        print("\nBox plot saved as: weekday_income_analysis.png")
         plt.show()
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

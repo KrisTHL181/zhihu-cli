@@ -18,8 +18,8 @@ ZHIHU_PIN_PATTERN = r"https?://(?:www\.)?zhihu\.com/pin/([^/?#]+)"
 
 def get_type_and_id(url: str) -> tuple[str | None, str | None]:
     """
-    返回 (type, id)
-    type: 'articles', 'questions', 'answers', 'pins' 或 None
+    Returns (type, id).
+    type: 'articles', 'questions', 'answers', 'pins', or None.
     """
     match = re.search(ZHIHU_ARTICLE_PATTERN, url)
     if match:
@@ -46,4 +46,4 @@ def fmt_time(ts: int | float | None) -> str:
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             return str(ts)
-    return "未知时间"
+    return "unknown time"

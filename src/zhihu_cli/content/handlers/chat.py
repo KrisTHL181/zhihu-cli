@@ -42,8 +42,8 @@ def get_inbox() -> list[dict[str, Any]]:
             {
                 "id": message.get("participant", {}).get("id"),
                 "url_token": message.get("url_token", ""),
-                "from": message.get("participant", {}).get("name", "未知用户"),
-                "snippet": message.get("snippet", "(无内容)"),
+                "from": message.get("participant", {}).get("name", "unknown"),
+                "snippet": message.get("snippet", "(no content)"),
                 "updated_time": fmt_time(message.get("updated_time")),
                 "message_count": message.get("message_count", 0),
                 "unread_count": message.get("unread_count", 0),

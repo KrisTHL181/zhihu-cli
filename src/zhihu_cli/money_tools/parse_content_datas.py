@@ -40,7 +40,7 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
     """Scrape all user creations and save to output_path. Returns the asset list."""
     headers = cache_manager.load_headers()
     if not headers:
-        print("❌ 未找到鉴权凭证，请先运行: zhihu auth paste")
+        print("No cached headers found. Run: zhihu auth paste")
         return []
 
     base_url = "https://www.zhihu.com/api/v4/creators/creations/v2/all"
@@ -48,7 +48,7 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
     offset = 0
     limit = 20
 
-    print("🔍 正在扫描你的知乎创作内容...")
+    print("Scanning your Zhihu creations...")
     while True:
         params = {
             "start": 0,
@@ -61,7 +61,7 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
         try:
             resp = session.get(base_url, headers=headers, params=params, timeout=15)
             if resp.status_code != 200:
-                print(f"  ⚠️ HTTP {resp.status_code}，已中断")
+                print(f"  HTTP {resp.status_code}, interrupted")
                 break
 
             data = resp.json()
@@ -81,19 +81,19 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
             paging = data.get("paging", {})
             totals = paging.get("totals", 0)
             offset += limit
-            print(f"  {min(offset, totals)}/{totals} — 已收集 {len(all_assets)} 条")
+            print(f"  {min(offset, totals)}/{totals} — Collected {len(all_assets)} items")
 
             if paging.get("is_end", True) or offset >= totals:
                 break
         except Exception as e:
-            print(f"  ⚠️ 异常: {e}")
+            print(f"  Exception: {e}")
             break
         time.sleep(1.2)
 
     os.makedirs(output_path.parent, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_assets, f, ensure_ascii=False, indent=2)
-    print(f"✅ 已保存 {len(all_assets)} 条资产 → {output_path}")
+    print(f"Saved {len(all_assets)} assets → {output_path}")
     return all_assets
 
 
@@ -128,13 +128,13 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
     if assets_file.exists():
         with open(assets_file, encoding="utf-8") as f:
             answer_ids = json.load(f)
-        print(f"📋 已加载 {len(answer_ids)} 个待分析资产")
+        print(f"Loaded {len(answer_ids)} assets to analyze")
     else:
-        print("❌ 找不到 all_assets_list.json")
-        print("   这个文件是你知乎创作内容的资产清单，metrics 命令通过它知道要分析哪些内容。")
+        print("all_assets_list.json not found")
+        print("  This file is the asset inventory of your Zhihu creations.")
         print()
         try:
-            choice = input("  ▶ 是否现在自动生成？[Y/n]: ").strip().lower()
+            choice = input("  Generate it now? [Y/n]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return
@@ -145,13 +145,13 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                 return
         else:
             print()
-            print("  请手动运行: zhihu scrape creations")
-            print("  生成后再执行: zhihu tools income metrics")
+            print("  Run: zhihu scrape creations")
+            print("  Then: zhihu tools income metrics")
             return
 
     headers = cache_manager.load_headers()
     if not headers:
-        print("❌ 未找到缓存的鉴权凭证，请先运行: zhihu auth paste")
+        print("No cached headers found. Run: zhihu auth paste")
         return
     headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
@@ -159,7 +159,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
 
     success_count = 0
     for i, token in enumerate(answer_ids):
-        print(f"\n[任务 {i + 1}/{len(answer_ids)}] 正在处理 ID: {token} ...")
+        print(f"\n[Task {i + 1}/{len(answer_ids)}] Processing ID: {token} ...")
 
         created_ts = token.get("created_time", 0)
         start_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
@@ -200,7 +200,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                         "yesterday": _extract_daily_item(data.get("yesterday")),
                         "today": _extract_daily_item(data.get("today")),
                     }
-                    entries_label = "聚合"
+                    entries_label = "aggregated"
                 else:
                     clean_data = []
                     for d in data:
@@ -224,26 +224,26 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                                 "follower_translate": advanced.get("follower_translate", "0"),
                             }
                         )
-                    entries_label = f"{len(clean_data)} 条"
+                    entries_label = f"{len(clean_data)} entries"
 
                 output_file = metrics_dir / f"metrics_full_{token['type']}_{token['id']}.json"
                 with open(output_file, "w", encoding="utf-8") as f:
                     json.dump(clean_data, f, indent=4)
 
-                print(f"  ✅ 已保存: {output_file} ({entries_label} 记录)")
+                print(f"  Saved: {output_file} ({entries_label} records)")
                 success_count += 1
             else:
-                print(f"  ❌ 抓取失败 (Code: {resp.status_code})。可能是 token 对应内容已删除或签名过期。")
+                print(f"  Fetch failed (Code: {resp.status_code})")
 
         except Exception as e:
-            print(f"  ⚠️ 异常: {e}")
+            print(f"  Exception: {e}")
 
         time.sleep(1.2)
 
     print("\n" + "=" * 40)
-    print("🏁 批量收割结束！")
-    print(f"📁 成功抓取: {success_count} / {len(answer_ids)}")
-    print("📂 所有数据存储在: ./content_metrics/")
+    print("Batch harvest finished!")
+    print(f"Successful fetches: {success_count} / {len(answer_ids)}")
+    print(f"Data stored in: {metrics_dir}")
     print("=" * 40)
 
 

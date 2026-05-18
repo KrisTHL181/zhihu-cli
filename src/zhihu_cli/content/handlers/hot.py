@@ -1,4 +1,4 @@
-"""Zhihu hot list (热榜) handler."""
+"""Zhihu hot list handler."""
 
 from typing import Any
 
@@ -33,7 +33,7 @@ def _parse_hot_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_hot_list(limit: int = 50) -> list[dict[str, Any]]:
-    """Fetch the Zhihu hot list (热榜)."""
+    """Fetch the Zhihu hot list."""
     url = f"https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit={limit}&desktop=true"
     resp = session.get(url)
     resp.raise_for_status()

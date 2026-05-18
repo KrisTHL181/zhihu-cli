@@ -57,7 +57,7 @@ def _parse_item_url(url: str) -> tuple[str, str]:
 
 
 def _resolve_answer_id(item_id: str) -> str:
-    """问答类型的 id 格式为 'question_id/answer_id'，提取 answer_id。"""
+    """Extract answer_id from composite 'question_id/answer_id' format."""
     if "/" in item_id:
         return item_id.split("/")[1]
     return item_id
@@ -320,7 +320,7 @@ def download_question(url: str, output_dir: str) -> None:
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "pins"), help="Output directory")
 def download_pin(url: str, output_dir: str) -> None:
-    """Download a single Zhihu pin (想法) as Markdown."""
+    """Download a single Zhihu pin as Markdown."""
     metadata, markdown = scrape_pin(url)
     filepath = _save_markdown(metadata, markdown, output_dir)
     click.echo(f"Pin by {metadata.get('author', 'unknown')}")
@@ -481,7 +481,7 @@ def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: boo
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Show excerpt and details")
 def browse_hot(limit: int, output: str, verbose: bool) -> None:
-    """View the Zhihu real-time hot list (热榜)."""
+    """View the Zhihu real-time hot list."""
     items = fetch_hot_list(limit=50)
 
     if limit and len(items) > limit:
@@ -504,14 +504,14 @@ def browse_hot(limit: int, output: str, verbose: bool) -> None:
             if excerpt:
                 click.echo(f"    preview: {excerpt[:200]}")
             author = item["author"]
-            if author and author != "用户":
+            if author and author != "anonymous":
                 click.echo(f"    author: {author}")
         if answer_count or follower_count:
             parts = []
             if answer_count:
-                parts.append(f"{answer_count} 回答")
+                parts.append(f"{answer_count} answers")
             if follower_count:
-                parts.append(f"{follower_count} 关注")
+                parts.append(f"{follower_count} followers")
             click.echo(f"    {'  '.join(parts)}")
         if url:
             click.echo(f"    {url}")
@@ -706,7 +706,7 @@ def _parse_item_url_safe(url_or_id: str) -> tuple[str | None, str | None]:
 
 @interact.group("thank")
 def interact_thank() -> None:
-    """Thank / unthank answers."""
+    """Thank or unthank answers."""
 
 
 @interact_thank.command("add")
@@ -725,7 +725,7 @@ def thank_remove(answer_id: str) -> None:
 
 @interact.group("follow")
 def interact_follow() -> None:
-    """Follow / unfollow users or questions."""
+    """Follow or unfollow users and questions."""
 
 
 @interact_follow.command("user")
@@ -758,7 +758,7 @@ def unfollow_question_cmd(question_id: str) -> None:
 
 @interact.group("block")
 def interact_block() -> None:
-    """Block / unblock users."""
+    """Block or unblock users."""
 
 
 @interact_block.command("add")

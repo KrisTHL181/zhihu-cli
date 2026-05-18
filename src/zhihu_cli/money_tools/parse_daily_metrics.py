@@ -27,7 +27,7 @@ def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
                     next_start = last_dt + timedelta(days=1)
                     return details, next_start
         except Exception as e:
-            print(f"[!] 读取旧文件失败: {e}，将重新抓取")
+            print(f"[!] Failed to read existing data: {e}, will re-fetch")
 
     return [], datetime.strptime(DEFAULT_START_DATE, "%Y-%m-%d")
 
@@ -37,16 +37,16 @@ def run_task() -> None:
     end_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     if start_dt >= end_dt:
-        print(f"✅ 数据已是最新 (最后记录: {start_dt - timedelta(days=1)})，无需更新。")
+        print(f"Data is already up to date (last record: {start_dt - timedelta(days=1)}), no update needed.")
         return
 
     headers = cache_manager.load_headers()
     if not headers:
-        print("❌ 未找到缓存的鉴权凭证，请先运行: zhihu auth paste")
+        print("No cached headers found. Run: zhihu auth paste")
         return
     headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
-    print(f"--- 增量模式：将从 {start_dt.strftime('%Y-%m-%d')} 开始抓取 ---")
+    print(f"--- Incremental mode: fetching from {start_dt.strftime('%Y-%m-%d')} ---")
 
     new_records: list[dict[str, Any]] = []
 
@@ -63,7 +63,7 @@ def run_task() -> None:
             "format": "csv",
         }
 
-        print(f"\n[任务] 抓取中: {params['start']} -> {params['end']}")
+        print(f"\n[Task] Fetching: {params['start']} -> {params['end']}")
 
         try:
             resp = session.get(DAILY_URL, headers=headers, params=params, timeout=15)
@@ -90,12 +90,12 @@ def run_task() -> None:
                         }
                     )
                     count += 1
-                print(f"  [成功] 新提取 {count} 天数据")
+                print(f"  [Success] Extracted {count} days of data")
             else:
-                print(f"  [跳过] 状态码: {resp.status_code}，可能该时段无数据")
+                print(f"  [Skip] Status code: {resp.status_code}")
 
         except Exception as e:
-            print(f"  [异常] {e}")
+            print(f"  [Exception] {e}")
 
         if batch_end >= end_dt - timedelta(days=1):
             break
@@ -119,13 +119,13 @@ def run_task() -> None:
             json.dump(output, f, ensure_ascii=False, indent=4)
 
         print("\n" + "=" * 40)
-        print("✅ 更新完成！")
-        print(f"📈 新增天数: {len(new_records)} 天")
-        print(f"📊 总计天数: {len(sorted_details)} 天")
-        print(f"📁 文件已同步: {DB_FILE}")
+        print("Updated!")
+        print(f"New days: {len(new_records)}")
+        print(f"Total days: {len(sorted_details)}")
+        print(f"File synced: {DB_FILE}")
         print("=" * 40)
     else:
-        print("\n[!] 未能获取任何新数据。")
+        print("\n[!] No new data fetched.")
 
 
 if __name__ == "__main__":

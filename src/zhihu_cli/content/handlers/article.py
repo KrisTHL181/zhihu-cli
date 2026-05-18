@@ -7,23 +7,23 @@ from zhihu_cli.content.utils.html2markdown import converter
 
 def parse_article_metadata(item: dict[str, Any]) -> dict[str, Any]:
     article_id = item.get("id", "")
-    title = item.get("title", "无标题")
+    title = item.get("title", "untitled")
     excerpt = item.get("excerpt", "")
     content_preview = excerpt or (item.get("content", "")[:200] if item.get("content") else "")
 
-    # 统计数据
+    # Stats
     voteup_count = item.get("voteup_count", 0)
     comment_count = item.get("comment_count", 0)
 
-    # 时间戳
+    # Timestamps
     created = item.get("created", 0)
     updated = item.get("updated", 0)
 
-    # 作者信息
+    # Author info
     author = item.get("author", {})
-    author_name = author.get("name", "未知用户")
+    author_name = author.get("name", "unknown")
 
-    # 文章链接
+    # Article URL
     url = item.get("url", "")
     if not url and article_id:
         url = f"https://zhuanlan.zhihu.com/p/{article_id}"

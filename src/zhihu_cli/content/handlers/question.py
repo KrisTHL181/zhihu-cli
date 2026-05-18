@@ -23,7 +23,7 @@ def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
         "visit_count": item.get("visitCount", 0),
         "follower_count": item.get("followerCount", 0),
         "author": {
-            "name": author.get("name", "匿名用户"),
+            "name": author.get("name", "anonymous"),
             "headline": author.get("headline", ""),
         },
     }
@@ -45,7 +45,7 @@ def scrape_answers(question_data: dict[str, Any]) -> Generator[dict[str, Any], N
     def parse_ans(data):
         for ans in data.get("data", []):
             yield {
-                "author": ans.get("author", {}).get("name", "匿名用户"),
+                "author": ans.get("author", {}).get("name", "anonymous"),
                 "vote": ans.get("voteup_count", 0),
                 "content": converter.convert(ans.get("content", "")),
             }
@@ -88,7 +88,7 @@ def unvote_question(question_id: str) -> dict[str, Any]:
     return resp.json()
 
 
-def downvote_question(question_id: str) -> dict[str, Any]:  # 未公开接口！
+def downvote_question(question_id: str) -> dict[str, Any]:  # undocumented endpoint!
     resp = session.post(f"https://www.zhihu.com/api/v4/questions/{question_id}/voters/down")
     return resp.json()
 

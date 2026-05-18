@@ -57,7 +57,7 @@ def convert_items(items: list[dict[str, Any]], forced_type: str | None = None) -
 
         # Determine title
         if fmt == "answers":
-            title = item.get("question_title", "未命名回答")
+            title = item.get("question_title", "untitled answer")
         else:
             title = item.get("title", f"{asset_type}_{asset_id}")
 

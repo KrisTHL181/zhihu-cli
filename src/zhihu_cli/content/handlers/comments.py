@@ -40,8 +40,8 @@ def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | No
         return []
 
     child_offset = parent_comment.get("child_comment_next_offset")
-    # offset 为 None 表示 API 未提供，尝试从 0 开始；
-    # offset 为 0 是有效值，不能用 `not child_offset` 误判
+    # offset=None means API didn't provide one, try from 0
+    # offset=0 is a valid value, don't use `not child_offset`
     if child_offset is None:
         child_offset = 0
 
@@ -56,7 +56,7 @@ def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | No
             if cid:
                 seen_ids.add(cid)
             yield {
-                "author": child.get("author", {}).get("name", "匿名用户"),
+                "author": child.get("author", {}).get("name", "anonymous"),
                 "like_count": child.get("like_count", 0),
                 "dislike_count": child.get("dislike_count", 0),
                 "content": _convert_content(child.get("content", "")),
@@ -75,7 +75,7 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
     def root_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for comment in data.get("data", []):
             root: dict[str, Any] = {
-                "author": comment.get("author", {}).get("name", "匿名用户"),
+                "author": comment.get("author", {}).get("name", "anonymous"),
                 "like_count": comment.get("like_count", 0),
                 "dislike_count": comment.get("dislike_count", 0),
                 "content": _convert_content(comment.get("content", "")),
@@ -93,7 +93,7 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
                     seen_ids.add(cid)
                 root["child_comments"].append(
                     {
-                        "author": child.get("author", {}).get("name", "匿名用户"),
+                        "author": child.get("author", {}).get("name", "anonymous"),
                         "like_count": child.get("like_count", 0),
                         "dislike_count": child.get("dislike_count", 0),
                         "content": _convert_content(child.get("content", "")),
@@ -101,7 +101,7 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
                     }
                 )
 
-            # 翻页获取剩余的 child comments（带去重）
+            # Paginate to fetch remaining child comments (with dedup)
             if comment.get("child_comment_count", 0) >= 1:
                 root["child_comments"].extend(fetch_child_comments(comment, seen_ids))
 
@@ -114,14 +114,16 @@ def print_comments(item_type: str, item_id: str) -> None:
     comment_id = 1
     for comment in fetch_root_comments(item_type, item_id):
         print(
-            f"\n[{comment_id}] 作者: {comment['author']} | 赞: {comment['like_count']} | 踩: {comment['dislike_count']}"
+            f"\n[{comment_id}] Author: {comment['author']} | Likes: {comment['like_count']} | Dislikes: {comment['dislike_count']}"
         )
         print("-" * 20)
         print(comment["content"])
         if comment["child_comments"]:
-            print("\n  ↳ 子评论:")
+            print("\n  ↳ Replies:")
             for child in comment["child_comments"]:
-                print(f"    - 作者: {child['author']} | 赞: {child['like_count']} | 踩: {child['dislike_count']}")
+                print(
+                    f"    - Author: {child['author']} | Likes: {child['like_count']} | Dislikes: {child['dislike_count']}"
+                )
                 print(f"      {child['content']}\n")
         print("-" * 20)
         comment_id += 1

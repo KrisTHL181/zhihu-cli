@@ -1,4 +1,4 @@
-"""Zhihu feeds (推荐/关注) handler."""
+"""Zhihu feeds (recommend/follow) handler."""
 
 from collections.abc import Iterable
 from typing import Any
@@ -12,9 +12,9 @@ FOLLOW_URL = "https://www.zhihu.com/api/v3/moments?limit=20&desktop=true"
 
 def _parse_author(author: dict[str, Any] | None) -> dict[str, Any]:
     if not author:
-        return {"name": "匿名用户", "url_token": "", "headline": ""}
+        return {"name": "anonymous", "url_token": "", "headline": ""}
     return {
-        "name": author.get("name", "匿名用户"),
+        "name": author.get("name", "anonymous"),
         "url_token": author.get("url_token", ""),
         "headline": author.get("headline", ""),
         "avatar_url": author.get("avatar_url", ""),
@@ -47,7 +47,7 @@ def _parse_article_target(target: dict[str, Any]) -> dict[str, Any]:
     return {
         "target_type": "article",
         "id": target.get("id", ""),
-        "title": target.get("title", "无标题"),
+        "title": target.get("title", "untitled"),
         "excerpt": target.get("excerpt", ""),
         "content_html": target.get("content", ""),
         "url": target.get("url", ""),
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         if args.verbose:
             ttype = item.get("target_type", "?")
             title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
-            author = item.get("author", {}).get("name", "未知")
+            author = item.get("author", {}).get("name", "unknown")
             url = item.get("url", "")
             excerpt = item.get("excerpt", "")
 
