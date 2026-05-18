@@ -54,7 +54,9 @@ class ZhihuSession(_requests.Session):
 
     def _build_sign_source(self, method: str, url: str, kwargs: dict) -> str | None:
         parsed = urlparse(url)
-        if parsed.hostname not in ("www.zhihu.com", "zhihu.com", "api.zhihu.com"):
+        hostname = parsed.hostname or ""
+
+        if not (hostname == "zhihu.com" or hostname.endswith(".zhihu.com")):
             return None
 
         path_and_query = parsed.path
