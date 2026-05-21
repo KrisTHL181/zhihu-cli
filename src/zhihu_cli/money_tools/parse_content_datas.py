@@ -97,7 +97,7 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
     return all_assets
 
 
-def _extract_daily_item(d: dict[str, Any] | None) -> dict | None:
+def _extract_daily_item(d: dict[str, Any] | None, content_type: str = "") -> dict | None:
     """Extract metrics from a single daily item (used for aggr yesterday/today)."""
     if not d:
         return None
@@ -107,7 +107,7 @@ def _extract_daily_item(d: dict[str, Any] | None) -> dict | None:
         "pv": d.get("pv", 0),
         "show": d.get("show", 0),
         "play": d.get("play", 0),
-        "upvote": d.get("upvote", 0),
+        "upvote": d.get("reaction", d.get("upvote", 0)) if content_type == "pin" else d.get("upvote", 0),
         "like": d.get("like", 0),
         "collect": d.get("collect", 0),
         "comment": d.get("comment", 0),
@@ -184,7 +184,9 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                             "pv": data.get("pv", 0),
                             "show": data.get("show", 0),
                             "play": data.get("play", 0),
-                            "upvote": data.get("upvote", 0),
+                            "upvote": data.get("reaction", data.get("upvote", 0))
+                            if token["type"] == "pin"
+                            else data.get("upvote", 0),
                             "like": data.get("like", 0),
                             "collect": data.get("collect", 0),
                             "comment": data.get("comment", 0),
@@ -197,8 +199,8 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                             ),
                             "follower_translate": advanced.get("follower_translate", 0),
                         },
-                        "yesterday": _extract_daily_item(data.get("yesterday")),
-                        "today": _extract_daily_item(data.get("today")),
+                        "yesterday": _extract_daily_item(data.get("yesterday"), token["type"]),
+                        "today": _extract_daily_item(data.get("today"), token["type"]),
                     }
                     entries_label = "aggregated"
                 else:
@@ -212,7 +214,9 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                                 "pv": d.get("pv", 0),
                                 "show": d.get("show", 0),
                                 "play": d.get("play", 0),
-                                "upvote": d.get("upvote", 0),
+                                "upvote": d.get("reaction", d.get("upvote", 0))
+                                if token["type"] == "pin"
+                                else d.get("upvote", 0),
                                 "like": d.get("like", 0),
                                 "collect": d.get("collect", 0),
                                 "comment": d.get("comment", 0),
