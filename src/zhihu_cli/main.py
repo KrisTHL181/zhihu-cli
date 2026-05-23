@@ -525,9 +525,8 @@ def browse_comments(url: str, output_json: bool) -> None:
 @click.option("--markdown/--no-markdown", default=False, help="Convert HTML to Markdown")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
-@click.option("--verbose", "-v", is_flag=True, help="Print items while fetching")
 def browse_feed(
-    feed_type: str, limit: int, max_items: int | None, markdown: bool, output_json: bool, output: str, verbose: bool
+    feed_type: str, limit: int, max_items: int | None, markdown: bool, output_json: bool, output: str
 ) -> None:
     """Stream Zhihu recommend or follow feed."""
     fetch_fn = fetch_feed_with_markdown if markdown else fetch_feed
@@ -542,35 +541,31 @@ def browse_feed(
         return
 
     for item in items:
-        if verbose:
-            ttype = item.get("target_type", "?")
-            title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
-            author = item.get("author", {}).get("name", "unknown")
-            url = item.get("url", "")
-            excerpt = item.get("excerpt", "")
+        ttype = item.get("target_type", "?")
+        title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
+        author = item.get("author", {}).get("name", "unknown")
+        url = item.get("url", "")
+        excerpt = item.get("excerpt", "")
 
-            click.echo(f"[{ttype}] {title[:120]}")
-            if excerpt:
-                click.echo(f"  preview: {excerpt[:200]}")
-            click.echo(f"  author={author}  votes={item.get('voteup_count', 0)}")
-            if url:
-                click.echo(f"  link: {url}")
-            click.echo()
+        click.echo(f"[{ttype}] {title[:120]}")
+        if excerpt:
+            click.echo(f"  preview: {excerpt[:200]}")
+        click.echo(f"  author={author}  votes={item.get('voteup_count', 0)}")
+        if url:
+            click.echo(f"  link: {url}")
+        click.echo()
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
         click.echo(f"Saved {len(items)} items to {output}")
-    elif not verbose:
-        click.echo(f"Fetched {len(items)} items (use --verbose to print, --output to save)")
 
 
 @browse.command("hot")
 @click.option("--limit", "-n", type=int, default=30, help="Number of hot items to show (default: 30)")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
-@click.option("--verbose", "-v", is_flag=True, help="Show excerpt and details")
-def browse_hot(limit: int, output_json: bool, output: str, verbose: bool) -> None:
+def browse_hot(limit: int, output_json: bool, output: str) -> None:
     """View the Zhihu real-time hot list."""
     items = fetch_hot_list(limit=50)
 
@@ -597,13 +592,12 @@ def browse_hot(limit: int, output_json: bool, output: str, verbose: bool) -> Non
         label_str = f" [{card_label}]" if card_label else ""
         click.echo(f"[{i}] {heat}{label_str}  {ttype}")
         click.echo(f"    {title}")
-        if verbose:
-            excerpt = item["excerpt"]
-            if excerpt:
-                click.echo(f"    preview: {excerpt[:200]}")
-            author = item["author"]
-            if author and author != "anonymous":
-                click.echo(f"    author: {author}")
+        excerpt = item["excerpt"]
+        if excerpt:
+            click.echo(f"    preview: {excerpt[:200]}")
+        author = item["author"]
+        if author and author != "anonymous":
+            click.echo(f"    author: {author}")
         if answer_count or follower_count:
             parts = []
             if answer_count:
@@ -629,8 +623,7 @@ def browse_hot(limit: int, output_json: bool, output: str, verbose: bool) -> Non
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
-@click.option("--verbose", "-v", is_flag=True, help="Show comment content")
-def browse_notifications(limit: int, max_items: int | None, output_json: bool, output: str, verbose: bool) -> None:
+def browse_notifications(limit: int, max_items: int | None, output_json: bool, output: str) -> None:
     """View your Zhihu notifications."""
     from zhihu_cli.content.handlers.notifications import fetch_notifications
 
@@ -657,10 +650,9 @@ def browse_notifications(limit: int, max_items: int | None, output_json: bool, o
         merge_str = f" (+{merge - 1})" if merge > 1 else ""
 
         click.echo(f"[{i}]{marker} {actor} {verb}{merge_str}  ({rtype}: {target_text})")
-        if verbose:
-            comment = item["comment_text"]
-            if comment:
-                click.echo(f"    > {comment}")
+        comment = item["comment_text"]
+        if comment:
+            click.echo(f"    > {comment}")
         if target_link:
             click.echo(f"    {target_link}")
         click.echo(f"    {time_str}")
