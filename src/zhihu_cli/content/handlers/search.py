@@ -11,6 +11,7 @@ from zhihu_cli.content.handlers.question import parse_question_metadata
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 SEARCH_URL = "https://www.zhihu.com/api/v4/search_v3"
+ARTICLE_SEARCH_URL = "https://api.zhihu.com/search_v3"
 
 
 def replace_em(text: str) -> str:
@@ -47,7 +48,11 @@ def _parse_article(item: dict[str, Any]) -> dict[str, Any]:
         "id": obj.get("id", ""),
         "title": obj.get("title", ""),
         "excerpt": obj.get("excerpt", ""),
-        "url": obj.get("url", ""),
+        "url": re.sub(
+            r"^https://www\.zhihu\.com/articles?/(\d+)",
+            r"https://zhuanlan.zhihu.com/p/\1",
+            obj.get("url", "").replace("api.zhihu.com", "www.zhihu.com"),
+        ),
         "author": obj.get("author", {}),
         "created": obj.get("created_time", 0),
         "updated": obj.get("updated_time", 0),
@@ -148,13 +153,41 @@ def search_articles(
     limit: int = 20,
     max_items: int | None = 20,
 ) -> list[dict[str, Any]]:
-    """Search Zhihu articles via general search filtered by article type."""
+    """Search Zhihu articles via the article-specific search endpoint."""
     encoded_query = quote(query)
-    url = f"{SEARCH_URL}?t=general&q={encoded_query}&offset=0&limit={limit}&search_source=Normal"
+    params = (
+        f"gk_version=gz-gaokao"
+        f"&q={encoded_query}"
+        f"&t=general"
+        f"&search_source=Filter"
+        f"&is_real_time=0"
+        f"&correction=1"
+        f"&show_all_topics=0"
+        f"&pin_flow=false"
+        f"&entry=main"
+        f"&offset=0"
+        f"&limit={limit}"
+        f"&lc_idx=0"
+        f"&vertical=article"
+        f"&zhida_source=ai_search_general"
+    )
+    url = f"{ARTICLE_SEARCH_URL}?{params}"
+    parser = _make_parser(_parse_article)
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _make_parser(_parse_article), delay=1.0):
-        if item.get("target_type") != "article":
-            continue
+    for item in stream_handler(url, parser, delay=1.0):
+        url = item.get("url", "")
+        if url.startswith("https://api.zhihu.com/"):
+            url = url.replace("api.zhihu.com", "www.zhihu.com")
+        url = re.sub(
+            r"^https://www\.zhihu\.com/articles?/(\d+)",
+            r"https://zhuanlan.zhihu.com/p/\1",
+            url,
+        )
+        item["url"] = url
+        if item.get("title"):
+            item["title"] = replace_em(item["title"])
+        if item.get("excerpt"):
+            item["excerpt"] = replace_em(item["excerpt"])
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
