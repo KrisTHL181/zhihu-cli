@@ -72,9 +72,21 @@ def parse_frontmatter_field(filepath: Path, field: str) -> str | None:
     return None
 
 
-def build_yaml_frontmatter(title: str, author: str, created: str, source: str) -> str:
+def build_yaml_frontmatter(
+    title: str,
+    author: str,
+    created: str,
+    source: str,
+    classification: str = "unknown",
+    crank_probability: float | None = None,
+) -> str:
     """Build YAML frontmatter block matching the Hall of Flames convention."""
-    return f"---\ntitle: {title}\nauthor: {author}\ncreated: {created}\nsource: {source}\n---\n\n"
+    lines = f"---\ntitle: {title}\nauthor: {author}\ncreated: {created}\nsource: {source}"
+    if classification != "unknown":
+        lines += f"\nclassification: {classification}"
+    if crank_probability is not None:
+        lines += f"\ncrank_probability: {crank_probability:.4f}"
+    return lines + "\n---\n\n"
 
 
 def generate_filename(author: str, title: str, created: str) -> str:
@@ -102,6 +114,7 @@ class CrankMonitor:
         llm_api_base: str | None = None,
         llm_api_key: str | None = None,
         llm_model: str | None = None,
+        classify_downloads: bool = False,
     ) -> None:
         self.registry_path = Path(registry_path)
         self.hof_root = Path(hall_of_flames_root)
@@ -110,6 +123,7 @@ class CrankMonitor:
         self.llm_api_base = llm_api_base
         self.llm_api_key = llm_api_key
         self.llm_model = llm_model
+        self.classify_downloads = classify_downloads
 
     # ── registry management ─────────────────────────────────────────────
 
@@ -297,6 +311,7 @@ class CrankMonitor:
         new_articles: list[dict[str, Any]],
         *,
         dry_run: bool = False,
+        classify: bool = False,
     ) -> list[Path]:
         """Download *new_articles* for one author and save to their series directory.
 
@@ -306,6 +321,12 @@ class CrankMonitor:
         author_name = author_entry["name"]
         series_dir = author_entry.get("series_dir", "")
         saved: list[Path] = []
+
+        # Lazy-load classifier model if needed
+        if classify:
+            from zhihu_cli.extensions.crank.classifier.model import load_model, predict
+
+            load_model()
 
         # Resolve series directory — possibly via LLM naming
         if not series_dir:
@@ -344,10 +365,29 @@ class CrankMonitor:
             author = metadata.get("author", {}).get("name") or author_name
             created = (metadata.get("created_time") or "")[:10] or "unknown"
 
+            # Classification
+            classification = "unknown"
+            crank_probability: float | None = None
+            if classify:
+                try:
+                    result = predict(title, markdown)
+                    classification = result["label"]
+                    crank_probability = result["probability"]
+                    print(f"      [classify] {classification} (prob={crank_probability:.2f})")
+                except Exception as e:
+                    print(f"      [classify] failed: {e}", file=sys.stderr)
+
             filename = generate_filename(author, title, created)
             filepath = target_dir / filename
 
-            yaml_block = build_yaml_frontmatter(title, author, created, art_url)
+            yaml_block = build_yaml_frontmatter(
+                title,
+                author,
+                created,
+                art_url,
+                classification=classification,
+                crank_probability=crank_probability,
+            )
             filepath.write_text(yaml_block + markdown, encoding="utf-8")
 
             print(f"      → {filepath}")
@@ -416,6 +456,7 @@ class CrankMonitor:
         fetch: bool = False,
         author_filter: str | None = None,
         dry_run: bool = False,
+        classify: bool = False,
     ) -> dict[str, Any]:
         """Main entry point.
 
@@ -424,6 +465,7 @@ class CrankMonitor:
             fetch: Download new articles.
             author_filter: Only process this author (by name).
             dry_run: Don't actually write files.
+            classify: Classify downloaded articles with BERT model.
 
         Returns a summary dict ``{author_name: new_count}``.
         """
@@ -462,7 +504,7 @@ class CrankMonitor:
                 continue  # check-only mode: report but don't download
 
             if fetch:
-                saved = self.fetch_author(author_entry, new_articles, dry_run=dry_run)
+                saved = self.fetch_author(author_entry, new_articles, dry_run=dry_run, classify=classify)
                 summary[name]["saved"] = len(saved)
 
         # Print final summary
@@ -517,13 +559,24 @@ def register_commands(main_group: click.Group) -> None:
     @crank_group.command("fetch")
     @_click.option("--author", "-a", "author_name", default=None, help="Only fetch for a specific author")
     @_click.option("--dry-run", is_flag=True, help="Show what would be downloaded without writing files")
+    @_click.option("--classify", is_flag=True, help="Classify downloaded articles with BERT model")
     @_llm_decorator
     def crank_fetch(
-        author_name: str | None, dry_run: bool, api_endpoint: str | None, api_key: str | None, model: str
+        author_name: str | None,
+        dry_run: bool,
+        classify: bool,
+        api_endpoint: str | None,
+        api_key: str | None,
+        model: str,
     ) -> None:
         """Download new articles from watched authors."""
-        mon = CrankMonitor(llm_api_base=api_endpoint, llm_api_key=api_key, llm_model=model)
-        mon.run(fetch=True, author_filter=author_name, dry_run=dry_run)
+        mon = CrankMonitor(
+            llm_api_base=api_endpoint,
+            llm_api_key=api_key,
+            llm_model=model,
+            classify_downloads=classify,
+        )
+        mon.run(fetch=True, author_filter=author_name, dry_run=dry_run, classify=classify)
 
     @crank_group.command("archive")
     @_click.option("--user-token", "-u", required=True, help="Zhihu user URL token (e.g. chen-bao-qun)")
@@ -590,3 +643,120 @@ def register_commands(main_group: click.Group) -> None:
         """Remove an author from the monitor registry."""
         mon = CrankMonitor()
         mon.remove_author(author_name)
+
+    # ── classify subcommand group ──────────────────────────────────────
+
+    @crank_group.group(name="classify")
+    def crank_classify_group() -> None:
+        """Crank text classifier — train, predict, discover."""
+
+    @crank_classify_group.command("predict")
+    @_click.argument("url")
+    @_click.option("--threshold", type=float, default=0.5, help="Crank probability threshold")
+    def crank_classify_predict(url: str, threshold: float) -> None:
+        """Classify a single Zhihu article URL as crank or normal."""
+        from zhihu_cli.content.handlers.article import scrape_article
+        from zhihu_cli.extensions.crank.classifier.model import load_model, predict
+
+        load_model()
+        metadata, markdown = scrape_article(url)
+        title = metadata.get("title", "")
+        result = predict(title, markdown, threshold=threshold)
+
+        label = result["label"]
+        prob = result["probability"]
+        conf = result["confidence"]
+        probs = result["probabilities"]
+
+        color = "red" if label == "crank" else "green"
+        _click.echo(f"Title: {title}")
+        _click.echo(f"Classification: {_click.style(label.upper(), bold=True, fg=color)}")
+        _click.echo(f"Crank probability: {prob:.1%}")
+        _click.echo(f"Confidence: {conf:.1%}")
+        _click.echo(f"Probabilities: normal={probs[0]:.1%}, crank={probs[1]:.1%}")
+
+    @crank_classify_group.command("train")
+    @_click.option("--epochs", type=int, default=None, help="Override number of epochs")
+    @_click.option("--lr", type=float, default=None, help="Override learning rate")
+    @_click.option("--batch-size", type=int, default=None, help="Override batch size")
+    @_click.option(
+        "--hof-dir",
+        default=None,
+        help=f"Path to Hall of Flames serial papers dir (default: {SERIAL_PAPERS_DIR})",
+    )
+    def crank_classify_train(
+        epochs: int | None,
+        lr: float | None,
+        batch_size: int | None,
+        hof_dir: str | None,
+    ) -> None:
+        """Train the crank classifier on HoF papers + scraped negative data."""
+        from pathlib import Path
+
+        from zhihu_cli.extensions.crank.classifier.train import check_training_data_ready, train_classifier
+
+        if not check_training_data_ready():
+            raise SystemExit(1)
+
+        overrides = {}
+        if epochs is not None:
+            overrides["num_epochs"] = epochs
+        if lr is not None:
+            overrides["learning_rate"] = lr
+        if batch_size is not None:
+            overrides["batch_size"] = batch_size
+
+        hof_path = Path(hof_dir) if hof_dir else Path(SERIAL_PAPERS_DIR)
+        _click.echo("Training crank classifier...")
+        metadata = train_classifier(hof_path, **overrides)
+        val = metadata.get("val_metrics", {})
+        f1 = val.get("eval_f1", 0)
+        _click.echo(f"\nTraining complete! Best F1: {f1:.4f}")
+
+    @crank_classify_group.command("stats")
+    def crank_classify_stats() -> None:
+        """Show classifier model statistics and training data summary."""
+        from zhihu_cli.extensions.crank.classifier.data_loader import print_data_summary
+        from zhihu_cli.extensions.crank.classifier.model import get_model_stats
+
+        stats = get_model_stats()
+        _click.echo("Classifier Status")
+        _click.echo(f"  Model: {stats.get('model_name', 'N/A')}")
+        _click.echo(f"  Status: {stats.get('status', 'unknown')}")
+        if "val_metrics" in stats:
+            for k, v in stats["val_metrics"].items():
+                _click.echo(f"  {k}: {v:.4f}")
+        if "train_date" in stats:
+            _click.echo(f"  Trained: {stats['train_date']}")
+        print()
+        print_data_summary()
+
+    @crank_classify_group.command("discover")
+    @_click.option(
+        "--keywords",
+        "-k",
+        default=None,
+        help="Comma-separated search keywords (default: built-in crank keywords)",
+    )
+    @_click.option("--threshold", type=float, default=0.7, help="Crank probability threshold")
+    @_click.option("--min-ratio", type=float, default=0.5, help="Minimum crank/total ratio to flag an author")
+    @_click.option("--max-per-keyword", type=int, default=50, help="Max articles per keyword")
+    @_click.option("--show-articles", type=int, default=3, help="Top crank articles to show per author")
+    def crank_classify_discover(
+        keywords: str | None,
+        threshold: float,
+        min_ratio: float,
+        max_per_keyword: int,
+        show_articles: int,
+    ) -> None:
+        """Search Zhihu and identify potential new crank authors."""
+        from zhihu_cli.extensions.crank.classifier.discovery import discover_cranks, discover_report
+
+        kw_list = [k.strip() for k in keywords.split(",")] if keywords else None
+        results = discover_cranks(
+            keywords=kw_list,
+            max_per_keyword=max_per_keyword,
+            threshold=threshold,
+            min_crank_ratio=min_ratio,
+        )
+        discover_report(results, show_articles=show_articles)
