@@ -20,7 +20,7 @@ from zhihu_cli.content.handlers.collection import (
     delete_collection,
     delete_to_collection,
 )
-from zhihu_cli.content.handlers.comments import comment_item, delete_comment, print_comments
+from zhihu_cli.content.handlers.comments import comment_item, delete_comment, fetch_comments, print_comments
 from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
 from zhihu_cli.content.handlers.hot import fetch_hot_list
@@ -183,22 +183,40 @@ def auth_login(profile_name: str | None) -> None:
 
 
 @auth.command("status")
-def auth_status() -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def auth_status(output_json: bool) -> None:
     """Show authentication status and active profile."""
     active = cache_manager.get_active_profile()
+    profiles = cache_manager.list_profiles()
+    headers = cache_manager.load_headers()
+    has_cookie = "cookie" in {k.lower() for k in headers} if headers else False
+
+    if output_json:
+        click.echo(
+            json.dumps(
+                {
+                    "active_profile": active,
+                    "profiles": profiles,
+                    "headers_count": len(headers),
+                    "has_cookie": has_cookie,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
     if active:
         click.echo(f"Active profile: {active}")
     else:
         click.echo("No active profile set.")
 
-    profiles = cache_manager.list_profiles()
     if profiles:
         click.echo(f"Saved profiles: {', '.join(profiles)}")
 
-    headers = cache_manager.load_headers()
     if headers:
         click.echo(f"Headers: {len(headers)} cached")
-        if "cookie" in {k.lower() for k in headers}:
+        if has_cookie:
             click.echo("Cookie: present")
         else:
             click.echo("Warning: no Cookie header found.", err=True)
@@ -222,12 +240,28 @@ def profile() -> None:
 
 
 @profile.command("list")
-def profile_list() -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def profile_list(output_json: bool) -> None:
     """List all saved profiles."""
     active = cache_manager.get_active_profile()
     profiles = cache_manager.list_profiles()
     if not profiles:
-        click.echo("No profiles found. Use 'zhihu auth paste --profile <name>' to create one.")
+        if output_json:
+            click.echo(json.dumps([], ensure_ascii=False, indent=2))
+        else:
+            click.echo("No profiles found. Use 'zhihu auth paste --profile <name>' to create one.")
+        return
+    if output_json:
+        result = []
+        for name in profiles:
+            path = cache_manager._resolve_profile_path(name)
+            try:
+                data = json.loads(path.read_text())
+                has_cookie = "cookie" in {k.lower() for k in data}
+            except (json.JSONDecodeError, OSError):
+                has_cookie = False
+            result.append({"name": name, "active": name == active, "has_cookie": has_cookie})
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
         return
     for name in profiles:
         marker = " *" if name == active else ""
@@ -271,9 +305,13 @@ def profile_delete(name: str, force: bool) -> None:
 
 
 @profile.command("current")
-def profile_current() -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def profile_current(output_json: bool) -> None:
     """Show the currently active profile."""
     active = cache_manager.get_active_profile()
+    if output_json:
+        click.echo(json.dumps({"active_profile": active}, ensure_ascii=False, indent=2))
+        return
     if active:
         click.echo(active)
     else:
@@ -291,10 +329,14 @@ def download() -> None:
 @download.command("article")
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "articles"), help="Output directory")
-def download_article(url: str, output_dir: str) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def download_article(url: str, output_dir: str, output_json: bool) -> None:
     """Download a single Zhihu article as Markdown."""
     metadata, markdown = scrape_article(url)
     filepath = _save_markdown(metadata, markdown, output_dir)
+    if output_json:
+        click.echo(json.dumps({"metadata": metadata, "filepath": filepath}, ensure_ascii=False, indent=2))
+        return
     click.echo(f"{metadata.get('title', 'untitled')}")
     click.echo(f"  -> {filepath}")
 
@@ -302,7 +344,8 @@ def download_article(url: str, output_dir: str) -> None:
 @download.command("question")
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "questions"), help="Output directory")
-def download_question(url: str, output_dir: str) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def download_question(url: str, output_dir: str, output_json: bool) -> None:
     """Download a Zhihu question and all its answers as Markdown."""
     q_meta, q_detail_md = scrape_question_data(url)
     os.makedirs(output_dir, exist_ok=True)
@@ -312,9 +355,6 @@ def download_question(url: str, output_dir: str) -> None:
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# {q_meta['title']}\n\n{q_detail_md}\n")
 
-    click.echo(f"Question: {q_meta['title']}")
-    click.echo(f"  -> {filepath}")
-
     ans_dir = os.path.join(output_dir, f"{title}_answers")
     os.makedirs(ans_dir, exist_ok=True)
     count = 0
@@ -323,16 +363,33 @@ def download_question(url: str, output_dir: str) -> None:
         afile = os.path.join(ans_dir, f"{count:04d}_{sanitize_filename(ans['author'])}.md")[:200]
         with open(afile, "w", encoding="utf-8") as f:
             f.write(f"# Answer by {ans['author']} (+{ans['vote']})\n\n{ans['content']}\n")
+
+    if output_json:
+        click.echo(
+            json.dumps(
+                {"metadata": q_meta, "filepath": filepath, "answers_count": count, "answers_dir": ans_dir},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    click.echo(f"Question: {q_meta['title']}")
+    click.echo(f"  -> {filepath}")
     click.echo(f"  {count} answers saved to {ans_dir}")
 
 
 @download.command("pin")
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "pins"), help="Output directory")
-def download_pin(url: str, output_dir: str) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def download_pin(url: str, output_dir: str, output_json: bool) -> None:
     """Download a single Zhihu pin as Markdown."""
     metadata, markdown = scrape_pin(url)
     filepath = _save_markdown(metadata, markdown, output_dir)
+    if output_json:
+        click.echo(json.dumps({"metadata": metadata, "filepath": filepath}, ensure_ascii=False, indent=2))
+        return
     click.echo(f"Pin by {metadata.get('author', 'unknown')}")
     click.echo(f"  -> {filepath}")
 
@@ -412,11 +469,18 @@ def browse() -> None:
 @browse.command("answers")
 @click.argument("url")
 @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
-def browse_answers(url: str, reading_mode: bool) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def browse_answers(url: str, reading_mode: bool, output_json: bool) -> None:
     """Stream answers under a Zhihu question."""
     q_meta, q_detail_md = scrape_question_data(url)
 
     answers = list(scrape_answers(q_meta))
+
+    if output_json:
+        click.echo(
+            json.dumps({"question": q_meta, "detail_md": q_detail_md, "answers": answers}, ensure_ascii=False, indent=2)
+        )
+        return
 
     if reading_mode:
         try:
@@ -442,11 +506,15 @@ def browse_answers(url: str, reading_mode: bool) -> None:
 
 @browse.command("comments")
 @click.argument("url")
-def browse_comments(url: str) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def browse_comments(url: str, output_json: bool) -> None:
     """Print the comment tree for any Zhihu item."""
     item_type, item_id = _parse_item_url(url)
     if item_type == "answers":
         item_id = _resolve_answer_id(item_id)
+    if output_json:
+        click.echo(json.dumps(fetch_comments(item_type, item_id), ensure_ascii=False, indent=2))
+        return
     print_comments(item_type, item_id)
 
 
@@ -455,12 +523,23 @@ def browse_comments(url: str) -> None:
 @click.option("--limit", type=int, default=20, help="Items per page")
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
 @click.option("--markdown/--no-markdown", default=False, help="Convert HTML to Markdown")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Print items while fetching")
-def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: bool, output: str, verbose: bool) -> None:
+def browse_feed(
+    feed_type: str, limit: int, max_items: int | None, markdown: bool, output_json: bool, output: str, verbose: bool
+) -> None:
     """Stream Zhihu recommend or follow feed."""
     fetch_fn = fetch_feed_with_markdown if markdown else fetch_feed
     items = fetch_fn(feed_type, limit, max_items)
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(items)} items to {output}", err=True)
+        return
 
     for item in items:
         if verbose:
@@ -488,14 +567,23 @@ def browse_feed(feed_type: str, limit: int, max_items: int | None, markdown: boo
 
 @browse.command("hot")
 @click.option("--limit", "-n", type=int, default=30, help="Number of hot items to show (default: 30)")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Show excerpt and details")
-def browse_hot(limit: int, output: str, verbose: bool) -> None:
+def browse_hot(limit: int, output_json: bool, output: str, verbose: bool) -> None:
     """View the Zhihu real-time hot list."""
     items = fetch_hot_list(limit=50)
 
     if limit and len(items) > limit:
         items = items[:limit]
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(items)} items to {output}", err=True)
+        return
 
     for i, item in enumerate(items, 1):
         title = item["title"] or "(no title)"
@@ -539,13 +627,22 @@ def browse_hot(limit: int, output: str, verbose: bool) -> None:
 @browse.command("notifications")
 @click.option("--limit", type=int, default=20, help="Items per page")
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Show comment content")
-def browse_notifications(limit: int, max_items: int | None, output: str, verbose: bool) -> None:
+def browse_notifications(limit: int, max_items: int | None, output_json: bool, output: str, verbose: bool) -> None:
     """View your Zhihu notifications."""
     from zhihu_cli.content.handlers.notifications import fetch_notifications
 
     items = fetch_notifications(limit=limit, max_items=max_items)
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(items)} items to {output}", err=True)
+        return
 
     for i, item in enumerate(items, 1):
         marker = " " if item["is_read"] else "*"
@@ -710,7 +807,8 @@ def people() -> None:
 @people.command("show")
 @click.argument("url_token")
 @click.option("--limit", "-n", type=int, default=5, help="Items per content type (default: 5)")
-def people_show(url_token: str, limit: int) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def people_show(url_token: str, limit: int, output_json: bool) -> None:
     """Display a user's profile and recent content across all types.
 
     URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL
@@ -718,11 +816,26 @@ def people_show(url_token: str, limit: int) -> None:
     """
     token = _extract_url_token(url_token)
 
-    click.echo(f"Fetching profile for {token}...")
+    click.echo(f"Fetching profile for {token}...", err=True)
     profile = fetch_member_profile(token)
     if profile is None:
         click.echo(f"Error: could not fetch profile for '{token}'. Check the token and try again.", err=True)
         raise SystemExit(1)
+
+    if output_json:
+        result: dict = {"profile": profile}
+        for key, fn in [
+            ("answers", fetch_member_answers),
+            ("articles", fetch_member_articles),
+            ("pins", fetch_member_pins),
+            ("questions", fetch_member_questions),
+        ]:
+            try:
+                result[key] = fn(token, limit=limit, max_items=limit)
+            except Exception:
+                result[key] = []
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
 
     _show_profile_rich(profile)
 
@@ -735,11 +848,15 @@ def people_show(url_token: str, limit: int) -> None:
 @people.command("answers")
 @click.argument("url_token")
 @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
-def people_answers(url_token: str, limit: int) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def people_answers(url_token: str, limit: int, output_json: bool) -> None:
     """List a user's answers."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching answers for {token}...")
+    click.echo(f"Fetching answers for {token}...", err=True)
     items = fetch_member_answers(token, max_items=limit)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     if not items:
         click.echo("No answers found.")
         return
@@ -751,11 +868,15 @@ def people_answers(url_token: str, limit: int) -> None:
 @people.command("articles")
 @click.argument("url_token")
 @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
-def people_articles(url_token: str, limit: int) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def people_articles(url_token: str, limit: int, output_json: bool) -> None:
     """List a user's articles."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching articles for {token}...")
+    click.echo(f"Fetching articles for {token}...", err=True)
     items = fetch_member_articles(token, max_items=limit)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     if not items:
         click.echo("No articles found.")
         return
@@ -767,11 +888,15 @@ def people_articles(url_token: str, limit: int) -> None:
 @people.command("pins")
 @click.argument("url_token")
 @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
-def people_pins(url_token: str, limit: int) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def people_pins(url_token: str, limit: int, output_json: bool) -> None:
     """List a user's pins (想法)."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching pins for {token}...")
+    click.echo(f"Fetching pins for {token}...", err=True)
     items = fetch_member_pins(token, max_items=limit)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     if not items:
         click.echo("No pins found.")
         return
@@ -788,11 +913,15 @@ def people_pins(url_token: str, limit: int) -> None:
 @people.command("questions")
 @click.argument("url_token")
 @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
-def people_questions(url_token: str, limit: int) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def people_questions(url_token: str, limit: int, output_json: bool) -> None:
     """List questions asked by a user."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching questions for {token}...")
+    click.echo(f"Fetching questions for {token}...", err=True)
     items = fetch_member_questions(token, max_items=limit)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     if not items:
         click.echo("No questions found (this endpoint may not be available).")
         return
@@ -813,9 +942,13 @@ def search() -> None:
 @click.argument("query")
 @click.option("--limit", type=int, default=20, help="Items per page")
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
-def search_question_cmd(query: str, limit: int, max_items: int | None) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def search_question_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
     """Search Zhihu questions by keyword."""
     items = search_questions(query, limit=limit, max_items=max_items)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     for i, q in enumerate(items, 1):
         click.echo(f"[{i}] {q['title']}")
         click.echo(f"    {q['answer_count']} answers  {q['follower_count']} followers")
@@ -830,9 +963,13 @@ def search_question_cmd(query: str, limit: int, max_items: int | None) -> None:
 @click.argument("query")
 @click.option("--limit", type=int, default=20, help="Items per page")
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
-def search_article_cmd(query: str, limit: int, max_items: int | None) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def search_article_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
     """Search Zhihu articles by keyword."""
     items = search_articles(query, limit=limit, max_items=max_items)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     for i, a in enumerate(items, 1):
         click.echo(f"[{i}] {a['title']}")
         click.echo(f"    by {a['author']['name']}  {a['voteup_count']} upvotes")
@@ -849,9 +986,13 @@ def search_article_cmd(query: str, limit: int, max_items: int | None) -> None:
 @click.argument("query")
 @click.option("--limit", type=int, default=20, help="Items per page")
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
-def search_user_cmd(query: str, limit: int, max_items: int | None) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def search_user_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
     """Search Zhihu users by keyword."""
     items = search_users(query, limit=limit, max_items=max_items)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     for i, u in enumerate(items, 1):
         click.echo(f"[{i}] {u['name']}  ({u['gender']})")
         if u["headline"]:
@@ -867,9 +1008,13 @@ def search_user_cmd(query: str, limit: int, max_items: int | None) -> None:
 @click.argument("query")
 @click.option("--limit", type=int, default=20, help="Items per page")
 @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
-def search_topic_cmd(query: str, limit: int, max_items: int | None) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def search_topic_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
     """Search Zhihu topics by keyword."""
     items = search_topics(query, limit=limit, max_items=max_items)
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
     for i, t in enumerate(items, 1):
         click.echo(f"[{i}] {t['name']}")
         intro = t["introduction"] or t["excerpt"]
@@ -1147,9 +1292,13 @@ def chat() -> None:
 
 
 @chat.command("inbox")
-def chat_inbox() -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def chat_inbox(output_json: bool) -> None:
     """List recent conversations."""
     messages = get_inbox()
+    if output_json:
+        click.echo(json.dumps(messages, ensure_ascii=False, indent=2))
+        return
     if not messages:
         click.echo("Inbox is empty.")
         return
@@ -1163,9 +1312,19 @@ def chat_inbox() -> None:
 @chat.command("history")
 @click.argument("chat_id")
 @click.option("--limit", "-n", type=int, default=50, help="Max messages to fetch")
-def chat_history(chat_id: str, limit: int) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def chat_history(chat_id: str, limit: int, output_json: bool) -> None:
     """Read messages from a chat conversation."""
     count = 0
+    if output_json:
+        msgs = []
+        for msg in iter_chat_history(chat_id):
+            msgs.append(msg)
+            count += 1
+            if count >= limit:
+                break
+        click.echo(json.dumps(msgs, ensure_ascii=False, indent=2))
+        return
     for msg in iter_chat_history(chat_id):
         click.echo(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
         count += 1
@@ -1422,10 +1581,14 @@ def income_fetch() -> None:
     default=str(get_data_dir() / "exports" / "zhihu_income_report.json"),
     help="Income report JSON",
 )
-def income_monthly(file_path: str) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def income_monthly(file_path: str, output_json: bool) -> None:
     """Print monthly income summary table."""
-    from zhihu_cli.money_tools.analyze_monthly_income import analyze_monthly_income
+    from zhihu_cli.money_tools.analyze_monthly_income import analyze_monthly_income, get_monthly_income_data
 
+    if output_json:
+        click.echo(json.dumps(get_monthly_income_data(file_path), ensure_ascii=False, indent=2))
+        return
     analyze_monthly_income(file_path)
 
 
@@ -1482,7 +1645,8 @@ def tools_nlp() -> None:
 @tools_nlp.command("count")
 @click.option("--folder", default=str(get_data_dir() / "downloads" / "answers"), help="Folder with Markdown files")
 @click.option("--no-code", is_flag=True, help="Exclude code blocks")
-def nlp_count(folder: str, no_code: bool) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def nlp_count(folder: str, no_code: bool, output_json: bool) -> None:
     """Count words in downloaded Markdown files."""
     import numpy as np
 
@@ -1494,7 +1658,28 @@ def nlp_count(folder: str, no_code: bool) -> None:
             word_counts.append(count_words(os.path.join(folder, filename), no_code=no_code))
 
     if not word_counts:
-        click.echo("No markdown files found.")
+        if output_json:
+            click.echo(json.dumps({"files": 0}, ensure_ascii=False, indent=2))
+        else:
+            click.echo("No markdown files found.")
+        return
+
+    wc = [int(x) for x in word_counts]
+    if output_json:
+        click.echo(
+            json.dumps(
+                {
+                    "files": len(wc),
+                    "mean": round(float(np.mean(wc)), 1),
+                    "std": round(float(np.std(wc)), 1),
+                    "p50": int(np.percentile(wc, 50)),
+                    "p90": int(np.percentile(wc, 90)),
+                    "max": int(max(wc)),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return
 
     click.echo(f"Files: {len(word_counts)}")

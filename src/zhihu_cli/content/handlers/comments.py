@@ -110,6 +110,11 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
     return stream_handler(initial_url, root_parser)
 
 
+def fetch_comments(item_type: str, item_id: str) -> list[dict[str, Any]]:
+    """Return comment tree as a list of dicts (for JSON output)."""
+    return list(fetch_root_comments(item_type, item_id))
+
+
 def print_comments(item_type: str, item_id: str) -> None:
     comment_id = 1
     for comment in fetch_root_comments(item_type, item_id):
