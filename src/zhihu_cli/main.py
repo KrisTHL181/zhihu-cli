@@ -24,7 +24,17 @@ from zhihu_cli.content.handlers.comments import comment_item, delete_comment, pr
 from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
 from zhihu_cli.content.handlers.hot import fetch_hot_list
-from zhihu_cli.content.handlers.people import block, follow, unblock, unfollow
+from zhihu_cli.content.handlers.people import (
+    block,
+    fetch_member_answers,
+    fetch_member_articles,
+    fetch_member_pins,
+    fetch_member_profile,
+    fetch_member_questions,
+    follow,
+    unblock,
+    unfollow,
+)
 from zhihu_cli.content.handlers.pin import scrape_pin
 from zhihu_cli.content.handlers.publishing import modify_answer, modify_article, publish_answer, publish_article
 from zhihu_cli.content.handlers.question import (
@@ -566,6 +576,229 @@ def browse_notifications(limit: int, max_items: int | None, output: str, verbose
 
     if not items:
         click.echo("No notifications found. Try logging in first: zhihu auth login")
+
+
+# ── people ───────────────────────────────────────────────────────────────
+
+
+def _extract_url_token(token_or_url: str) -> str:
+    """Extract a Zhihu url_token from a full profile URL or return as-is."""
+    import re
+
+    m = re.search(r"zhihu\.com/people/([^/?]+)", token_or_url)
+    if m:
+        return m.group(1)
+    return token_or_url.rstrip("/").split("/")[-1]
+
+
+def _print_stat(label: str, value: int) -> None:
+    """Print a labeled stat line with dimmed label."""
+    click.echo(f"  {click.style(label + ':', dim=True)} {value}")
+
+
+def _print_content_item(item: dict, show_type: bool = False) -> None:
+    """Print a single content item in a compact format."""
+    ttype = item.get("type", "")
+    type_label = f"[{ttype}] " if show_type else ""
+    title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
+    created = item.get("created_time", "")
+    votes = item.get("voteup_count", 0)
+    comments = item.get("comment_count", 0)
+
+    parts = [created]
+    if votes:
+        parts.append(f"+{votes}")
+    if comments:
+        parts.append(f"{comments} comments")
+    if "answer_count" in item and item["answer_count"]:
+        parts.append(f"{item['answer_count']} answers")
+    if "follower_count" in item and item["follower_count"]:
+        parts.append(f"{item['follower_count']} followers")
+
+    click.echo(f"  {type_label}{title[:100]}")
+    click.echo(f"  {click.style('  '.join(parts), dim=True)}")
+    click.echo(f"  {click.style(item.get('url', ''), dim=True)}")
+    click.echo()
+
+
+def _show_profile_rich(profile: dict) -> None:
+    """Display a user profile using Rich if available, otherwise plain text."""
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+
+        console = Console()
+        name = profile.get("name", "Unknown")
+        headline = profile.get("headline", "")
+        url_token = profile.get("url_token", "")
+
+        header = Text(name, style="bold cyan")
+        if headline:
+            header.append(f"\n{headline}", style="dim")
+
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column(style="dim")
+        table.add_column()
+        table.add_column(style="dim")
+        table.add_column()
+        table.add_row(
+            f"followers: {profile.get('follower_count', 0)}",
+            f"following: {profile.get('following_count', 0)}",
+            f"answers: {profile.get('answer_count', 0)}",
+            f"articles: {profile.get('articles_count', 0)}",
+        )
+        table.add_row(
+            f"pins: {profile.get('pins_count', 0)}",
+            f"questions: {profile.get('question_count', 0)}",
+            f"upvotes: {profile.get('voteup_count', 0)}",
+            f"thanked: {profile.get('thanked_count', 0)}",
+        )
+
+        panel = Panel(
+            table,
+            title=header.plain[:40],
+            border_style="cyan",
+            padding=(1, 2),
+        )
+        console.print(panel)
+        click.echo(f"  Profile: https://www.zhihu.com/people/{url_token}")
+        click.echo()
+    except ImportError:
+        click.echo(f"\n{click.style(profile.get('name', 'Unknown'), bold=True)}")
+        if headline := profile.get("headline"):
+            click.echo(f"  {headline}")
+        click.echo(f"  https://www.zhihu.com/people/{profile.get('url_token', '')}")
+        click.echo()
+        _print_stat("Followers", profile.get("follower_count", 0))
+        _print_stat("Following", profile.get("following_count", 0))
+        _print_stat("Answers", profile.get("answer_count", 0))
+        _print_stat("Articles", profile.get("articles_count", 0))
+        _print_stat("Pins", profile.get("pins_count", 0))
+        _print_stat("Questions", profile.get("question_count", 0))
+        _print_stat("Upvotes received", profile.get("voteup_count", 0))
+        click.echo()
+
+
+def _list_content_section(
+    fetch_fn,
+    url_token: str,
+    section_title: str,
+    limit: int = 5,
+    *,
+    show_type: bool = False,
+) -> list:
+    """Fetch and display a content section. Returns the fetched items."""
+    try:
+        items = fetch_fn(url_token, limit=limit, max_items=limit)
+    except Exception:
+        return []
+
+    if items:
+        click.echo(f"── Recent {len(items)} {section_title}" + "─" * 40)
+        for item in items:
+            _print_content_item(item, show_type=show_type)
+    return items
+
+
+@main.group()
+def people() -> None:
+    """Browse a Zhihu user's public profile and content."""
+
+
+@people.command("show")
+@click.argument("url_token")
+@click.option("--limit", "-n", type=int, default=5, help="Items per content type (default: 5)")
+def people_show(url_token: str, limit: int) -> None:
+    """Display a user's profile and recent content across all types.
+
+    URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL
+    (e.g. https://www.zhihu.com/people/zhangsan).
+    """
+    token = _extract_url_token(url_token)
+
+    click.echo(f"Fetching profile for {token}...")
+    profile = fetch_member_profile(token)
+    if profile is None:
+        click.echo(f"Error: could not fetch profile for '{token}'. Check the token and try again.", err=True)
+        raise SystemExit(1)
+
+    _show_profile_rich(profile)
+
+    _list_content_section(fetch_member_answers, token, "Answers", limit)
+    _list_content_section(fetch_member_articles, token, "Articles", limit)
+    _list_content_section(fetch_member_pins, token, "Pins", limit)
+    _list_content_section(fetch_member_questions, token, "Questions", limit)
+
+
+@people.command("answers")
+@click.argument("url_token")
+@click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+def people_answers(url_token: str, limit: int) -> None:
+    """List a user's answers."""
+    token = _extract_url_token(url_token)
+    click.echo(f"Fetching answers for {token}...")
+    items = fetch_member_answers(token, max_items=limit)
+    if not items:
+        click.echo("No answers found.")
+        return
+    for item in items:
+        _print_content_item(item)
+    click.echo(f"── {len(items)} answers total")
+
+
+@people.command("articles")
+@click.argument("url_token")
+@click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+def people_articles(url_token: str, limit: int) -> None:
+    """List a user's articles."""
+    token = _extract_url_token(url_token)
+    click.echo(f"Fetching articles for {token}...")
+    items = fetch_member_articles(token, max_items=limit)
+    if not items:
+        click.echo("No articles found.")
+        return
+    for item in items:
+        _print_content_item(item)
+    click.echo(f"── {len(items)} articles total")
+
+
+@people.command("pins")
+@click.argument("url_token")
+@click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+def people_pins(url_token: str, limit: int) -> None:
+    """List a user's pins (想法)."""
+    token = _extract_url_token(url_token)
+    click.echo(f"Fetching pins for {token}...")
+    items = fetch_member_pins(token, max_items=limit)
+    if not items:
+        click.echo("No pins found.")
+        return
+    for item in items:
+        t = click.style(item.get("created_time", ""), dim=True)
+        content = item.get("content_text", "") or item.get("excerpt", "")
+        click.echo(f"  {content[:120]}")
+        click.echo(f"  {t}  +{item.get('voteup_count', 0)}  {item.get('comment_count', 0)} comments")
+        click.echo(f"  {click.style(item.get('url', ''), dim=True)}")
+        click.echo()
+    click.echo(f"── {len(items)} pins total")
+
+
+@people.command("questions")
+@click.argument("url_token")
+@click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+def people_questions(url_token: str, limit: int) -> None:
+    """List questions asked by a user."""
+    token = _extract_url_token(url_token)
+    click.echo(f"Fetching questions for {token}...")
+    items = fetch_member_questions(token, max_items=limit)
+    if not items:
+        click.echo("No questions found (this endpoint may not be available).")
+        return
+    for item in items:
+        _print_content_item(item)
+    click.echo(f"── {len(items)} questions total")
 
 
 # ── search ────────────────────────────────────────────────────────────────
