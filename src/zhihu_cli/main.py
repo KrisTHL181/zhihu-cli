@@ -23,6 +23,14 @@ from zhihu_cli.content.handlers.collection import (
 from zhihu_cli.content.handlers.comments import comment_item, delete_comment, fetch_comments, print_comments
 from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
+from zhihu_cli.content.handlers.following import (
+    fetch_followees,
+    fetch_following_collections,
+    fetch_following_columns,
+    fetch_following_questions,
+    fetch_following_topics,
+    get_my_url_token,
+)
 from zhihu_cli.content.handlers.hot import fetch_hot_list
 from zhihu_cli.content.handlers.people import (
     block,
@@ -746,6 +754,203 @@ def browse_history(limit: int, max_items: int | None, output_json: bool, output:
 
     if not items:
         click.echo("No read history found. Try logging in first: zhihu auth login")
+
+
+# ── browse following ──────────────────────────────────────────────────────
+
+
+@browse.group("following")
+def browse_following() -> None:
+    """View your followed users, topics, questions, columns, and collections."""
+
+
+def _resolve_following_token(url_token: str | None) -> str:
+    """Resolve the url_token: use provided value or auto-detect from /api/v4/me."""
+    if url_token:
+        return _extract_url_token(url_token)
+    token = get_my_url_token()
+    if not token:
+        raise click.UsageError(
+            "Cannot detect your url_token. Please authenticate first (zhihu auth login) "
+            "or provide --url-token explicitly."
+        )
+    return token
+
+
+def _display_following_items(items: list[dict], totals: int | None = None) -> None:
+    """Display a list of following items in terminal mode."""
+    for i, item in enumerate(items, 1):
+        ttype = item.get("type", "?")
+
+        if ttype == "user":
+            name = item.get("name", "")
+            headline = item.get("headline", "")
+            is_followed = item.get("is_followed", False)
+            mutual = " [互关]" if is_followed else ""
+            f_cnt = item.get("follower_count", 0)
+            a_cnt = item.get("answer_count", 0)
+            art_cnt = item.get("articles_count", 0)
+            stats = click.style(f"followers: {f_cnt}  answers: {a_cnt}  articles: {art_cnt}", dim=True)
+            click.echo(f"[{i}] {click.style(name, bold=True)}{mutual}")
+            if headline:
+                click.echo(f"    {headline[:120]}")
+            click.echo(f"    {stats}")
+            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+
+        elif ttype == "topic":
+            name = item.get("name", "")
+            intro = item.get("introduction", "") or item.get("excerpt", "")
+            f_cnt = item.get("followers_count", 0)
+            q_cnt = item.get("questions_count", 0)
+            stats = click.style(f"followers: {f_cnt}  questions: {q_cnt}", dim=True)
+            click.echo(f"[{i}] {click.style(name, bold=True)} [topic]")
+            if intro:
+                click.echo(f"    {intro[:120]}")
+            click.echo(f"    {stats}")
+            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+
+        elif ttype == "question":
+            title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
+            a_cnt = item.get("answer_count", 0)
+            f_cnt = item.get("follower_count", 0)
+            ctime = item.get("created_time", "")
+            stats = click.style(f"answers: {a_cnt}  followers: {f_cnt}  created: {ctime}", dim=True)
+            click.echo(f"[{i}] {title[:120]}")
+            click.echo(f"    {stats}")
+            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+
+        elif ttype == "column":
+            title = item.get("title", "") or "(no title)"
+            desc = item.get("description", "") or item.get("excerpt", "")
+            creator = item.get("creator", "")
+            f_cnt = item.get("followers_count", 0)
+            art_cnt = item.get("articles_count", 0)
+            stats = click.style(f"followers: {f_cnt}  articles: {art_cnt}", dim=True)
+            click.echo(f"[{i}] {click.style(title, bold=True)} [column]")
+            if creator:
+                click.echo(f"    by {creator}")
+            if desc:
+                click.echo(f"    {desc[:120]}")
+            click.echo(f"    {stats}")
+            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+
+        elif ttype == "collection":
+            title = item.get("title", "") or "(no title)"
+            desc = item.get("description", "")
+            creator_name = item.get("creator_name", "")
+            a_cnt = item.get("answer_count", 0)
+            f_cnt = item.get("follower_count", 0)
+            stats = click.style(f"items: {a_cnt}  followers: {f_cnt}", dim=True)
+            click.echo(f"[{i}] {click.style(title, bold=True)} [collection]")
+            if creator_name:
+                click.echo(f"    by {creator_name}")
+            if desc:
+                click.echo(f"    {desc[:120]}")
+            click.echo(f"    {stats}")
+            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+
+        click.echo()
+
+    if items:
+        total_str = f"/{totals}" if totals else ""
+        click.echo(f"── {len(items)}{total_str} items")
+
+
+def _following_command(
+    fetch_fn,
+    url_token: str | None,
+    limit: int,
+    max_items: int | None,
+    output_json: bool,
+    output: str,
+    label: str,
+) -> None:
+    """Shared execution path for following sub-commands."""
+    token = _resolve_following_token(url_token)
+    click.echo(f"Fetching {label} for {token}...", err=True)
+    items = fetch_fn(token, limit=limit, max_items=max_items)
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(items)} items to {output}", err=True)
+        return
+
+    if not items:
+        click.echo(f"No {label} found.")
+        return
+
+    _display_following_items(items)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        click.echo(f"Saved {len(items)} items to {output}")
+
+
+@browse_following.command("users")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def following_users(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
+    """List users you follow."""
+    _following_command(fetch_followees, url_token, limit, max_items, output_json, output, "followed users")
+
+
+@browse_following.command("topics")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def following_topics(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
+    """List topics you follow."""
+    _following_command(fetch_following_topics, url_token, limit, max_items, output_json, output, "followed topics")
+
+
+@browse_following.command("questions")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def following_questions(
+    url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str
+) -> None:
+    """List questions you follow."""
+    _following_command(
+        fetch_following_questions, url_token, limit, max_items, output_json, output, "followed questions"
+    )
+
+
+@browse_following.command("columns")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def following_columns(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
+    """List columns (zhuanlan) you follow."""
+    _following_command(fetch_following_columns, url_token, limit, max_items, output_json, output, "followed columns")
+
+
+@browse_following.command("collections")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def following_collections(
+    url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str
+) -> None:
+    """List collections (favorites) you follow."""
+    _following_command(
+        fetch_following_collections, url_token, limit, max_items, output_json, output, "followed collections"
+    )
 
 
 # ── people ───────────────────────────────────────────────────────────────
