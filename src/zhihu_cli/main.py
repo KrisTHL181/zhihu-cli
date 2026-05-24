@@ -62,6 +62,7 @@ from zhihu_cli.content.handlers.question import (
 from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
+from zhihu_cli.content.handlers.stats import get_item_stats
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.extensions import discover_extensions
 
@@ -1674,6 +1675,64 @@ def listen(url_token: str, topic: str, incognito: bool) -> None:
         listener.start()
     except KeyboardInterrupt:
         click.echo("\nStopped.")
+
+
+# ── stats ─────────────────────────────────────────────────────────────────
+
+
+@main.command("stats")
+@click.argument("url")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--with-share", is_flag=True, default=False, help="Include share count via creator API (author only)")
+@click.option(
+    "--with-pv", is_flag=True, default=False, help="Include page views (阅读量) via creator API (author only)"
+)
+@click.option(
+    "--with-show", is_flag=True, default=False, help="Include impressions (展现量) via creator API (author only)"
+)
+def stats(url: str, output_json: bool, with_share: bool, with_pv: bool, with_show: bool) -> None:
+    """Show engagement summary (赞同/收藏/评论/喜欢) for a Zhihu post.
+
+    URL can be an article, answer, or pin (想法).
+
+    Use --with-share / --with-pv / --with-show to also fetch data from the
+    creator analytics API. This only works when you are the author of the content.
+    """
+    try:
+        result = get_item_stats(url, with_share=with_share, with_pv=with_pv, with_show=with_show)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+    if output_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    click.echo(f"  {click.style(result['title'], bold=True)}")
+    click.echo(f"  {click.style(result['url'], dim=True)}")
+    click.echo()
+    click.echo(f"  赞同 (voteup):  {result['voteup_count']}")
+    click.echo(f"  收藏 (favorite): {result['favlists_count']}")
+    click.echo(f"  评论 (comment):  {result['comment_count']}")
+    click.echo(f"  喜欢 (thanks):   {result['thanks_count']}")
+    if with_pv:
+        pv = result.get("pv")
+        if pv is None:
+            click.echo(f"  阅读 (pv):       {click.style('(not author / unavailable)', dim=True)}")
+        else:
+            click.echo(f"  阅读 (pv):       {pv}")
+    if with_show:
+        show = result.get("show")
+        if show is None:
+            click.echo(f"  展现 (show):     {click.style('(not author / unavailable)', dim=True)}")
+        else:
+            click.echo(f"  展现 (show):     {show}")
+    if with_share:
+        sc = result.get("share_count")
+        if sc is None:
+            click.echo(f"  分享 (share):    {click.style('(not author / unavailable)', dim=True)}")
+        else:
+            click.echo(f"  分享 (share):    {sc}")
 
 
 # ── scrape ───────────────────────────────────────────────────────────────
