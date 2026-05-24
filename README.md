@@ -179,16 +179,16 @@ zhihu convert draft <question_url> -o draft.md                   # fetch draft a
 
 ### Tools — analytics
 
-#### Income Analytics (`zhihu tools income`)
+#### Creator Analytics (`zhihu tools creator`)
 
 ```bash
-zhihu tools income fetch         # fetch creator income data
-zhihu tools income monthly       # monthly summary table
-zhihu tools income plot          # bar chart + EMA + trend
-zhihu tools income advanced      # Bollinger + MACD analysis
-zhihu tools income derivative    # velocity, acceleration, jerk
-zhihu tools income weekday       # weekday distribution
-zhihu tools income metrics       # per-content daily metrics
+zhihu tools creator fetch         # fetch creator income data
+zhihu tools creator monthly       # monthly summary table
+zhihu tools creator plot          # bar chart + EMA + trend
+zhihu tools creator advanced      # Bollinger + MACD analysis
+zhihu tools creator derivative    # velocity, acceleration, jerk
+zhihu tools creator weekday       # weekday distribution
+zhihu tools creator metrics       # per-content daily metrics
 ```
 
 Plots saved to `~/.zhihu-cli/plots/`.
@@ -235,7 +235,7 @@ src/zhihu_cli/
 │   │   └── zse.py           # ZSE v4 encryption (pure Python, ported from Rust)
 │   ├── download_contents.py # content downloader — Markdown + JSON metadata
 │   └── universal_converter.py  # normalize export JSON to unified format
-├── money_tools/             # creator income analytics + plotting
+├── creator_tools/           # creator analytics + plotting
 ├── nlp_tools/               # word count, wordcloud, KMeans clustering
 └── extensions/              # auto-discovered plugin system
     └── crank/               # paper monitoring + archiving extension

@@ -146,7 +146,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
         else:
             print()
             print("  Run: zhihu scrape creations")
-            print("  Then: zhihu tools income metrics")
+            print("  Then: zhihu tools creator metrics")
             return
 
     headers = cache_manager.load_headers()

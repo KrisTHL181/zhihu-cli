@@ -1690,7 +1690,7 @@ def scrape() -> None:
 )
 def scrape_creations(output: str) -> None:
     """Fetch all user creation IDs (answers, articles, pins) → JSON."""
-    from zhihu_cli.money_tools.parse_content_datas import generate_assets_file
+    from zhihu_cli.creator_tools.parse_content_datas import generate_assets_file
 
     generate_assets_file(Path(output))
 
@@ -1869,23 +1869,23 @@ for _ext_mod in discover_extensions():
 
 @main.group()
 def tools() -> None:
-    """Analysis tools — income analytics and NLP text analysis."""
+    """Analysis tools — creator analytics and NLP text analysis."""
 
 
-@tools.group("income")
-def tools_income() -> None:
-    """Zhihu creator income analytics."""
+@tools.group("creator")
+def tools_creator() -> None:
+    """Zhihu creator analytics."""
 
 
-@tools_income.command("fetch")
-def income_fetch() -> None:
+@tools_creator.command("fetch")
+def creator_fetch() -> None:
     """Fetch incremental income data from Zhihu creator API."""
-    from zhihu_cli.money_tools.parse_zhihu_incomes import run_task
+    from zhihu_cli.creator_tools.parse_zhihu_incomes import run_task
 
     run_task()
 
 
-@tools_income.command("monthly")
+@tools_creator.command("monthly")
 @click.option(
     "--file",
     "-f",
@@ -1894,9 +1894,9 @@ def income_fetch() -> None:
     help="Income report JSON",
 )
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def income_monthly(file_path: str, output_json: bool) -> None:
+def creator_monthly(file_path: str, output_json: bool) -> None:
     """Print monthly income summary table."""
-    from zhihu_cli.money_tools.analyze_monthly_income import analyze_monthly_income, get_monthly_income_data
+    from zhihu_cli.creator_tools.analyze_monthly_income import analyze_monthly_income, get_monthly_income_data
 
     if output_json:
         click.echo(json.dumps(get_monthly_income_data(file_path), ensure_ascii=False, indent=2))
@@ -1904,56 +1904,56 @@ def income_monthly(file_path: str, output_json: bool) -> None:
     analyze_monthly_income(file_path)
 
 
-@tools_income.command("plot")
-def income_plot() -> None:
+@tools_creator.command("plot")
+def creator_plot() -> None:
     """Generate basic income plot (bar chart + EMA + trend)."""
-    from zhihu_cli.money_tools.plot_zhihu_incomes import plot_analysis
+    from zhihu_cli.creator_tools.plot_zhihu_incomes import plot_analysis
 
     plot_analysis()
     click.echo(f"Saved {get_data_dir() / 'plots' / 'income_analysis.png'}")
 
 
-@tools_income.command("advanced")
-def income_advanced() -> None:
+@tools_creator.command("advanced")
+def creator_advanced() -> None:
     """Generate advanced analysis plot (Bollinger + MACD)."""
-    from zhihu_cli.money_tools.plot_zhihu_incomes_advanced import plot_advanced_analysis
+    from zhihu_cli.creator_tools.plot_zhihu_incomes_advanced import plot_advanced_analysis
 
     plot_advanced_analysis()
     click.echo(f"Saved {get_data_dir() / 'plots' / 'income_advanced_analysis.png'}")
 
 
-@tools_income.command("derivative")
-def income_derivative() -> None:
+@tools_creator.command("derivative")
+def creator_derivative() -> None:
     """Generate derivative analysis plot (velocity, acceleration, jerk)."""
-    from zhihu_cli.money_tools.derivative_analysis import plot_derivative_analysis
+    from zhihu_cli.creator_tools.derivative_analysis import plot_derivative_analysis
 
     plot_derivative_analysis()
     click.echo(f"Saved {get_data_dir() / 'plots' / 'derivative_analysis.png'}")
 
 
-@tools_income.command("weekday")
-def income_weekday() -> None:
+@tools_creator.command("weekday")
+def creator_weekday() -> None:
     """Generate weekday income distribution plot."""
-    from zhihu_cli.money_tools.weekday_income_analysis import plot_weekday_analysis
+    from zhihu_cli.creator_tools.weekday_income_analysis import plot_weekday_analysis
 
     plot_weekday_analysis()
     click.echo(f"Saved {get_data_dir() / 'plots' / 'weekday_income_analysis.png'}")
 
 
-@tools_income.command("metrics")
+@tools_creator.command("metrics")
 @click.option("--aggr", is_flag=True, help="Use aggregated endpoint (single datapoint per content)")
-def income_metrics(aggr: bool) -> None:
+def creator_metrics(aggr: bool) -> None:
     """Fetch per-content daily metrics from Zhihu API."""
-    from zhihu_cli.money_tools.parse_content_datas import run_batch_daily_analysis
+    from zhihu_cli.creator_tools.parse_content_datas import run_batch_daily_analysis
 
     run_batch_daily_analysis(use_aggr=aggr)
 
 
-@tools_income.command("growth")
+@tools_creator.command("growth")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def income_growth(output_json: bool) -> None:
+def creator_growth(output_json: bool) -> None:
     """Fetch and display creator growth-level (创作分) data."""
-    from zhihu_cli.money_tools.growth_level import show_growth_level
+    from zhihu_cli.creator_tools.growth_level import show_growth_level
 
     show_growth_level(json_output=output_json)
 
