@@ -11,6 +11,7 @@ Environment variables:
 """
 
 import argparse
+import json
 import os
 import random
 import shutil
@@ -31,6 +32,28 @@ ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 CRANK_DIR = str(Path.home() / ".zhihu-cli" / "crank")
 HALL_OF_FLAMES_ROOT = CRANK_DIR
 SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
+LLM_CONFIG_PATH = os.path.join(CRANK_DIR, "llm_config.json")
+
+
+def load_llm_config() -> dict[str, str]:
+    """Load cached LLM config from disk. Returns empty dict if no cache exists."""
+    try:
+        if os.path.exists(LLM_CONFIG_PATH):
+            with open(LLM_CONFIG_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            return {k: v for k, v in data.items() if isinstance(v, str) and v}
+    except Exception:
+        pass
+    return {}
+
+
+def save_llm_config(api_base: str, api_key: str, model: str) -> None:
+    """Persist LLM config to disk cache."""
+    os.makedirs(CRANK_DIR, exist_ok=True)
+    data = {"api_base": api_base, "api_key": api_key, "model": model}
+    with open(LLM_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 # ── article list scraping ──────────────────────────────────────────────────
 
@@ -128,9 +151,10 @@ def call_llm_for_name(
         api_key: API key. Defaults to ``LLM_API_KEY`` env var.
         model: Model name. Defaults to ``LLM_MODEL`` env var or ``gpt-4o-mini``.
     """
-    _api_base = api_base or os.environ.get("LLM_API_BASE", "https://api.openai.com/v1")
-    _api_key = api_key or os.environ.get("LLM_API_KEY", "")
-    _model = model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    _cached = load_llm_config()
+    _api_base = api_base or os.environ.get("LLM_API_BASE") or _cached.get("api_base", "https://api.openai.com/v1")
+    _api_key = api_key or os.environ.get("LLM_API_KEY") or _cached.get("api_key", "")
+    _model = model or os.environ.get("LLM_MODEL") or _cached.get("model", "gpt-4o-mini")
 
     if not _api_key:
         print("Error: LLM API key not provided. Use --api-key or set LLM_API_KEY env var.", file=sys.stderr)

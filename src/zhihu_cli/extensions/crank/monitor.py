@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any
 
 from zhihu_cli.content.download_contents import sanitize_filename
 from zhihu_cli.content.handlers.article import scrape_article
-from zhihu_cli.extensions.crank.archiver import call_llm_for_name, fetch_article_list
+from zhihu_cli.extensions.crank.archiver import (
+    call_llm_for_name,
+    fetch_article_list,
+    load_llm_config,
+    save_llm_config,
+)
 
 if TYPE_CHECKING:
     import click
@@ -546,10 +551,24 @@ def register_commands(main_group: click.Group) -> None:
 
     # Shared LLM options used by ``fetch`` and ``archive``.
     _llm_options = [
-        _click.option("--api-endpoint", envvar="LLM_API_BASE", help="OpenAI-compatible API endpoint"),
-        _click.option("--api-key", envvar="LLM_API_KEY", help="API key"),
-        _click.option("--model", envvar="LLM_MODEL", default="gpt-4o-mini", help="Model name (default: gpt-4o-mini)"),
+        _click.option("--api-endpoint", envvar="LLM_API_BASE", help="OpenAI-compatible API endpoint (saved to cache)"),
+        _click.option("--api-key", envvar="LLM_API_KEY", help="API key (saved to cache)"),
+        _click.option("--model", envvar="LLM_MODEL", help="Model name (saved to cache, default: gpt-4o-mini)"),
     ]
+
+    def _resolve_llm_config(
+        api_endpoint: str | None,
+        api_key: str | None,
+        model: str | None,
+    ) -> tuple[str, str, str]:
+        """Resolve final LLM config: CLI arg → env var → cache → hardcoded default."""
+        cached = load_llm_config()
+        _api_base = (
+            api_endpoint or os.environ.get("LLM_API_BASE") or cached.get("api_base", "https://api.openai.com/v1")
+        )
+        _api_key = api_key or os.environ.get("LLM_API_KEY") or cached.get("api_key", "")
+        _model = model or os.environ.get("LLM_MODEL") or cached.get("model", "gpt-4o-mini")
+        return _api_base, _api_key, _model
 
     def _llm_decorator(fn):
         for opt in reversed(_llm_options):
@@ -567,11 +586,13 @@ def register_commands(main_group: click.Group) -> None:
         classify: bool,
         api_endpoint: str | None,
         api_key: str | None,
-        model: str,
+        model: str | None,
     ) -> None:
         """Download new articles from watched authors."""
+        api_base, api_key, model = _resolve_llm_config(api_endpoint, api_key, model)
+        save_llm_config(api_base, api_key, model)
         mon = CrankMonitor(
-            llm_api_base=api_endpoint,
+            llm_api_base=api_base,
             llm_api_key=api_key,
             llm_model=model,
             classify_downloads=classify,
@@ -596,7 +617,7 @@ def register_commands(main_group: click.Group) -> None:
         dry_run: bool,
         api_endpoint: str | None,
         api_key: str | None,
-        model: str,
+        model: str | None,
     ) -> None:
         """One-shot: fetch ALL articles from a Zhihu user, LLM-name the series, and archive.
 
@@ -605,12 +626,15 @@ def register_commands(main_group: click.Group) -> None:
         """
         from zhihu_cli.extensions.crank.archiver import run_archiver
 
+        api_base, api_key, model = _resolve_llm_config(api_endpoint, api_key, model)
+        save_llm_config(api_base, api_key, model)
+
         result = run_archiver(
             user_token=user_token,
             output_dir=output_dir,
             sample_count=sample_count,
             dry_run=dry_run,
-            api_base=api_endpoint,
+            api_base=api_base,
             api_key=api_key,
             model=model,
         )
