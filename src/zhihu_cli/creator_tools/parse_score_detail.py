@@ -13,7 +13,6 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 
 DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "creator_score_detail.json")
-DEFAULT_START_DATE: str = "2025-01-01"
 SCORE_URL: str = "https://www.zhihu.com/api/v4/creators/creator_score_detail"
 
 
@@ -40,7 +39,7 @@ def load_existing_data() -> tuple[list[dict[str, Any]], str]:
         except Exception as e:
             print(f"[!] Failed to read existing data: {e}, will re-fetch")
 
-    return [], DEFAULT_START_DATE
+    return [], cache_manager.get_start_date()
 
 
 def run_task() -> None:

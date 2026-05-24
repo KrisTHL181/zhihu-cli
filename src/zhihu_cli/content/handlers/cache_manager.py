@@ -36,6 +36,7 @@ class CacheManager:
         self.profiles_dir = self.cache_dir / "profiles"
         self.profiles_dir.mkdir(exist_ok=True)
         self.active_profile_file = self.cache_dir / "active_profile"
+        self.config_file = self.cache_dir / "config.json"
 
         self._migrate_old_cache()
 
@@ -203,6 +204,25 @@ class CacheManager:
             except json.JSONDecodeError:
                 return {}
         return {}
+
+    # ── config management ───────────────────────────────────────────────
+
+    def get_config(self) -> dict[str, Any]:
+        if self.config_file.exists():
+            try:
+                return json.loads(self.config_file.read_text())
+            except json.JSONDecodeError:
+                pass
+        return {}
+
+    def get_start_date(self) -> str:
+        config = self.get_config()
+        return config.get("default_start_date", "2026-01-16")
+
+    def set_start_date(self, date_str: str) -> None:
+        config = self.get_config()
+        config["default_start_date"] = date_str
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
 
     # ── question cache ──────────────────────────────────────────────────
 

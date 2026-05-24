@@ -11,7 +11,6 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 
 DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_income_report.json")
-DEFAULT_START_DATE: str = "2026-01-06"
 BASE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/detail/download"
 
 
@@ -30,7 +29,7 @@ def load_existing_data() -> tuple[list[dict[str, Any]], datetime]:
         except Exception as e:
             print(f"[!] Failed to read existing data: {e}, will re-fetch")
 
-    return [], datetime.strptime(DEFAULT_START_DATE, "%Y-%m-%d")
+    return [], datetime.strptime(cache_manager.get_start_date(), "%Y-%m-%d")
 
 
 def run_task() -> None:

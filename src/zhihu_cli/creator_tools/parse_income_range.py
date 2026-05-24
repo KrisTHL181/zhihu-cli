@@ -101,7 +101,7 @@ def run_task(
     if end_date is None:
         end_date = yesterday.strftime("%Y-%m-%d")
     if start_date is None:
-        start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+        start_date = cache_manager.get_start_date()
 
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
