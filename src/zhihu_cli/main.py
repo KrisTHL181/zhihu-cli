@@ -1966,6 +1966,31 @@ def creator_score() -> None:
     run_task()
 
 
+@tools_creator.command("income")
+@click.option("--start-date", default=None, help="Start date (YYYY-MM-DD), default: 30 days ago")
+@click.option("--end-date", default=None, help="End date (YYYY-MM-DD), default: today")
+@click.option("--order-field", default="content_publish_at", help="Sort field (default: content_publish_at)")
+@click.option("--order-sort", default="desc", help="Sort direction (default: desc)")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def creator_income(
+    start_date: str | None,
+    end_date: str | None,
+    order_field: str,
+    order_sort: str,
+    output_json: bool,
+) -> None:
+    """Fetch per-content income detail (单篇内容盐粒) from Zhihu API."""
+    from zhihu_cli.creator_tools.parse_income_range import run_task
+
+    run_task(
+        start_date=start_date,
+        end_date=end_date,
+        order_field=order_field,
+        order_sort=order_sort,
+        json_output=output_json,
+    )
+
+
 @tools_creator.group("follower")
 def tools_creator_follower() -> None:
     """Follower analytics (关注者分析)."""
