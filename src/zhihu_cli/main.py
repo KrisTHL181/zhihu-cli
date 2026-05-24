@@ -1949,6 +1949,15 @@ def income_metrics(aggr: bool) -> None:
     run_batch_daily_analysis(use_aggr=aggr)
 
 
+@tools_income.command("growth")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def income_growth(output_json: bool) -> None:
+    """Fetch and display creator growth-level (创作分) data."""
+    from zhihu_cli.money_tools.growth_level import show_growth_level
+
+    show_growth_level(json_output=output_json)
+
+
 @tools.group("nlp")
 def tools_nlp() -> None:
     """NLP text analysis on downloaded Markdown files."""
