@@ -1966,6 +1966,28 @@ def creator_score() -> None:
     run_task()
 
 
+@tools_creator.group("follower")
+def tools_creator_follower() -> None:
+    """Follower analytics (关注者分析)."""
+
+
+@tools_creator_follower.command("fetch")
+@click.option("--days", type=int, default=90, help="Number of days to fetch (default: 90)")
+def creator_follower_fetch(days: int) -> None:
+    """Fetch follower detail data from Zhihu API."""
+    from zhihu_cli.creator_tools.parse_follower_detail import run_task
+
+    run_task(days=days)
+
+
+@tools_creator_follower.command("analysis")
+def creator_follower_analysis() -> None:
+    """Fetch follower profile/demographics (关注者画像) from Zhihu API."""
+    from zhihu_cli.creator_tools.parse_follower_profile import run_task
+
+    run_task()
+
+
 @tools.group("nlp")
 def tools_nlp() -> None:
     """NLP text analysis on downloaded Markdown files."""
