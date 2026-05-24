@@ -699,6 +699,55 @@ def browse_notifications(limit: int, max_items: int | None, output_json: bool, o
         click.echo("No notifications found. Try logging in first: zhihu auth login")
 
 
+@browse.command("history")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def browse_history(limit: int, max_items: int | None, output_json: bool, output: str) -> None:
+    """View your Zhihu read history."""
+    from zhihu_cli.content.handlers.read_history import fetch_read_history
+
+    items = fetch_read_history(limit=limit, max_items=max_items)
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(items)} items to {output}", err=True)
+        return
+
+    for i, item in enumerate(items, 1):
+        ctype = item["content_type"]
+        title = item["title"] or "(no title)"
+        author = item["author_name"]
+        summary = item["summary"]
+        stats = item["stats_text"]
+        url = item["url"]
+        read_time = item["read_time"]
+
+        click.echo(f"[{i}] [{ctype}] {title[:120]}")
+        if author:
+            click.echo(f"    author: {author}")
+        if summary:
+            click.echo(f"    {summary[:200]}")
+        if stats:
+            click.echo(f"    {stats}")
+        if url:
+            click.echo(f"    {url}")
+        click.echo(f"    read: {read_time}")
+        click.echo()
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        click.echo(f"Saved {len(items)} items to {output}")
+
+    if not items:
+        click.echo("No read history found. Try logging in first: zhihu auth login")
+
+
 # ── people ───────────────────────────────────────────────────────────────
 
 
