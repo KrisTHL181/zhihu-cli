@@ -50,6 +50,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_answer,
     upvote_question,
 )
+from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.universal_converter import convert_items, load_json
@@ -502,6 +503,37 @@ def browse_answers(url: str, reading_mode: bool, output_json: bool) -> None:
         for i, ans in enumerate(answers, 1):
             click.echo(f"\n--- Answer {i} by {ans['author']} (+{ans['vote']}) ---")
             click.echo(ans["content"])
+
+
+@browse.command("log")
+@click.argument("url")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def browse_log(url: str, output_json: bool) -> None:
+    """View the edit history (log) of a Zhihu question."""
+    _, question_id = _parse_item_url(url)
+    if not question_id:
+        raise click.BadParameter(f"Cannot parse question ID from URL: {url}")
+
+    entries = fetch_question_log(question_id)
+
+    if output_json:
+        click.echo(json.dumps(entries, ensure_ascii=False, indent=2))
+        return
+
+    if not entries:
+        click.echo("No edit history found.")
+        return
+
+    for entry in entries:
+        user = entry["user"] or "unknown"
+        action = entry["action"]
+        time_str = entry["time"]
+        detail = entry["detail"]
+
+        click.echo(f"[{time_str}] {user} {action}")
+        if detail:
+            click.echo(f"  {detail[:200]}")
+        click.echo()
 
 
 @browse.command("comments")
