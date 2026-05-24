@@ -19,6 +19,7 @@ from zhihu_cli.content.handlers.collection import (
     create_collection,
     delete_collection,
     delete_to_collection,
+    list_collections,
 )
 from zhihu_cli.content.handlers.comments import comment_item, delete_comment, fetch_comments, print_comments
 from zhihu_cli.content.handlers.draft import draft_to_markdown
@@ -1498,6 +1499,39 @@ def collect_create(title: str, description: str, public: bool) -> None:
 def collect_delete(collection_id: str) -> None:
     """Delete a collection."""
     click.echo(delete_collection(collection_id))
+
+
+@interact_collect.command("list")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def collect_list(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
+    """List your collections."""
+    token = _resolve_following_token(url_token)
+    click.echo(f"Fetching collections for {token}...", err=True)
+
+    items = list_collections(token, limit=limit, max_items=max_items)
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(items)} items to {output}", err=True)
+        return
+
+    if not items:
+        click.echo("No collections found.")
+        return
+
+    _display_following_items(items)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        click.echo(f"Saved {len(items)} items to {output}")
 
 
 # ── publish ──────────────────────────────────────────────────────────────
