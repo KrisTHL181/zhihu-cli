@@ -77,9 +77,44 @@ def sanitize_filename(name: str) -> str:
     import html
 
     name = html.unescape(name)
-    name = re.sub(r"[^\w一-龥\-]", "_", name)
+    if os.name == "nt":
+        illegal_chars = ["<", ">", ":", '"', "/", "\\", "|", "?", "*"]
+        illegal_filenames = [
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM3",
+            "COM4",
+            "COM5",
+            "COM6",
+            "COM7",
+            "COM8",
+            "COM9",
+            "LPT1",
+            "LPT2",
+            "LPT3",
+            "LPT4",
+            "LPT5",
+            "LPT6",
+            "LPT7",
+            "LPT8",
+            "LPT9",
+        ]
+    else:
+        illegal_chars = ["/", "\0"]
+        illegal_filenames = []
+
+    for char in illegal_chars:
+        name = name.replace(char, "_")
+    base_name = os.path.splitext(name)[0]
+    if base_name.upper() in illegal_filenames:
+        name = f"_{name}_"
+    name = name.rstrip(". ")
     name = re.sub(r"_+", "_", name)
-    return name.strip("_")
+    return name.strip().strip("_")
 
 
 class ContentDownloader:
