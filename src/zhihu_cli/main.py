@@ -1958,6 +1958,14 @@ def creator_growth(output_json: bool) -> None:
     show_growth_level(json_output=output_json)
 
 
+@tools_creator.command("score")
+def creator_score() -> None:
+    """Fetch incremental creator score detail (创作分明细) from Zhihu API."""
+    from zhihu_cli.creator_tools.parse_score_detail import run_task
+
+    run_task()
+
+
 @tools.group("nlp")
 def tools_nlp() -> None:
     """NLP text analysis on downloaded Markdown files."""
