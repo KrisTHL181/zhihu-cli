@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from zhihu_cli.content.download_contents import build_yaml_frontmatter, get_safe_filename, sanitize_filename
+from zhihu_cli.content.download_contents import sanitize_filename, save_article
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.waterfall import stream_handler
@@ -243,22 +243,13 @@ def run_archiver(
     for url in article_urls:
         try:
             metadata, markdown = scrape_article(url)
-            title = sanitize_filename(metadata["title"])
-            author = sanitize_filename(metadata["author"]["name"])
-            created = metadata.get("created_time", "")[:10] or "unknown"
-            full_name = f"{title}_{author}_{created}"
-            filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
-            filepath = os.path.join(temp_dir, filename)
             meta = {
                 "title": metadata["title"],
                 "author": metadata["author"]["name"],
-                "created": created,
-                "source": url,
+                "created": metadata.get("created_time", "")[:10] or "unknown",
             }
-            file_content = build_yaml_frontmatter(meta) + markdown
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(file_content)
-            print(f"  [OK] {url} → {filename}")
+            filepath = save_article(url, meta, markdown, temp_dir)
+            print(f"  [OK] {url} → {os.path.basename(filepath)}")
         except Exception as e:
             print(f"  [Error] {url}: {e}", file=sys.stderr)
         time.sleep(1.0)

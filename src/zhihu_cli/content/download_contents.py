@@ -146,6 +146,51 @@ def build_yaml_frontmatter(metadata: dict[str, str]) -> str:
     return f"---\n{body}\n---\n\n"
 
 
+def save_article(url: str, metadata: dict[str, str], markdown: str, output_dir: str) -> str:
+    """Save a downloaded article as Markdown with YAML frontmatter.
+
+    Returns the file path.
+    """
+    title = sanitize_filename(metadata.get("title", "untitled"))
+    author = sanitize_filename(metadata.get("author", "unknown"))
+    created = metadata.get("created", "") or "unknown"
+    full_name = f"{title}_{author}_{created}"
+    filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
+    filepath = os.path.join(output_dir, filename)
+
+    meta = {**metadata, "source": url}
+    file_content = build_yaml_frontmatter(meta) + markdown
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(file_content)
+    return filepath
+
+
+def save_pin(url: str, metadata: dict[str, str], markdown: str, output_dir: str) -> str:
+    """Save a downloaded pin as Markdown with YAML frontmatter.
+
+    Returns the file path.
+    """
+    author = sanitize_filename(metadata.get("author", "unknown"))
+    created = metadata.get("created", "unknown")
+    preview = re.sub(r"\s+", " ", markdown)[:30]
+    preview = sanitize_filename(preview)
+    if not preview:
+        preview = metadata.get("pin_id", "unknown")
+    full_name = f"{author}_{created}_{preview}"
+    filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
+    filepath = os.path.join(output_dir, filename)
+
+    meta = {**metadata, "source": url}
+    file_content = build_yaml_frontmatter(meta) + markdown
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(file_content)
+    return filepath
+
+
 class ContentDownloader:
     """Zhihu content downloader."""
 
@@ -294,25 +339,12 @@ class ContentDownloader:
                 answer_markdown = self._html_to_markdown(answer_data["content"], url)
 
                 meta = {
-                    "question_name": question_title,
+                    "title": question_title,
                     "question_detail": question_detail,
                     "author": author,
                     "created": created,
-                    "source": url,
                 }
-
-                file_content = build_yaml_frontmatter(meta) + answer_markdown
-
-                safe_title = sanitize_filename(question_title)
-                safe_author = sanitize_filename(author)
-                safe_created = sanitize_filename(created) if created else "unknown"
-                full_name = f"{safe_title}_{safe_author}_{safe_created}"
-                filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
-
-                filepath = os.path.join(self.output_dir, filename)
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(file_content)
+                filepath = save_article(url, meta, answer_markdown, self.output_dir)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
@@ -348,19 +380,7 @@ class ContentDownloader:
         for url in urls:
             try:
                 metadata, markdown_content = self.fetch_article(url)
-
-                title = sanitize_filename(metadata["title"])
-                author = sanitize_filename(metadata["author"])
-                created = metadata["created"] if metadata["created"] else "unknown"
-
-                full_name = f"{title}_{author}_{created}"
-                filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
-                filepath = os.path.join(self.output_dir, filename)
-
-                metadata["source"] = url
-                file_content = build_yaml_frontmatter(metadata) + markdown_content
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(file_content)
+                filepath = save_article(url, metadata, markdown_content, self.output_dir)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
@@ -443,26 +463,13 @@ class ContentDownloader:
                 if not markdown_content:
                     markdown_content = "(no content)"
 
-                preview = re.sub(r"\s+", " ", markdown_content)[:30]
-                preview = sanitize_filename(preview)
-                if not preview:
-                    preview = pin_id
-                safe_author = sanitize_filename(author_name)
-                full_name = f"{safe_author}_{created_date}_{preview}"
-                filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
-                filepath = os.path.join(self.output_dir, filename)
-
                 meta = {
                     "author": author_name,
                     "created": created_date,
                     "ip": ip_info,
                     "pin_id": pin_id,
-                    "source": url,
                 }
-                file_content = build_yaml_frontmatter(meta) + markdown_content
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(file_content)
+                filepath = save_pin(url, meta, markdown_content, self.output_dir)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
