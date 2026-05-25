@@ -117,6 +117,28 @@ def sanitize_filename(name: str) -> str:
     return name.strip().strip("_")
 
 
+def get_safe_filename(long_title: str, ext: str = ".md", max_bytes: int = 240) -> str:
+    """Truncate title to fit within max_bytes UTF-8 bytes, preserving whole characters."""
+    ext_bytes = len(ext.encode("utf-8"))
+    available_bytes = max_bytes - ext_bytes
+
+    if len(long_title.encode("utf-8")) <= available_bytes:
+        return long_title + ext
+
+    current_bytes = 0
+    truncated_title = ""
+
+    for char in long_title:
+        char_bytes = len(char.encode("utf-8"))
+        if current_bytes + char_bytes <= available_bytes:
+            truncated_title += char
+            current_bytes += char_bytes
+        else:
+            break
+
+    return f"{truncated_title}...{ext}"
+
+
 class ContentDownloader:
     """Zhihu content downloader."""
 

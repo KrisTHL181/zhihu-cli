@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from zhihu_cli.content.download_contents import sanitize_filename
+from zhihu_cli.content.download_contents import get_safe_filename, sanitize_filename
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.waterfall import stream_handler
@@ -246,9 +246,8 @@ def run_archiver(
             title = sanitize_filename(metadata["title"])
             author = sanitize_filename(metadata["author"]["name"])
             created = metadata.get("created_time", "")[:10] or "unknown"
-            filename = f"{title}_{author}_{created}.md"
-            if len(filename) > 200:
-                filename = filename[:200]
+            full_name = f"{title}_{author}_{created}"
+            filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
             filepath = os.path.join(temp_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(markdown)
