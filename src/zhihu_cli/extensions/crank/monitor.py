@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zhihu_cli.content.download_contents import sanitize_filename
+from zhihu_cli.content.download_contents import build_yaml_frontmatter, get_safe_filename, sanitize_filename
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.extensions.crank.archiver import (
     call_llm_for_name,
@@ -77,32 +77,13 @@ def parse_frontmatter_field(filepath: Path, field: str) -> str | None:
     return None
 
 
-def build_yaml_frontmatter(
-    title: str,
-    author: str,
-    created: str,
-    source: str,
-    classification: str = "unknown",
-    crank_probability: float | None = None,
-) -> str:
-    """Build YAML frontmatter block matching the Hall of Flames convention."""
-    lines = f"---\ntitle: {title}\nauthor: {author}\ncreated: {created}\nsource: {source}"
-    if classification != "unknown":
-        lines += f"\nclassification: {classification}"
-    if crank_probability is not None:
-        lines += f"\ncrank_probability: {crank_probability:.4f}"
-    return lines + "\n---\n\n"
-
-
 def generate_filename(author: str, title: str, created: str) -> str:
     """Generate Hall-of-Flames-style filename: {YYYY-MM-DD}_{author}_{title}.md"""
     safe_author = sanitize_filename(author)
     safe_title = sanitize_filename(title)
     date_str = created if created else "unknown"
-    filename = f"{date_str}_{safe_author}_{safe_title}.md"
-    if len(filename) > 200:
-        filename = filename[:200]
-    return filename
+    full_name = f"{date_str}_{safe_author}_{safe_title}"
+    return get_safe_filename(full_name, ext=".md", max_bytes=240)
 
 
 # ── CrankMonitor ────────────────────────────────────────────────────────────
@@ -385,14 +366,17 @@ class CrankMonitor:
             filename = generate_filename(author, title, created)
             filepath = target_dir / filename
 
-            yaml_block = build_yaml_frontmatter(
-                title,
-                author,
-                created,
-                art_url,
-                classification=classification,
-                crank_probability=crank_probability,
-            )
+            meta: dict[str, str] = {
+                "title": title,
+                "author": author,
+                "created": created,
+                "source": art_url,
+            }
+            if classification != "unknown":
+                meta["classification"] = classification
+            if crank_probability is not None:
+                meta["crank_probability"] = f"{crank_probability:.4f}"
+            yaml_block = build_yaml_frontmatter(meta)
             filepath.write_text(yaml_block + markdown, encoding="utf-8")
 
             print(f"      → {filepath}")
