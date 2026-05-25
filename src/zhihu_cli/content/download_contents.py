@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import yaml
 from bs4 import BeautifulSoup
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -137,6 +138,12 @@ def get_safe_filename(long_title: str, ext: str = ".md", max_bytes: int = 240) -
             break
 
     return f"{truncated_title}...{ext}"
+
+
+def build_yaml_frontmatter(metadata: dict[str, str]) -> str:
+    """Build a YAML frontmatter block from a metadata dict."""
+    body = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).strip()
+    return f"---\n{body}\n---\n\n"
 
 
 class ContentDownloader:
@@ -286,18 +293,21 @@ class ContentDownloader:
 
                 answer_markdown = self._html_to_markdown(answer_data["content"], url)
 
-                json_line = json.dumps(
-                    {"question_name": question_title, "question_detail": question_detail}, ensure_ascii=False
-                )
+                meta = {
+                    "question_name": question_title,
+                    "question_detail": question_detail,
+                    "author": author,
+                    "created": created,
+                    "source": url,
+                }
 
-                file_content = f"{json_line}\n---\n{answer_markdown}"
+                file_content = build_yaml_frontmatter(meta) + answer_markdown
 
                 safe_title = sanitize_filename(question_title)
                 safe_author = sanitize_filename(author)
                 safe_created = sanitize_filename(created) if created else "unknown"
-                filename = f"{safe_title}_{safe_author}_{safe_created}.md"
-                if len(filename) > 200:
-                    filename = filename[:200]
+                full_name = f"{safe_title}_{safe_author}_{safe_created}"
+                filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
 
                 filepath = os.path.join(self.output_dir, filename)
 
@@ -343,14 +353,14 @@ class ContentDownloader:
                 author = sanitize_filename(metadata["author"])
                 created = metadata["created"] if metadata["created"] else "unknown"
 
-                filename = f"{title}_{author}_{created}.md"
-                if len(filename) > 200:
-                    filename = filename[:200]
-
+                full_name = f"{title}_{author}_{created}"
+                filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
                 filepath = os.path.join(self.output_dir, filename)
 
+                metadata["source"] = url
+                file_content = build_yaml_frontmatter(metadata) + markdown_content
                 with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(markdown_content)
+                    f.write(file_content)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
@@ -438,16 +448,18 @@ class ContentDownloader:
                 if not preview:
                     preview = pin_id
                 safe_author = sanitize_filename(author_name)
-                filename = f"{safe_author}_{created_date}_{preview}.md"
-                if len(filename) > 200:
-                    filename = filename[:200]
+                full_name = f"{safe_author}_{created_date}_{preview}"
+                filename = get_safe_filename(full_name, ext=".md", max_bytes=240)
                 filepath = os.path.join(self.output_dir, filename)
 
-                json_meta = json.dumps(
-                    {"author": author_name, "created": created_date, "ip": ip_info, "pin_id": pin_id, "url": url},
-                    ensure_ascii=False,
-                )
-                file_content = f"{json_meta}\n---\n{markdown_content}"
+                meta = {
+                    "author": author_name,
+                    "created": created_date,
+                    "ip": ip_info,
+                    "pin_id": pin_id,
+                    "source": url,
+                }
+                file_content = build_yaml_frontmatter(meta) + markdown_content
 
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(file_content)
