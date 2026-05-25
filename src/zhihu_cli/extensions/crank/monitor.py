@@ -668,6 +668,58 @@ def register_commands(main_group: click.Group) -> None:
         mon = CrankMonitor()
         mon.remove_author(author_name)
 
+    @crank_group.command("register")
+    def crank_register() -> None:
+        """Interactively register a new crank author to the monitor registry."""
+        name = _click.prompt("Author display name", type=str).strip()
+
+        # Scan papers dir for existing series directories matching this author
+        papers_dir = Path(SERIAL_PAPERS_DIR)
+        candidates: list[str] = []
+        if papers_dir.is_dir():
+            candidates = sorted(
+                d.name
+                for d in papers_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".") and d.name.startswith(name)
+            )
+
+        if len(candidates) == 1:
+            series_dir = _click.prompt(
+                f"Series directory name [{candidates[0]}]",
+                type=str,
+                default=candidates[0],
+                show_default=False,
+            ).strip()
+        elif len(candidates) > 1:
+            _click.echo("Found multiple matching series directories:")
+            for i, d in enumerate(candidates, 1):
+                _click.echo(f"  {i}. {d}")
+            _click.echo(f"  {len(candidates) + 1}. (enter manually)")
+            _click.echo(f"  {len(candidates) + 2}. (skip — leave blank for LLM auto-naming)")
+            choice = _click.prompt(
+                "Select",
+                type=int,
+                default=1,
+            )
+            if 1 <= choice <= len(candidates):
+                series_dir = candidates[choice - 1]
+            elif choice == len(candidates) + 1:
+                series_dir = _click.prompt("Series directory name", type=str, default="", show_default=False).strip()
+            else:
+                series_dir = ""
+        else:
+            series_dir = _click.prompt(
+                "Series directory name (enter to skip, will be LLM-named on first fetch)",
+                type=str,
+                default="",
+                show_default=False,
+            ).strip()
+
+        zhihu_token = _click.prompt("Zhihu URL token (e.g. mersenne-20)", type=str).strip()
+
+        mon = CrankMonitor()
+        mon.upsert_author(name, zhihu_token, series_dir)
+
     # ── classify subcommand group ──────────────────────────────────────
 
     @crank_group.group(name="classify")
