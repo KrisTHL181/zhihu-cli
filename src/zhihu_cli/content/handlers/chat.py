@@ -41,7 +41,7 @@ def get_inbox() -> list[dict[str, Any]]:
         messages.append(
             {
                 "id": message.get("participant", {}).get("id"),
-                "url_token": message.get("url_token", ""),
+                "url_token": message.get("participant", {}).get("url_token", ""),
                 "from": message.get("participant", {}).get("name", "unknown"),
                 "snippet": message.get("snippet", "(no content)"),
                 "updated_time": fmt_time(message.get("updated_time")),
