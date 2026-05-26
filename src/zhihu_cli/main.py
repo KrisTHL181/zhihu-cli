@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename
+from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename, save_article, save_pin
 from zhihu_cli.content.handlers import get_data_dir, get_type_and_id
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -51,6 +51,7 @@ from zhihu_cli.content.handlers.question import (
     downvote_question,
     follow_question,
     neutral_answer,
+    scrape_answer_page,
     scrape_answers,
     scrape_question_data,
     thank_answer,
@@ -467,6 +468,110 @@ def download_batch_articles(input_file: str, output_dir: str, delay: float, no_c
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
     dl.download_articles(urls, delay=delay)
+
+
+@download.command("user")
+@click.argument("user")
+@click.option(
+    "--output-dir", "-o", default=None, help="Base output directory (default: ~/.zhihu-cli/downloads/<username>)"
+)
+@click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests in seconds")
+@click.option("--max-items", "-n", type=int, default=None, help="Max items per content type")
+@click.option(
+    "--type",
+    "content_types",
+    default="all",
+    type=click.Choice(["answers", "articles", "pins", "all"]),
+    help="Content types to download (default: all)",
+)
+def download_user(user: str, output_dir: str | None, delay: float, max_items: int | None, content_types: str) -> None:
+    """Download all answers, articles, and pins from a Zhihu user."""
+    url_token = _extract_url_token(user)
+
+    profile = fetch_member_profile(url_token)
+    user_name = profile["name"] if profile else url_token
+    click.echo(f"User: {user_name} (url_token: {url_token})")
+
+    if output_dir is None:
+        base_dir = get_data_dir() / "downloads" / sanitize_filename(user_name)
+    else:
+        base_dir = Path(output_dir)
+
+    downloaded: dict[str, int] = {"answers": 0, "articles": 0, "pins": 0}
+
+    if content_types in ("answers", "all"):
+        answers_dir = str(base_dir / "answers")
+        click.echo(f"\nFetching answers list for {user_name}...")
+        answer_items = fetch_member_answers(url_token, max_items=max_items)
+        click.echo(f"  Found {len(answer_items)} answers. Downloading full content...")
+
+        for i, item in enumerate(answer_items, 1):
+            try:
+                meta, md = scrape_answer_page(item["url"])
+                save_meta = {
+                    "title": meta.get("title", "untitled"),
+                    "author": meta.get("author", "unknown"),
+                    "created": meta.get("created", "unknown"),
+                }
+                filepath = save_article(item["url"], save_meta, md, answers_dir)
+                click.echo(f"  [{i}/{len(answer_items)}] {save_meta['title'][:50]} -> {os.path.basename(filepath)}")
+                downloaded["answers"] += 1
+            except Exception as e:
+                click.echo(f"  [{i}/{len(answer_items)}] Error: {e}", err=True)
+            time.sleep(delay)
+
+    if content_types in ("articles", "all"):
+        articles_dir = str(base_dir / "articles")
+        click.echo(f"\nFetching articles list for {user_name}...")
+        article_items = fetch_member_articles(url_token, max_items=max_items)
+        click.echo(f"  Found {len(article_items)} articles. Downloading full content...")
+
+        for i, item in enumerate(article_items, 1):
+            try:
+                meta, md = scrape_article(item["url"])
+                author = meta.get("author", {})
+                author_name = author.get("name", "unknown") if isinstance(author, dict) else str(author)
+                save_meta = {
+                    "title": meta.get("title", "untitled"),
+                    "author": author_name,
+                    "created": (meta.get("created_time", "unknown") or "unknown")[:10],
+                }
+                filepath = save_article(item["url"], save_meta, md, articles_dir)
+                click.echo(f"  [{i}/{len(article_items)}] {save_meta['title'][:50]} -> {os.path.basename(filepath)}")
+                downloaded["articles"] += 1
+            except Exception as e:
+                click.echo(f"  [{i}/{len(article_items)}] Error: {e}", err=True)
+            time.sleep(delay)
+
+    if content_types in ("pins", "all"):
+        pins_dir = str(base_dir / "pins")
+        click.echo(f"\nFetching pins list for {user_name}...")
+        pin_items = fetch_member_pins(url_token, max_items=max_items)
+        click.echo(f"  Found {len(pin_items)} pins. Downloading full content...")
+
+        for i, item in enumerate(pin_items, 1):
+            try:
+                meta, md = scrape_pin(item["url"])
+                author = meta.get("author", {})
+                author_name = author.get("name", "unknown") if isinstance(author, dict) else str(author)
+                save_meta = {
+                    "author": author_name,
+                    "created": (meta.get("created_time", "unknown") or "unknown")[:10],
+                    "pin_id": str(meta.get("id", "")),
+                }
+                filepath = save_pin(item["url"], save_meta, md, pins_dir)
+                preview = (meta.get("excerpt", "") or "")[:30]
+                click.echo(f"  [{i}/{len(pin_items)}] {preview} -> {os.path.basename(filepath)}")
+                downloaded["pins"] += 1
+            except Exception as e:
+                click.echo(f"  [{i}/{len(pin_items)}] Error: {e}", err=True)
+            time.sleep(delay)
+
+    click.echo(f"\nDone! Downloaded from {user_name}:")
+    click.echo(f"  Answers: {downloaded['answers']}")
+    click.echo(f"  Articles: {downloaded['articles']}")
+    click.echo(f"  Pins: {downloaded['pins']}")
+    click.echo(f"  Output: {base_dir}")
 
 
 # ── browse ───────────────────────────────────────────────────────────────

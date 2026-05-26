@@ -1,5 +1,10 @@
+import json
+import re
 from collections.abc import Generator
+from datetime import datetime
 from typing import Any
+
+from bs4 import BeautifulSoup
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import get_page_entities, session
@@ -101,3 +106,82 @@ def follow_question(question_id: str) -> dict[str, Any]:
 def unfollow_question(question_id: str) -> dict[str, Any]:
     resp = session.delete(f"https://www.zhihu.com/api/v4/questions/{question_id}/followers")
     return resp.json()
+
+
+def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
+    """Scrape full content from a single answer page URL.
+
+    Returns (metadata, markdown_content).
+    """
+    resp = session.get(answer_url, timeout=15)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    init_script = soup.find("script", id="js-initialData")
+    if not init_script:
+        raise ValueError(f"No js-initialData found in {answer_url}")
+    data = json.loads(init_script.string)
+    entities = data.get("initialState", {}).get("entities", {})
+
+    answers = entities.get("answers", {})
+    if not answers:
+        raise ValueError(f"No answer data found in {answer_url}")
+    answer_data = next(iter(answers.values()))
+
+    questions = entities.get("questions", {})
+    question_title = "untitled"
+    if questions:
+        question_data = next(iter(questions.values()))
+        question_title = question_data.get("title", "untitled")
+
+    users = entities.get("users", {})
+    author_ref = answer_data.get("author", "")
+    author_name = "unknown"
+    if author_ref:
+        if isinstance(author_ref, str) and author_ref in users:
+            author_name = users[author_ref].get("name", "unknown")
+        elif isinstance(author_ref, dict):
+            author_name = author_ref.get("name", "unknown")
+
+    # Try entity timestamp fields first (may be seconds or milliseconds)
+    created_ts = answer_data.get("created_time") or answer_data.get("created") or answer_data.get("createdTime")
+    created_date = "unknown"
+    if created_ts:
+        try:
+            if isinstance(created_ts, (int, float)) and created_ts > 1e12:
+                created_ts = created_ts / 1000
+            created_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
+        except (ValueError, OSError):
+            pass
+
+    # Fall back to HTML <meta itemprop="dateCreated">
+    if created_date == "unknown":
+        created_meta = soup.select_one('meta[itemprop="dateCreated"]')
+        if created_meta and created_meta.get("content"):
+            created_raw = created_meta["content"]
+            try:
+                created_dt = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+                created_date = created_dt.strftime("%Y-%m-%d")
+            except (ValueError, OSError):
+                created_date = created_raw[:10] if len(created_raw) >= 10 else "unknown"
+
+    # Last fallback: .ContentItem-time element
+    if created_date == "unknown":
+        time_elem = soup.select_one(".ContentItem-time")
+        if time_elem:
+            time_text = time_elem.get_text()
+            match = re.search(r"(\d{4}-\d{2}-\d{2})", time_text)
+            if match:
+                created_date = match.group(1)
+
+    metadata = {
+        "id": str(answer_data.get("id", "")),
+        "title": question_title,
+        "author": author_name,
+        "created": created_date,
+    }
+
+    content_html = answer_data.get("content", "")
+    markdown = converter.convert(content_html)
+
+    return metadata, markdown
