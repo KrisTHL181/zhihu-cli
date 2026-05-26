@@ -515,6 +515,40 @@ def browse_answers(url: str, reading_mode: bool, output_json: bool) -> None:
             click.echo(ans["content"])
 
 
+@browse.command("article")
+@click.argument("url")
+@click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def browse_article(url: str, reading_mode: bool, output_json: bool) -> None:
+    """Read a Zhihu article in the terminal."""
+    metadata, markdown = scrape_article(url)
+
+    if output_json:
+        click.echo(json.dumps({"metadata": metadata, "content_md": markdown}, ensure_ascii=False, indent=2))
+        return
+
+    if reading_mode:
+        try:
+            from rich.console import Console
+            from rich.markdown import Markdown
+        except ImportError:
+            reading_mode = False
+
+    title = metadata.get("title", "untitled")
+    author = metadata.get("author", {}).get("name", "unknown")
+    header = f"# {title}\n\n**Author:** {author}"
+
+    if reading_mode:
+        console = Console()
+        with console.pager(styles=True, links=True):
+            console.print(Markdown(header))
+            console.print(Markdown(markdown))
+    else:
+        click.echo(header)
+        click.echo()
+        click.echo(markdown)
+
+
 @browse.command("log")
 @click.argument("url")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
