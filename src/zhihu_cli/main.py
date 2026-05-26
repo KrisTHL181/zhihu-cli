@@ -2205,6 +2205,25 @@ def nlp_cluster(source_dir: str, output: str, n_clusters: int, n_terms: int, mod
     click.echo(f"Saved {output}")
 
 
+@tools_nlp.command("conetwork")
+@click.option("--source-dir", default=str(get_data_dir() / "downloads"), help="Directory with Markdown files")
+@click.option("--topk", type=int, default=80, help="Top N words to include in network")
+@click.option("--window-size", type=int, default=5, help="Co-occurrence window size within documents")
+@click.option("--min-edge-weight", type=int, default=3, help="Minimum co-occurrence count to show edge")
+@click.option("--output", "-o", default=str(get_data_dir() / "plots" / "zhihu_conetwork.png"), help="Output image path")
+def nlp_conetwork(source_dir: str, topk: int, window_size: int, min_edge_weight: int, output: str) -> None:
+    """Word co-occurrence network visualization of downloaded content."""
+    from zhihu_cli.nlp_tools.cooccurrence_network import main as conetwork_main
+
+    conetwork_main(
+        source_dir=source_dir,
+        topk=topk,
+        window_size=window_size,
+        min_edge_weight=min_edge_weight,
+        output=output,
+    )
+
+
 # ── entry point ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

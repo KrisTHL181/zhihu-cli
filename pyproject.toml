@@ -21,6 +21,7 @@ classifier = [
     "transformers>=4.30.0",
     "scikit-learn>=1.0.0",
     "jieba",
+    "networkx",
 ]
 
 [project.scripts]
