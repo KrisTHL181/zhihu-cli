@@ -100,7 +100,14 @@ def _save_markdown(metadata: dict, markdown: str, output_dir: str, prefix: str =
     """Save markdown content to output_dir. Returns the file path."""
     os.makedirs(output_dir, exist_ok=True)
     title = sanitize_filename(metadata.get("title", "untitled"))
-    author = sanitize_filename(metadata.get("author", "unknown"))
+
+    # author may be a string or a dict (e.g. from scrape_article)
+    author_raw = metadata.get("author", "unknown")
+    if isinstance(author_raw, dict):
+        author = sanitize_filename(author_raw.get("name", "unknown"))
+    else:
+        author = sanitize_filename(author_raw)
+
     created = sanitize_filename(metadata.get("created_time", "unknown"))
     filename = f"{prefix}{title}_{author}_{created}.md"[:200]
     filepath = os.path.join(output_dir, filename)

@@ -8,10 +8,9 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from bs4 import BeautifulSoup
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session, session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
@@ -267,31 +266,6 @@ class ContentDownloader:
         print("[Success] Headers configured and cached.")
         return True
 
-    def _html_to_markdown(self, html_content: str, url: str = "") -> str:
-        """Convert HTML to Markdown, falling back to BeautifulSoup on failure."""
-        if not html_content:
-            return ""
-
-        try:
-            markdown = self.md_converter.convert(html_content, url)
-            if markdown and markdown.strip():
-                return markdown
-        except Exception as e:
-            print(f"[Warning] md_converter failed: {e}, falling back to BeautifulSoup")
-
-        try:
-            soup = BeautifulSoup(html_content, "html.parser")
-            for script in soup(["script", "style"]):
-                script.decompose()
-            text = soup.get_text(separator="\n")
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase for line in lines for phrase in line.split("  "))
-            text = "\n".join(chunk for chunk in chunks if chunk)
-            return text
-        except Exception as e:
-            print(f"[Error] BeautifulSoup fallback failed: {e}")
-            return ""
-
     def download_answers(self, urls: list[str], delay: float = 1.0) -> None:
         """Download answer pages and convert to Markdown."""
         if not self.headers:
@@ -307,19 +281,14 @@ class ContentDownloader:
                 answer_data = page_data["answers"][next(iter(page_data["answers"]))]
 
                 question_title = question_data["title"]
-                question_detail = self._html_to_markdown(question_data.get("detail", ""))
+                question_detail = self.md_converter.convert(question_data.get("detail", ""))
 
-                # Author: prefer entity, fall back to HTML
                 author = _resolve_author(question_data, answer_data, page_data.get("users", {}))
-                if author == "unknown":
-                    soup = BeautifulSoup(html_content, "html.parser")
-                    author_elem = soup.select_one("div.AuthorInfo a.UserLink-link")
-                    author = author_elem.img["alt"].strip() if author_elem and author_elem.img else "unknown"
 
                 # Created: prefer entity timestamps
                 created = _resolve_created(answer_data, question_data)
 
-                answer_markdown = self._html_to_markdown(answer_data["content"], url)
+                answer_markdown = self.md_converter.convert(answer_data["content"], url)
 
                 meta = {
                     "title": question_title,
@@ -347,12 +316,39 @@ class ContentDownloader:
         """Fetch and convert a single article. Returns (metadata, markdown_content)."""
         if not self.headers:
             raise RuntimeError("Headers not loaded")
-        resp = session.get(url, timeout=15)
-        resp.raise_for_status()
-        html_content = resp.text
-        metadata = extract_metadata_from_html(html_content)
-        markdown_content = self.md_converter.convert(html_content, url)
-        return metadata, markdown_content
+        html_content = fetch_page_html(url)
+
+        entities = get_page_state(html_content)
+        articles = entities.get("articles", {})
+        if articles:
+            article = next(iter(articles.values()))
+
+            # ── metadata from structured entity data ──────────────
+            title = article.get("title", "untitled")
+            title = html.unescape(title).strip().replace("/", "_")
+
+            author_info = article.get("author", {}) or {}
+            author = author_info.get("name", "unknown")
+            author = html.unescape(author).strip().replace("/", "_")
+
+            created = ""
+            created_ts = article.get("created")
+            if created_ts:
+                try:
+                    if isinstance(created_ts, (int, float)) and created_ts > 1e12:
+                        created_ts = created_ts / 1000
+                    created = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
+                except (ValueError, OSError):
+                    pass
+
+            metadata = {"title": title, "author": author, "created": created}
+
+            # Use the article content from the entity directly (cleaner
+            # than parsing the full page HTML — fewer lingering HTML
+            # entities, and matches what scrape_article() does).
+            content_html = article.get("content", "")
+            markdown_content = self.md_converter.convert(content_html, url)
+            return metadata, markdown_content
 
     def download_articles(self, urls: list[str], delay: float = 1.0) -> None:
         """Download article pages and convert to Markdown."""
@@ -421,7 +417,7 @@ class ContentDownloader:
                     if part_type == "text":
                         html_fragment = part.get("content", "")
                         if html_fragment:
-                            md = self._html_to_markdown(html_fragment, url)
+                            md = self.md_converter.convert(html_fragment, url)
                             if md:
                                 markdown_lines.append(md)
                     elif part_type == "image":
@@ -435,7 +431,7 @@ class ContentDownloader:
                             markdown_lines.append(f"[video]({video_url})")
 
                 if not markdown_lines and pin.get("contentHtml"):
-                    markdown_lines.append(self._html_to_markdown(pin["contentHtml"], url))
+                    markdown_lines.append(self.md_converter.convert(pin["contentHtml"], url))
 
                 markdown_content = "\n\n".join(markdown_lines).strip()
                 if not markdown_content:
