@@ -10,6 +10,15 @@ import click
 
 from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename, save_article, save_pin
 from zhihu_cli.content.handlers import get_data_dir, get_type_and_id
+from zhihu_cli.content.handlers.agora import (
+    VALID_VOTES,
+    VOTE_LABELS,
+    fetch_agora_me,
+    fetch_comment_detail,
+    fetch_court_page,
+    fetch_reviews,
+    vote_discussion,
+)
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.chat import get_inbox, iter_chat_history, send_text_message
@@ -1814,6 +1823,263 @@ def listen(url_token: str, topic: str, incognito: bool) -> None:
         listener.start()
     except KeyboardInterrupt:
         click.echo("\nStopped.")
+
+
+# ── agora ─────────────────────────────────────────────────────────────────
+@main.group()
+def agora() -> None:
+    """众裁 (community moderation) — review reported comments and vote."""
+
+
+@agora.command("next")
+@click.option("--discussion-id", "-d", default=None, help="Specific discussion ID to fetch")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def agora_next(discussion_id: str | None, output_json: bool) -> None:
+    """Get the next agora discussion to judge (众裁案例).
+
+    Fetches the court page and extracts the current discussion case.
+    Use -d to request a specific discussion by ID.
+    """
+    try:
+        data = fetch_court_page(discussion_id=discussion_id)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    if output_json:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    juror = data.get("juror_info", {})
+
+    # Show juror status header
+    if juror.get("is_juror"):
+        today = juror.get("today_jury_count", 0)
+        max_day = juror.get("max_day_jury_count", 20)
+        remaining = max(0, max_day - today)
+        click.echo(f"众裁官 | 总投票: {juror.get('vote_count', 0)} | 今日: {today}/{max_day} (剩余 {remaining})")
+    else:
+        click.echo(click.style("你尚不是众裁官", fg="yellow"))
+
+    disc = data.get("current_discussion")
+    if not disc:
+        disc_id = data.get("discussion_id", "")
+        if disc_id:
+            click.echo(f"\nDiscussion ID: {disc_id}")
+            click.echo("Discussion data not in initialData. Try fetching details with 'zhihu agora detail {disc_id}'.")
+        else:
+            click.echo("\nNo pending discussions. Check back later!")
+        return
+
+    click.echo()
+
+    # Report reason
+    reason = disc.get("report_reason", "")
+    note = disc.get("report_note", "")
+    click.echo(click.style(f"举报理由: {reason}", fg="red", bold=True))
+    if note:
+        click.echo(f"  {note}")
+    click.echo()
+
+    # The reported comment
+    comment = disc.get("comment", {})
+    _print_agora_comment(comment, disc.get("reported_user", ""))
+    click.echo()
+
+    # Origin context
+    origin_title = disc.get("origin_title", "")
+    origin_url = disc.get("origin_url", "")
+    if origin_title:
+        click.echo(f"评论所在内容: {click.style(origin_title, bold=True)}")
+    if origin_url:
+        click.echo(f"  {click.style(origin_url, dim=True)}")
+    click.echo()
+
+    # Status
+    status = disc.get("status", "")
+    my_vote = disc.get("my_vote", "")
+    status_str = f"状态: {status}"
+    if my_vote:
+        status_str += f"  我的投票: {my_vote}"
+    click.echo(click.style(status_str, dim=True))
+
+    if not my_vote and status == "Voting":
+        click.echo()
+        click.echo(
+            "投票: zhihu agora vote {} -v {{affirmative,abstain,dissenting}}".format(
+                disc.get("id", data.get("discussion_id", "<id>"))
+            )
+        )
+
+
+def _print_agora_comment(comment: dict, reported_user: str) -> None:
+    """Print a single comment block for agora display."""
+    author = comment.get("author", {})
+    author_name = author.get("name", "unknown") if isinstance(author, dict) else str(author)
+    headline = author.get("headline", "") if isinstance(author, dict) else ""
+    content = comment.get("content", "(no content)")
+    created = comment.get("created_time", 0)
+    votes = comment.get("vote_count", 0)
+    url = comment.get("url", "")
+
+    click.echo(
+        f"被举报评论 — {click.style(author_name, bold=True)}{' (' + reported_user + ')' if reported_user else ''}"
+    )
+    if headline:
+        click.echo(f"  {click.style(headline, dim=True)}")
+    click.echo()
+    click.echo(f"  {content}")
+    click.echo()
+    click.echo(f"  赞同: {votes}  |  时间: {click.style(str(created), dim=True)}  |  {click.style(url, dim=True)}")
+
+
+@agora.command("me")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def agora_me(output_json: bool) -> None:
+    """Show your agora (众裁) juror status and statistics."""
+    data = fetch_agora_me()
+
+    if output_json:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    juror = data.get("juror_info", {})
+
+    if not data.get("is_juror"):
+        click.echo("You are not a juror (众裁官).")
+        return
+
+    click.echo(click.style("众裁官 (Juror)", bold=True, fg="green"))
+    click.echo()
+    click.echo(f"  总投票 (total votes):      {juror.get('vote_count', 0)}")
+    click.echo(f"  总评审 (total reviews):     {juror.get('review_count', 0)}")
+    click.echo(f"  评审获赞 (review likes):    {juror.get('review_liked_count', 0)}")
+    click.echo()
+    click.echo(
+        f"  今日已裁 (today judged):    {juror.get('today_jury_count', 0)} / {juror.get('max_day_jury_count', 20)}"
+    )
+    click.echo()
+    click.echo(f"  本周投票 (week votes):      {juror.get('week_vote_count', 0)}")
+    click.echo(f"  本周评审 (week reviews):    {juror.get('week_review_count', 0)}")
+    click.echo(f"  本周获赞 (week likes):      {juror.get('week_review_liked_count', 0)}")
+
+
+@agora.command("reviews")
+@click.argument("discussion_id")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def agora_reviews(discussion_id: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    """List review cases in an agora discussion."""
+    items = fetch_reviews(discussion_id, limit=limit, max_items=max_items)
+
+    if output_json:
+        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        return
+
+    if not items:
+        click.echo("No review cases found.")
+        return
+
+    for i, item in enumerate(items, 1):
+        comment_content = item.get("comment_content", "") or "(no content)"
+        author = item.get("comment_author", {})
+        author_name = author.get("name", "unknown") if isinstance(author, dict) else str(author)
+        reason = item.get("reason", "") or "(no reason)"
+        status = item.get("status", "")
+        my_vote = item.get("my_vote", "")
+
+        status_str = f" [{status}]" if status else ""
+        vote_str = f" my_vote={my_vote}" if my_vote else ""
+
+        click.echo(f"[{i}] {click.style(author_name, bold=True)}{status_str}{vote_str}")
+        click.echo(f"    comment: {comment_content[:200]}")
+        if reason:
+            click.echo(f"    reason: {reason}")
+        click.echo(f"    赞同: {item.get('affirmative_count', 0)}  反对: {item.get('dissenting_count', 0)}")
+        click.echo()
+
+
+@agora.command("detail")
+@click.argument("discussion_id")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def agora_detail(discussion_id: str, output_json: bool) -> None:
+    """Show the reported comment detail for an agora discussion."""
+    detail = fetch_comment_detail(discussion_id)
+
+    if output_json:
+        click.echo(json.dumps(detail, ensure_ascii=False, indent=2))
+        return
+
+    comment = detail.get("comment", {})
+    author = comment.get("author", {})
+
+    click.echo(f"Resource: {detail.get('resource_id', '?')}")
+    click.echo(f"Reported comment ID: {detail.get('reported_comment_id', '?')}")
+    click.echo()
+
+    author_name = author.get("name", "unknown")
+    click.echo(f"Author: {click.style(author_name, bold=True)}")
+    if author.get("headline"):
+        click.echo(f"  {author['headline']}")
+    click.echo(f"  url_token: {author.get('url_token', '?')}")
+    click.echo()
+
+    click.echo(f"Comment (id={comment.get('id', '?')}):")
+    click.echo(f"  {comment.get('content', '(no content)')}")
+    click.echo()
+    click.echo(
+        f"created: {comment.get('created_time', '?')}  "
+        f"votes: {comment.get('vote_count', 0)}  "
+        f"child_comments: {comment.get('child_comment_count', 0)}"
+    )
+    click.echo(f"url: {comment.get('url', '?')}")
+    click.echo()
+
+    children = detail.get("child_comments", [])
+    if children:
+        click.echo(f"Child comments ({len(children)}):")
+        for cc in children:
+            cc_content = cc.get("content", "")[:150]
+            cc_author = cc.get("author", {}).get("member", {}).get("name", "?")
+            click.echo(f"  [{cc_author}] {cc_content}")
+
+
+@agora.command("vote")
+@click.argument("discussion_id")
+@click.option(
+    "--vote",
+    "-v",
+    "vote_type",
+    required=True,
+    type=click.Choice(VALID_VOTES),
+    help="Vote choice",
+)
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def agora_vote(discussion_id: str, vote_type: str, output_json: bool) -> None:
+    """Cast a vote on an agora discussion (众裁投票).
+
+    \b
+    Vote types:
+      affirmative  — 赞同 (agree the comment should be removed)
+      abstain      — 弃权 (abstain)
+      dissenting   — 反对 (dissent, the comment should stay)
+    """
+    try:
+        result = vote_discussion(discussion_id, vote_type)
+    except ValueError as e:
+        raise click.BadParameter(str(e))
+
+    if output_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    label = VOTE_LABELS.get(vote_type, vote_type)
+    click.echo(f"Vote: {label}")
+    click.echo(f"  赞同 (affirmative): {result['affirmative_count']}")
+    click.echo(f"  反对 (dissenting):  {result['dissenting_count']}")
+    if result["blind_test_wrong"]:
+        click.echo(f"  {click.style('盲测错误 (blind test wrong)', fg='yellow')}")
+        click.echo(f"  今日盲测错误: {result['blind_test_today_wrong_count']}")
 
 
 # ── stats ─────────────────────────────────────────────────────────────────
