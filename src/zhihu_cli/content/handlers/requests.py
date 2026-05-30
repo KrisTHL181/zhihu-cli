@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
+from curl_cffi import CurlHttpVersion
 from curl_cffi import requests as _requests
 from user_agents import parse
 
@@ -102,7 +103,10 @@ class ZhihuSession(_requests.Session):
 
 headers = cache_manager.load_headers()
 
-session = requests = ZhihuSession(impersonate=get_browser(headers.get("User-Agent", "")))
+session = requests = ZhihuSession(
+    impersonate=get_browser(headers.get("User-Agent", "")),
+    http_version=CurlHttpVersion.V3,
+)
 requests.headers.update(headers)
 
 
@@ -110,7 +114,10 @@ def reload_session() -> None:
     """Reload the global session with headers from the active profile."""
     global headers, session, requests
     headers = cache_manager.load_headers()
-    session = requests = ZhihuSession(impersonate=get_browser(headers.get("User-Agent", "")))
+    session = requests = ZhihuSession(
+        impersonate=get_browser(headers.get("User-Agent", "")),
+        http_version=CurlHttpVersion.V3,
+    )
     requests.headers.update(headers)
 
 
