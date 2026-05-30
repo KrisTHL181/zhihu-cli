@@ -1,6 +1,6 @@
 from typing import Any
 
-from bs4 import BeautifulSoup
+from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers.requests import session
 
@@ -21,10 +21,10 @@ def fetch_question_log(question_id: str) -> list[dict[str, Any]]:
     resp = session.get(LOG_URL.format(question_id=question_id))
     resp.raise_for_status()
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    doc = lxml_html.fromstring(resp.text)
     entries = []
 
-    for item in soup.find_all("div", class_="zm-item"):
+    for item in doc.cssselect("div.zm-item"):
         log_id = item.get("id", "").replace("logitem-", "")
 
         action_div = item.find("div")
@@ -32,31 +32,32 @@ def fetch_question_log(question_id: str) -> list[dict[str, Any]]:
         user_url = None
         action = ""
 
-        if action_div:
+        if action_div is not None:
             user_link = action_div.find("a")
-            if user_link:
-                user = user_link.get_text(strip=True)
+            if user_link is not None:
+                user = user_link.text_content().strip()
                 user_url = user_link.get("href", "")
             # Action text is the span after the user link, or the whole text
             action_span = action_div.find("span")
-            if action_span:
-                action = action_span.get_text(strip=True)
+            if action_span is not None:
+                action = action_span.text_content().strip()
             else:
-                raw_text = action_div.get_text(" ", strip=True)
+                raw_text = action_div.text_content().strip()
                 if user:
                     action = raw_text.replace(user, "").strip()
 
         detail = None
-        detail_div = item.find("div", class_="zg-item-log-detail")
-        if detail_div:
-            detail = detail_div.get_text(strip=True) or None
+        detail_divs = item.cssselect("div.zg-item-log-detail")
+        if detail_divs:
+            detail = detail_divs[0].text_content().strip() or None
 
         time_str = ""
-        meta_div = item.find("div", class_="zm-item-meta")
-        if meta_div:
+        meta_divs = item.cssselect("div.zm-item-meta")
+        if meta_divs:
+            meta_div = meta_divs[0]
             time_tag = meta_div.find("time")
-            if time_tag:
-                time_str = time_tag.get("datetime", time_tag.get_text(strip=True))
+            if time_tag is not None:
+                time_str = time_tag.get("datetime", time_tag.text_content().strip())
 
         entries.append(
             {

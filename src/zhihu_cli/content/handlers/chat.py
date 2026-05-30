@@ -3,11 +3,11 @@ from collections.abc import Generator
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from bs4 import BeautifulSoup
+from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
-from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter
+from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter, replace_with_text
 
 
 def _sanitize_html(raw: str) -> str:
@@ -17,18 +17,22 @@ def _sanitize_html(raw: str) -> str:
     (link.zhihu.com redirects, invisible/visible spans, etc.).
     This extracts readable text and resolves link targets.
     """
-    soup = BeautifulSoup(raw, "html.parser")
+    doc = lxml_html.fromstring(raw)
 
-    for a_tag in soup.find_all("a"):
+    # Use xpath with self:: to also match the root element (handles single-<a> fragments)
+    for a_tag in doc.xpath(".//a | self::a"):
         href = ZhihuLinkConverter.normalize_link(str(a_tag.get("href", "")))
-        text = a_tag.get_text(strip=True)
+        text = a_tag.text_content().strip()
         if text == href or not text:
             replacement = href
         else:
             replacement = f"[{text}]({href})"
-        a_tag.replace_with(replacement)
+        if a_tag is doc:
+            # Root is the <a> tag itself; return replacement text directly
+            return replacement
+        replace_with_text(a_tag, replacement)
 
-    return soup.get_text()
+    return doc.text_content()
 
 
 def get_inbox() -> list[dict[str, Any]]:

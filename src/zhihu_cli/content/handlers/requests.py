@@ -4,9 +4,9 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup
 from curl_cffi import CurlHttpVersion
 from curl_cffi import requests as _requests
+from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import get_user_agent
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -208,13 +208,13 @@ def fetch_page_html(url: str) -> str:
 
 
 def get_page_state(html_text: str, key: str = "entities") -> dict[str, Any]:
-    soup = BeautifulSoup(html_text, "html.parser")
+    doc = lxml_html.fromstring(html_text)
 
-    script_tag = soup.find("script", id="js-initialData")
-    if not script_tag or script_tag.string is None:
+    script_tag = doc.find(".//script[@id='js-initialData']")
+    if script_tag is None or not script_tag.text:
         raise ValueError("Could not find 'js-initialData' script tag")
 
-    initial_data = json.loads(script_tag.string)
+    initial_data = json.loads(script_tag.text)
     return initial_data["initialState"][key]
 
 

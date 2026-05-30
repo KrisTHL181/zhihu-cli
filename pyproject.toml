@@ -10,7 +10,8 @@ requires-python = ">=3.10"
 dependencies = [
     "click",
     "curl-cffi",
-    "beautifulsoup4",
+    "lxml",
+    "cssselect",
     "pyyaml",
     "rich",
 ]
