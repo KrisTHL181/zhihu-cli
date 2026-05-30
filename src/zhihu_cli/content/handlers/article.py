@@ -1,7 +1,7 @@
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import get_page_entities
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 from zhihu_cli.content.utils.html2markdown import converter
 
 
@@ -45,7 +45,7 @@ def parse_article_metadata(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def scrape_article(article_url: str) -> tuple[dict[str, Any], str]:
-    entities = get_page_entities(article_url)
+    entities = get_page_state(fetch_page_html(article_url))
     item = entities.get("articles", {})
     if not item:
         raise ValueError(f"No {item} data found in entities")

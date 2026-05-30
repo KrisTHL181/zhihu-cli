@@ -13,13 +13,10 @@ Endpoints:
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from typing import Any
 
-from bs4 import BeautifulSoup
-
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 AGORA_BASE = "https://www.zhihu.com/api/v4/agora"
@@ -91,18 +88,9 @@ def fetch_court_page(discussion_id: str | None = None) -> dict[str, Any]:
     else:
         url = f"{COURT_PAGE}?redirect_from_main=1"
 
-    resp = session.get(url)
-    resp.raise_for_status()
+    html_text = fetch_page_html(url)
 
-    soup = BeautifulSoup(resp.text, "html.parser")
-    script_tag = soup.find("script", id="js-initialData")
-    if not script_tag or script_tag.string is None:
-        raise ValueError(
-            "Could not find 'js-initialData' in court page. You may need to authenticate first: zhihu auth login"
-        )
-
-    initial_data = json.loads(script_tag.string)
-    court = initial_data.get("initialState", {}).get("court", {})
+    court = get_page_state(html_text, "court")
 
     # Current discussion ID
     current_disc = court.get("currentDiscussion", {})

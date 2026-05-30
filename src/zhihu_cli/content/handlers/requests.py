@@ -202,22 +202,20 @@ def reload_session() -> None:
     session = requests = sess
 
 
-def get_page_entities(url: str) -> dict[str, Any]:
+def fetch_page_html(url: str) -> str:
     url = url.replace("http://", "https://")
-    resp = session.get(url)
+    return session.get(url).text
 
-    if resp.status_code == 403:
-        raise PermissionError(f"Access denied (403). You might be blocked: {url}")
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+def get_page_state(html_text: str, key: str = "entities") -> dict[str, Any]:
+    soup = BeautifulSoup(html_text, "html.parser")
 
     script_tag = soup.find("script", id="js-initialData")
     if not script_tag or script_tag.string is None:
-        raise ValueError(f"Could not find 'js-initialData' script tag at {url}")
+        raise ValueError("Could not find 'js-initialData' script tag")
 
     initial_data = json.loads(script_tag.string)
-    page_data = initial_data["initialState"]["entities"]
-    return page_data
+    return initial_data["initialState"][key]
 
 
 # ── captcha helpers ────────────────────────────────────────────────────────

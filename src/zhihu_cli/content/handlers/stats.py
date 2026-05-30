@@ -4,7 +4,7 @@ share) for any Zhihu article / answer / pin URL."""
 from typing import Any
 
 from zhihu_cli.content.handlers import get_type_and_id
-from zhihu_cli.content.handlers.requests import get_page_entities, session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 
 # Map entity keys (plural) → creator API type param (singular)
 _ENTITY_TO_CREATOR_TYPE = {"articles": "article", "answers": "answer", "pins": "pin"}
@@ -34,7 +34,7 @@ def _extract_stats(item: dict[str, Any]) -> dict[str, Any]:
 
 def _stats_from_entities(url: str, entity_key: str) -> dict[str, Any]:
     """Extract stats from a Zhihu page's js-initialData entities for articles or pins."""
-    entities = get_page_entities(url)
+    entities = get_page_state(fetch_page_html(url))
     items = entities.get(entity_key, {})
     if not items:
         raise ValueError(f"No {entity_key} data found in page entities for {url}")

@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import get_page_entities, session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 MEMBER_API = "https://www.zhihu.com/api/v4/members/{token}"
@@ -38,7 +38,7 @@ def unblock(user_id: str) -> None:
 def fetch_member_profile(url_token: str) -> dict[str, Any] | None:
     """Fetch a member's public profile info (via HTML js-initialData)."""
     try:
-        entities = get_page_entities(f"https://www.zhihu.com/people/{url_token}")
+        entities = get_page_state(fetch_page_html(f"https://www.zhihu.com/people/{url_token}"))
     except Exception:
         return None
 

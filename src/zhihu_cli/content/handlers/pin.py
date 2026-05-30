@@ -1,7 +1,7 @@
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import get_page_entities
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 from zhihu_cli.content.utils.html2markdown import converter
 
 
@@ -46,7 +46,7 @@ def parse_pin_metadata(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def scrape_pin(pin_url: str) -> tuple[dict[str, Any], str]:
-    entities = get_page_entities(pin_url)
+    entities = get_page_state(fetch_page_html(pin_url))
     item = entities.get("pins", {})
     if not item:
         raise ValueError("No pins data found in entities")

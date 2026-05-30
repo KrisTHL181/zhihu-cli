@@ -1,13 +1,9 @@
-import json
-import re
 from collections.abc import Generator
 from datetime import datetime
 from typing import Any
 
-from bs4 import BeautifulSoup
-
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import get_page_entities, session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import converter
 
@@ -35,7 +31,7 @@ def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def scrape_question_data(question_url: str) -> tuple[dict[str, Any], str]:
-    entities = get_page_entities(question_url)
+    entities = get_page_state(fetch_page_html(question_url))
     item = entities.get("questions", {})
     if not item:
         raise ValueError(f"No {item} data found in entities")
@@ -113,21 +109,14 @@ def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
 
     Returns (metadata, markdown_content).
     """
-    resp = session.get(answer_url, timeout=15)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    init_script = soup.find("script", id="js-initialData")
-    if not init_script:
-        raise ValueError(f"No js-initialData found in {answer_url}")
-    data = json.loads(init_script.string)
-    entities = data.get("initialState", {}).get("entities", {})
+    entities = get_page_state(fetch_page_html(answer_url))
 
     answers = entities.get("answers", {})
     if not answers:
         raise ValueError(f"No answer data found in {answer_url}")
     answer_data = next(iter(answers.values()))
 
+    question_data = {}
     questions = entities.get("questions", {})
     question_title = "untitled"
     if questions:
@@ -143,8 +132,10 @@ def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
         elif isinstance(author_ref, dict):
             author_name = author_ref.get("name", "unknown")
 
-    # Try entity timestamp fields first (may be seconds or milliseconds)
+    # Resolve created date from entity timestamps
     created_ts = answer_data.get("created_time") or answer_data.get("created") or answer_data.get("createdTime")
+    if not created_ts:
+        created_ts = question_data.get("created")
     created_date = "unknown"
     if created_ts:
         try:
@@ -153,26 +144,6 @@ def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
             created_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
         except (ValueError, OSError):
             pass
-
-    # Fall back to HTML <meta itemprop="dateCreated">
-    if created_date == "unknown":
-        created_meta = soup.select_one('meta[itemprop="dateCreated"]')
-        if created_meta and created_meta.get("content"):
-            created_raw = created_meta["content"]
-            try:
-                created_dt = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
-                created_date = created_dt.strftime("%Y-%m-%d")
-            except (ValueError, OSError):
-                created_date = created_raw[:10] if len(created_raw) >= 10 else "unknown"
-
-    # Last fallback: .ContentItem-time element
-    if created_date == "unknown":
-        time_elem = soup.select_one(".ContentItem-time")
-        if time_elem:
-            time_text = time_elem.get_text()
-            match = re.search(r"(\d{4}-\d{2}-\d{2})", time_text)
-            if match:
-                created_date = match.group(1)
 
     metadata = {
         "id": str(answer_data.get("id", "")),

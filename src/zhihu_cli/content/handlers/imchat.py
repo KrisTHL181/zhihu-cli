@@ -7,14 +7,14 @@ from paho.mqtt import client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import get_page_entities
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 
 NOTIFICATION_TOPIC: str = "zhihu/notification/badge/web/v1/{USER_HASH}/"
 IMCHAT_TOPIC: str = "zhihu/message/v1/im/user/{USER_HASH}/"
 
 
 def get_pm_mqtt_topic(url_token: str) -> str:
-    entities = get_page_entities(f"https://www.zhihu.com/people/{url_token}")
+    entities = get_page_state(fetch_page_html(f"https://www.zhihu.com/people/{url_token}"))
     item = entities["users"]
     return next(iter(item))
 

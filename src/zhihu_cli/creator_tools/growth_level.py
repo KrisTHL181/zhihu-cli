@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 
 GROWTH_URL = "https://www.zhihu.com/creator/account/growth-level"
 
@@ -25,21 +24,9 @@ INDICATOR_LABELS: dict[int, str] = {
 
 
 def _fetch_score_info() -> dict[str, Any]:
-    resp = session.get(GROWTH_URL)
-    if resp.status_code == 403:
-        raise PermissionError("Access denied (403). Check authentication.")
-    resp.raise_for_status()
-
-    m = re.search(
-        r'<script id="js-initialData" type="text/json">(.*?)</script>',
-        resp.text,
-        re.DOTALL,
-    )
-    if not m:
-        raise ValueError("Could not find js-initialData on the page.")
-
-    initial_data = json.loads(m.group(1))
-    return initial_data["initialState"]["creators"]["home"]["scoreInfo"]
+    html_text = fetch_page_html(GROWTH_URL)
+    creators = get_page_state(html_text, "creators")
+    return creators["home"]["scoreInfo"]
 
 
 def _fmt_num(n: int) -> str:

@@ -1,6 +1,5 @@
 import argparse
 import html
-import json
 import os
 import re
 import sys
@@ -12,7 +11,7 @@ import yaml
 from bs4 import BeautifulSoup
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import reload_session, session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 
 
@@ -191,6 +190,42 @@ def save_pin(url: str, metadata: dict[str, str], markdown: str, output_dir: str)
     return filepath
 
 
+def _resolve_author(question_data: dict, answer_data: dict, users: dict[str, dict]) -> str:
+    """Resolve author name from entity data (question > answer > users)."""
+    # Try question author
+    author = question_data.get("author", {})
+    if isinstance(author, dict) and author.get("name"):
+        return author["name"]
+
+    # Try answer author as string (user ID reference)
+    ans_author = answer_data.get("author", "")
+    if isinstance(ans_author, str) and ans_author in users:
+        return users[ans_author].get("name", "unknown")
+
+    # Try answer author as dict
+    if isinstance(ans_author, dict) and ans_author.get("name"):
+        return ans_author["name"]
+
+    return "unknown"
+
+
+def _resolve_created(answer_data: dict, question_data: dict) -> str:
+    """Resolve created date from entity timestamps (answer > question)."""
+    created_ts = answer_data.get("created_time") or answer_data.get("created") or answer_data.get("createdTime")
+    if not created_ts:
+        created_ts = question_data.get("created")
+
+    if created_ts:
+        try:
+            if isinstance(created_ts, (int, float)) and created_ts > 1e12:
+                created_ts = created_ts / 1000
+            return datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
+        except (ValueError, OSError):
+            pass
+
+    return "unknown"
+
+
 class ContentDownloader:
     """Zhihu content downloader."""
 
@@ -257,59 +292,6 @@ class ContentDownloader:
             print(f"[Error] BeautifulSoup fallback failed: {e}")
             return ""
 
-    def _extract_answer_metadata(self, soup: BeautifulSoup) -> dict[str, str]:
-        """Extract question title, detail, author, and publish time from answer page."""
-        metadata = {}
-
-        # Question title
-        title_elem = soup.select_one("h1.QuestionHeader-title")
-        metadata["question_title"] = title_elem.get_text(strip=True) if title_elem else "untitled"
-
-        # Question detail HTML
-        detail_elem = soup.select_one('span[itemprop="text"]')
-        if not detail_elem:
-            detail_elem = soup.select_one("div.QuestionRichText")
-        if detail_elem:
-            metadata["question_detail_html"] = str(detail_elem)
-        else:
-            metadata["question_detail_html"] = ""
-
-        # Author
-        author_elem = soup.select_one("div.AuthorInfo a.UserLink-link")
-        metadata["author"] = author_elem.img["alt"].strip() if author_elem else "unknown"
-
-        # Publish time
-        created_meta = soup.select_one('meta[itemprop="dateCreated"]')
-        if created_meta and created_meta.get("content"):
-            created_raw = created_meta["content"]
-            try:
-                created_dt = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
-                metadata["created"] = created_dt.strftime("%Y-%m-%d")
-            except ValueError:
-                metadata["created"] = created_raw[:10] if len(created_raw) >= 10 else ""
-        else:
-            time_elem = soup.select_one(".ContentItem-time")
-            if time_elem:
-                time_text = time_elem.get_text()
-                match = re.search(r"(\d{4}-\d{2}-\d{2})", time_text)
-                if match:
-                    metadata["created"] = match.group(1)
-                else:
-                    metadata["created"] = "unknown"
-            else:
-                metadata["created"] = "unknown"
-
-        return metadata
-
-    def _extract_answer_content_html(self, soup: BeautifulSoup) -> str:
-        """Extract answer content HTML."""
-        content_elem = soup.select_one("div.RichContent-inner span.RichText")
-        if not content_elem:
-            content_elem = soup.select_one("div.RichContent-inner")
-        if content_elem:
-            return str(content_elem)
-        return ""
-
     def download_answers(self, urls: list[str], delay: float = 1.0) -> None:
         """Download answer pages and convert to Markdown."""
         if not self.headers:
@@ -318,23 +300,24 @@ class ContentDownloader:
 
         for url in urls:
             try:
-                resp = session.get(url, timeout=15)
-                resp.raise_for_status()
-                html_content = resp.text
+                html_content = fetch_page_html(url)
 
-                soup = BeautifulSoup(html_content, "html.parser")
-
-                meta = self._extract_answer_metadata(soup)
-
-                page_data = json.loads(soup.find("script", id="js-initialData").string)["initialState"]["entities"]
+                page_data = get_page_state(html_content)
                 question_data = page_data["questions"][next(iter(page_data["questions"]))]
                 answer_data = page_data["answers"][next(iter(page_data["answers"]))]
 
                 question_title = question_data["title"]
-                question_detail = self._html_to_markdown(question_data["detail"])
+                question_detail = self._html_to_markdown(question_data.get("detail", ""))
 
-                author = meta["author"]
-                created = meta["created"]
+                # Author: prefer entity, fall back to HTML
+                author = _resolve_author(question_data, answer_data, page_data.get("users", {}))
+                if author == "unknown":
+                    soup = BeautifulSoup(html_content, "html.parser")
+                    author_elem = soup.select_one("div.AuthorInfo a.UserLink-link")
+                    author = author_elem.img["alt"].strip() if author_elem and author_elem.img else "unknown"
+
+                # Created: prefer entity timestamps
+                created = _resolve_created(answer_data, question_data)
 
                 answer_markdown = self._html_to_markdown(answer_data["content"], url)
 
@@ -401,18 +384,13 @@ class ContentDownloader:
 
         for url in urls:
             try:
-                resp = session.get(url, timeout=15)
-                resp.raise_for_status()
-                html_content = resp.text
-                soup = BeautifulSoup(html_content, "html.parser")
+                html_content = fetch_page_html(url)
 
-                init_script = soup.find("script", id="js-initialData")
-                if not init_script:
-                    print(f"[Error] No js-initialData found in {url}")
+                try:
+                    entities = get_page_state(html_content)
+                except ValueError as e:
+                    print(f"[Error] {e} in {url}")
                     continue
-
-                data = json.loads(init_script.string)
-                entities = data.get("initialState", {}).get("entities", {})
                 pins = entities.get("pins", {})
                 if not pins:
                     print(f"[Error] No pin data found in {url}")
