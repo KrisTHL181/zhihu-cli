@@ -74,6 +74,7 @@ from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
+from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.extensions import discover_extensions
 
@@ -1262,6 +1263,86 @@ def browse_history(limit: int, max_items: int | None, output_json: bool, output:
 
     if not items:
         click.echo("No read history found. Try logging in first: zhihu auth login")
+
+
+@browse.command("yanxuan")
+@click.argument("url_or_id")
+@click.option("--offset", type=int, default=0, help="Starting segment offset (default: 0)")
+@click.option("--max-segments", "-n", type=int, default=None, help="Max segments to fetch")
+@click.option("--max-pages", type=int, default=None, help="Max API pages to fetch")
+@click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output segments as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to file")
+def browse_yanxuan(
+    url_or_id: str,
+    offset: int,
+    max_segments: int | None,
+    max_pages: int | None,
+    reading_mode: bool,
+    output_json: bool,
+    output: str,
+) -> None:
+    """Read Zhihu Yanxuan (盐选) premium content in the terminal.
+
+    URL_OR_ID can be a full answer URL, a composite question_id/answer_id,
+    or a raw answer ID (url_token).
+    """
+    url_token = extract_url_token(url_or_id)
+
+    meta, segments = fetch_yanxuan_segments(
+        url_token,
+        offset=offset,
+        max_segments=max_segments,
+        max_pages=max_pages,
+    )
+
+    if output_json:
+        click.echo(json.dumps({"meta": meta, "segments": segments}, ensure_ascii=False, indent=2))
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump({"meta": meta, "segments": segments}, f, ensure_ascii=False, indent=2)
+            click.echo(f"Saved {len(segments)} segments to {output}", err=True)
+        return
+
+    if not segments:
+        click.echo("No content found for this yanxuan item.")
+        return
+
+    # Build header from meta
+    title = meta.get("title", "") or meta.get("story_name", "")
+    brand = meta.get("brand", "")
+    copyright_ = meta.get("copyright", "")
+
+    header_parts = []
+    if title:
+        header_parts.append(f"# {title}")
+    if brand:
+        header_parts.append(f"**{brand}**")
+    if copyright_:
+        header_parts.append(f"*{copyright_}*")
+
+    header = "\n\n".join(header_parts) if header_parts else ""
+    body = segments_to_text(segments)
+    full_text = f"{header}\n\n{body}" if header else body
+
+    if reading_mode:
+        try:
+            from rich.console import Console
+            from rich.markdown import Markdown
+        except ImportError:
+            reading_mode = False
+
+    if reading_mode:
+        console = Console()
+        with console.pager(styles=True, links=True):
+            console.print(Markdown(full_text))
+    else:
+        click.echo(full_text)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(full_text)
+        click.echo(f"Saved {len(segments)} segments to {output}")
 
 
 # ── browse following ──────────────────────────────────────────────────────
