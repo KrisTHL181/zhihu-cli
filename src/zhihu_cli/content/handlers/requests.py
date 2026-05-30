@@ -1,12 +1,12 @@
 import hashlib
 import json
+import re
 from typing import Any
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from curl_cffi import CurlHttpVersion
 from curl_cffi import requests as _requests
-from user_agents import parse
 
 from zhihu_cli.content.handlers import get_user_agent
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -16,9 +16,45 @@ ZSE93 = "101_3_3.0"
 
 
 def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
-    family = parse(ua).browser.family.lower()
-    if family in _requests.impersonate.REAL_TARGET_MAP:
-        return family
+    """Detect browser family from a User-Agent string for curl_cffi TLS impersonation.
+
+    Matching order is deliberate:
+    1. Edge first — its UA also contains ``Chrome/``.
+    2. Chrome Android — distinguish phone (``Mobile``) vs tablet.
+    3. Chrome desktop — ``Chrome/`` without ``Mobile``.
+    4. Firefox — ``Firefox/`` + ``Gecko/``.
+    5. iOS Safari — ``iPhone/iPad/iPod`` + ``Safari/``.
+    6. Desktop Safari — ``Safari/`` + ``Version/``, no ``Mobile``, no ``Chrome/``.
+
+    Tor Browser is intentionally **not** detected — it forges a generic Firefox
+    UA on all platforms and actively hides its fingerprint.
+    """
+    if not ua:
+        return "chrome"
+
+    # Edge — contains the Edg/ marker (newer Chromium-based Edge).
+    if re.search(r"Edg/", ua):
+        return "edge"
+
+    # Chrome on Android — Linux + Android + Chrome/.
+    if "Android" in ua and re.search(r"Chrome/", ua):
+        return "chrome_android"
+
+    # Chrome desktop — Chrome/ without Edg/, Android, or Mobile.
+    if re.search(r"Chrome/", ua) and "Mobile" not in ua:
+        return "chrome"
+
+    # Firefox — Firefox/ + Gecko/.
+    if re.search(r"Firefox/", ua) and re.search(r"Gecko/", ua):
+        return "firefox"
+
+    # iOS Safari — iPhone/iPad/iPod device token + Safari/.
+    if re.search(r"(?:iPhone|iPad|iPod)", ua) and re.search(r"Safari/", ua):
+        return "safari_ios"
+
+    # Desktop Safari — Safari/ + Version/, no Mobile, no Chrome/.
+    if re.search(r"Safari/", ua) and re.search(r"Version/", ua) and "Mobile" not in ua:
+        return "safari"
 
     return "chrome"
 
