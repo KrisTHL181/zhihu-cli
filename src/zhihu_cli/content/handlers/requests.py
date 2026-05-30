@@ -9,6 +9,7 @@ from curl_cffi import requests as _requests
 from user_agents import parse
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.captcha import detect_captcha, handle_captcha
 
 ZSE93 = "101_3_3.0"
 
@@ -28,11 +29,17 @@ class ZhihuSession(_requests.Session):
     source string from the ZSE version, request path, ``d_c0`` cookie, and
     JSON body (when present), hashes it with MD5, then encrypts the hash
     via the ZSEv4 block cipher.
+
+    Set ``captcha_handler`` to "auto" (interactive), "prompt" (ask first),
+    or "ignore" (skip handling) to control risk-control handling.
     """
+
+    CAPTCHA_HANDLER_MODES = ("auto", "prompt", "ignore")
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._zse_cipher = None  # lazy init to avoid import-time side effects
+        self.captcha_handler: str = "auto"  # "auto", "prompt", or "ignore"
 
     @property
     def zse_cipher(self):
@@ -48,9 +55,11 @@ class ZhihuSession(_requests.Session):
             for part in cookie_header.split("; "):
                 if part.startswith("d_c0="):
                     return part[5:]
-        for cookie in self.cookies:
-            if cookie.name == "d_c0":
-                return cookie.value
+        # curl_cffi Cookies may yield strings (names) when iterated
+        try:
+            return str(self.cookies.get("d_c0", ""))
+        except Exception:
+            pass
         return ""
 
     def _build_sign_source(self, method: str, url: str, kwargs: dict) -> str | None:
@@ -98,7 +107,28 @@ class ZhihuSession(_requests.Session):
             zse_headers.update(user_headers)
             kwargs["headers"] = zse_headers
 
-        return super().request(method, url, **kwargs)
+        resp = super().request(method, url, **kwargs)
+
+        # Post-response captcha / risk-control handling
+        if self.captcha_handler != "ignore":
+            captcha_error = detect_captcha(resp)
+            if captcha_error is not None:
+                # Avoid re-entrant handling for captcha-related endpoints
+                parsed = urlparse(url)
+                path = parsed.path
+                if not _is_captcha_endpoint(path):
+                    mode = self.captcha_handler
+                    if mode == "auto":
+                        result = handle_captcha(self, captcha_error)
+                        if result == "resolved":
+                            # Retry the original request once after verification
+                            resp = super().request(method, url, **kwargs)
+                        # For "skipped" or "cancelled", return the original
+                        # 403 response so the caller can handle it appropriately.
+                    elif mode == "prompt":
+                        _print_captcha_warning(captcha_error)
+
+        return resp
 
 
 headers = cache_manager.load_headers()
@@ -137,3 +167,33 @@ def get_page_entities(url: str) -> dict[str, Any]:
     initial_data = json.loads(script_tag.string)
     page_data = initial_data["initialState"]["entities"]
     return page_data
+
+
+# ── captcha helpers ────────────────────────────────────────────────────────
+
+
+def _is_captcha_endpoint(path: str) -> bool:
+    """Return True if the path belongs to a captcha-related endpoint.
+
+    These endpoints should NOT trigger captcha handling themselves,
+    to avoid infinite recursion.
+    """
+    captcha_paths = (
+        "/api/v4/anticrawl/new_captcha_appeal",
+        "/antispam/",
+        "/account/unhuman",
+        "/account/risk_control",
+        "/api/v3/oauth/captcha",
+    )
+    return path.startswith(captcha_paths)
+
+
+def _print_captcha_warning(captcha_error: dict) -> None:
+    """Print a brief warning that captcha was triggered (non-blocking)."""
+    redirect = captcha_error.get("redirect", "")
+    print()
+    print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)")
+    if redirect:
+        print(f"  Verify at: {redirect}")
+    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.")
+    print()

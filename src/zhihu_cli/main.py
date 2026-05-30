@@ -21,6 +21,7 @@ from zhihu_cli.content.handlers.agora import (
 )
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.captcha import detect_captcha, get_captcha_info, handle_captcha, parse_redirect
 from zhihu_cli.content.handlers.chat import get_inbox, iter_chat_history, send_text_message
 from zhihu_cli.content.handlers.collection import (
     add_to_collection,
@@ -282,6 +283,120 @@ def auth_clear() -> None:
     """Remove cached headers."""
     cache_manager.save_headers({})
     click.echo("Headers cache cleared.")
+
+
+@auth.command("captcha")
+@click.option("--url", "-u", "test_url", default=None, help="URL to test for captcha (default: hot list API)")
+@click.option("--open-browser/--no-browser", default=True, help="Auto-open browser for verification")
+def auth_captcha(test_url: str | None, open_browser: bool) -> None:
+    """Check and resolve Zhihu risk-control / captcha challenges.
+
+    Tests the current session against a Zhihu API endpoint. If the
+    response indicates a captcha is required, displays instructions
+    and optionally opens the verification page in a browser.
+
+    \033[2mExamples:\033[0m
+      zhihu auth captcha                    # test with hot list API
+      zhihu auth captcha --url <api-url>    # test a specific API
+      zhihu auth captcha --no-browser       # don't auto-open browser
+    """
+    from zhihu_cli.content.handlers.requests import session
+
+    if test_url is None:
+        test_url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=1&desktop=true"
+
+    click.echo(f"Testing endpoint for captcha: {test_url}")
+    click.echo()
+
+    # Temporarily disable automatic captcha handling — we control the flow here
+    old_handler = session.captcha_handler
+    session.captcha_handler = "ignore"
+
+    def _test_request():
+        """Make a test request and return the response (auto-handler disabled)."""
+        return session.get(test_url)
+
+    try:
+        resp = _test_request()
+    except Exception as e:
+        session.captcha_handler = old_handler
+        click.echo(f"Error making request: {e}", err=True)
+        raise SystemExit(1)
+
+    captcha_error = detect_captcha(resp)
+    if captcha_error is None:
+        if resp.status_code == 200:
+            click.echo("✅ No captcha detected — session is working normally.")
+        else:
+            click.echo(f"Status: {resp.status_code} (non-captcha error)")
+            try:
+                body = resp.text[:500]
+                click.echo(f"Response: {body}")
+            except Exception:
+                pass
+        return
+
+    # Captcha detected
+    click.echo("⚠️  Captcha/risk-control detected!")
+    click.echo()
+
+    redirect_url = captcha_error.get("redirect", "")
+    params = parse_redirect(redirect_url)
+    captcha_type = params.get("type", "unknown")
+    session_id = params.get("session", "")
+
+    click.echo(f"  Type:    {captcha_type}")
+    click.echo(f"  Session: {session_id}")
+    click.echo(f"  Message: {captcha_error.get('message', 'N/A')}")
+    click.echo()
+
+    # Try to get more details from the appeal API
+    if session_id:
+        try:
+            info = get_captcha_info(session, session_id)
+            click.echo(f"  Block level: {info.get('block_level', 'N/A')}")
+            img = info.get("img_base64", "")
+            if img:
+                click.echo(f"  Captcha image: {len(img)} chars (base64)")
+            redirect_msg = info.get("redirect_url", "")
+            if redirect_msg:
+                from urllib.parse import unquote
+
+                click.echo(f"  Detail: {unquote(redirect_msg)[:200]}")
+        except Exception as e:
+            click.echo(f"  (Could not fetch captcha details: {e})")
+
+    click.echo()
+
+    # Handle the captcha
+    result = handle_captcha(
+        session,
+        captcha_error,
+        interactive=True,
+        auto_open_browser=open_browser,
+    )
+
+    if result == "resolved":
+        # Verify by retesting
+        click.echo()
+        try:
+            resp2 = _test_request()
+            if resp2.status_code == 200:
+                click.echo("✅ Verification successful — session is now working.")
+            else:
+                click.echo(f"⚠️  Still getting status {resp2.status_code} after verification.")
+                captcha_error2 = detect_captcha(resp2)
+                if captcha_error2:
+                    click.echo("   Captcha is still active. Try using a browser or 'zhihu auth login'.")
+        except Exception as e:
+            click.echo(f"⚠️  Error during verification test: {e}")
+    elif result == "skipped":
+        click.echo("Skipped. You can retry later with 'zhihu auth captcha'.")
+    else:
+        click.echo("Cancelled.")
+
+    # Restore original handler mode
+    session.captcha_handler = old_handler
 
 
 # ── profile ──────────────────────────────────────────────────────────────
