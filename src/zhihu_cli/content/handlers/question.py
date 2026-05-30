@@ -47,7 +47,10 @@ def scrape_answers(question_data: dict[str, Any]) -> Generator[dict[str, Any], N
         for ans in data.get("data", []):
             yield {
                 "author": ans.get("author", {}).get("name", "anonymous"),
+                "id": ans.get("url", "/unknown").split("/")[-1],
                 "vote": ans.get("voteup_count", 0),
+                "comment": ans.get("comment_count", 0),
+                "favorite": ans.get("favlists_count", 0),
                 "content": converter.convert(ans.get("content", "")),
             }
 
@@ -149,6 +152,9 @@ def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
         "id": str(answer_data.get("id", "")),
         "title": question_title,
         "author": author_name,
+        "vote": answer_data.get("voteupCount", 0),
+        "comment": answer_data.get("commentCount", 0),
+        "favorite": answer_data.get("favlistsCount", 0),
         "created": created_date,
     }
 

@@ -12,8 +12,9 @@ def parse_article_metadata(item: dict[str, Any]) -> dict[str, Any]:
     content_preview = excerpt or (item.get("content", "")[:200] if item.get("content") else "")
 
     # Stats
-    voteup_count = item.get("voteup_count", 0)
-    comment_count = item.get("comment_count", 0)
+    voteup_count = item.get("voteupCount", 0)
+    comment_count = item.get("commentCount", 0)
+    favlists_count = item.get("favlistsCount", 0)
 
     # Timestamps
     created = item.get("created", 0)
@@ -35,7 +36,7 @@ def parse_article_metadata(item: dict[str, Any]) -> dict[str, Any]:
         "url": url,
         "created_time": fmt_time(created),
         "updated_time": fmt_time(updated),
-        "stats": {"voteup_count": voteup_count, "comment_count": comment_count},
+        "stats": {"voteup_count": voteup_count, "comment_count": comment_count, "favlists_count": favlists_count},
         "author": {
             "name": author_name,
             "headline": author.get("headline", ""),

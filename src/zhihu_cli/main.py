@@ -951,12 +951,16 @@ def browse_question(url: str, reading_mode: bool, output_json: bool) -> None:
         with console.pager(styles=True, links=True):
             console.print(Markdown(question_md))
             for i, ans in enumerate(answers, 1):
-                console.print(f"\n--- Answer {i} by {ans['author']} (+{ans['vote']}) ---")
+                console.print(
+                    f"\n--- Answer #{i} (ID: {ans['id']}) by {ans['author']} (+{ans['vote']} votes, {ans['comment']} comments, {ans['favorite']} favorites) ---"
+                )
                 console.print(Markdown(ans["content"]))
     else:
         click.echo(question_md)
         for i, ans in enumerate(answers, 1):
-            click.echo(f"\n--- Answer {i} by {ans['author']} (+{ans['vote']}) ---")
+            click.echo(
+                f"\n--- Answer #{i} (ID: {ans['id']}) by {ans['author']} (+{ans['vote']} votes, {ans['comment']} comments, {ans['favorite']} favorites) ---"
+            )
             click.echo(ans["content"])
 
 
@@ -982,7 +986,10 @@ def browse_answer(url: str, reading_mode: bool, output_json: bool) -> None:
     title = metadata.get("title", "untitled")
     author = metadata.get("author", "unknown")
     created = metadata.get("created", "unknown")
-    header = f"# {title}\n\n**Author:** {author} | **Date:** {created}"
+    upvotes = metadata.get("vote", 0)
+    comments = metadata.get("comment", 0)
+    favorites = metadata.get("favorite", 0)
+    header = f"# {title}\n\n**Author:** {author} | **Date:** {created} | **Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
 
     if reading_mode:
         console = Console()
@@ -1016,7 +1023,11 @@ def browse_article(url: str, reading_mode: bool, output_json: bool) -> None:
 
     title = metadata.get("title", "untitled")
     author = metadata.get("author", {}).get("name", "unknown")
-    header = f"# {title}\n\n**Author:** {author}"
+    stats = metadata.get("stats", {})
+    upvotes = stats.get("voteup_count", 0)
+    comments = stats.get("comment_count", 0)
+    favorites = stats.get("favlists_count", 0)
+    header = f"# {title}\n\n**Author:** {author} | **Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
 
     if reading_mode:
         console = Console()
