@@ -212,6 +212,21 @@ def auth_status(output_json: bool) -> None:
     headers = cache_manager.load_headers()
     has_cookie = "cookie" in {k.lower() for k in headers} if headers else False
 
+    # Fetch authenticated user info from /api/v4/me
+    username = None
+    user_id = None
+    url_token = None
+    if has_cookie:
+        try:
+            resp = session.get("https://www.zhihu.com/api/v4/me", timeout=10)
+            if resp.status_code == 200:
+                me = resp.json()
+                username = me.get("name")
+                user_id = me.get("id")
+                url_token = me.get("url_token")
+        except Exception:
+            pass  # Silently ignore — user info is a best-effort bonus
+
     if output_json:
         click.echo(
             json.dumps(
@@ -220,6 +235,9 @@ def auth_status(output_json: bool) -> None:
                     "profiles": profiles,
                     "headers_count": len(headers),
                     "has_cookie": has_cookie,
+                    "username": username,
+                    "user_id": user_id,
+                    "url_token": url_token,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -239,6 +257,12 @@ def auth_status(output_json: bool) -> None:
         click.echo(f"Headers: {len(headers)} cached")
         if has_cookie:
             click.echo("Cookie: present")
+            if username:
+                click.echo(f"Username: {username}")
+                if user_id:
+                    click.echo(f"User ID: {user_id}")
+                if url_token:
+                    click.echo(f"URL token: {url_token}")
         else:
             click.echo("Warning: no Cookie header found.", err=True)
     else:
