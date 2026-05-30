@@ -145,6 +145,10 @@ def auth_paste(profile_name: str | None) -> None:
 
     Use --profile to save to a named profile (e.g. work, personal).
     """
+    if profile_name and profile_name.startswith("_"):
+        click.echo("Profile names starting with '_' are reserved for internal use.", err=True)
+        raise SystemExit(1)
+
     print("Paste cURL command (Ctrl+D to finish):")
     try:
         curl_text = sys.stdin.read()
@@ -184,6 +188,10 @@ def auth_login(profile_name: str | None) -> None:
     This generates fresh cookies and saves them as a profile, so you
     don't need to manually paste cURL headers.
     """
+    if profile_name and profile_name.startswith("_"):
+        click.echo("Profile names starting with '_' are reserved for internal use.", err=True)
+        raise SystemExit(1)
+
     from zhihu_cli.content.handlers.auth_login import qr_login
 
     click.echo("Starting QR code login...")
@@ -289,7 +297,7 @@ def profile() -> None:
 def profile_list(output_json: bool) -> None:
     """List all saved profiles."""
     active = cache_manager.get_active_profile()
-    profiles = cache_manager.list_profiles()
+    profiles = [p for p in cache_manager.list_profiles() if not p.startswith("_")]
     if not profiles:
         if output_json:
             click.echo(json.dumps([], ensure_ascii=False, indent=2))
@@ -326,6 +334,7 @@ def profile_switch(name: str) -> None:
     """Switch to a different profile."""
     try:
         cache_manager.switch_profile(name)
+        reload_session()
         click.echo(f"Switched to profile '{name}'.")
     except ValueError:
         click.echo(f"Profile '{name}' does not exist. Use 'zhihu profile list' to see saved profiles.", err=True)
@@ -340,6 +349,9 @@ def profile_delete(name: str, force: bool) -> None:
     profiles = cache_manager.list_profiles()
     if name not in profiles:
         click.echo(f"Profile '{name}' does not exist.", err=True)
+        raise SystemExit(1)
+    if name.startswith("_"):
+        click.echo(f"Cannot delete internal profile '{name}'.", err=True)
         raise SystemExit(1)
 
     if not force:
@@ -361,6 +373,30 @@ def profile_current(output_json: bool) -> None:
         click.echo(active)
     else:
         click.echo("No active profile set.", err=True)
+
+
+_LOGOUT_PROFILE = "_logout_"
+
+
+@profile.command("logout")
+def profile_logout() -> None:
+    """Switch to an unauthenticated session (hidden profile).
+
+    Switches the active profile to a hidden profile with no stored
+    credentials. Use 'zhihu profile switch <name>' to log back in.
+    """
+    active = cache_manager.get_active_profile()
+    if active == _LOGOUT_PROFILE:
+        click.echo("Already logged out.")
+        return
+
+    # Ensure the hidden logout profile exists with empty headers
+    if _LOGOUT_PROFILE not in cache_manager.list_profiles():
+        cache_manager.save_headers({}, profile_name=_LOGOUT_PROFILE)
+
+    cache_manager.switch_profile(_LOGOUT_PROFILE)
+    reload_session()
+    click.echo("Logged out. Use 'zhihu profile switch <name>' to log back in.")
 
 
 # ── download ─────────────────────────────────────────────────────────────
