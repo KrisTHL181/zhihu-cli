@@ -915,12 +915,12 @@ def browse() -> None:
     """Browse Zhihu content in the terminal."""
 
 
-@browse.command("answers")
+@browse.command("question")
 @click.argument("url")
 @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def browse_answers(url: str, reading_mode: bool, output_json: bool) -> None:
-    """Stream answers under a Zhihu question."""
+def browse_question(url: str, reading_mode: bool, output_json: bool) -> None:
+    """Browse a Zhihu question and all its answers."""
     q_meta, q_detail_md = scrape_question_data(url)
 
     answers = list(scrape_answers(q_meta))

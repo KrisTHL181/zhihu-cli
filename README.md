@@ -75,7 +75,7 @@ Output goes to `~/.zhihu-cli/downloads/` by default. Use `-o` to override.
 ### Browse — read in the terminal
 
 ```bash
-zhihu browse answers <url>             # stream answers with Rich pager
+zhihu browse question <url>            # browse question and all answers with Rich pager
 zhihu browse comments <url>            # view comment tree
 zhihu browse feed --type recommend     # stream recommend/follow feed
 zhihu browse hot                       # real-time hot list
