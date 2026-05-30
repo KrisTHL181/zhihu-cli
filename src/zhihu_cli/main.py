@@ -447,6 +447,106 @@ def config_ua_clear() -> None:
     click.echo("Custom User-Agent cleared (now using per-profile default).")
 
 
+# ── config start-date ─────────────────────────────────────────────────────
+
+
+@config.group("start-date")
+def config_start_date() -> None:
+    """Manage the default start date for data fetching."""
+
+
+@config_start_date.command("set")
+@click.argument("date_str")
+def config_sd_set(date_str: str) -> None:
+    """Set the default start date for creator-tools data fetching.
+
+    DATE_STR must be in YYYY-MM-DD format.
+
+    \033[2mExample:\033[0m
+      zhihu config start-date set 2024-01-01
+    """
+    cache_manager.set_start_date(date_str)
+    click.echo(f"Default start date set to: {date_str}")
+
+
+@config_start_date.command("show")
+def config_sd_show() -> None:
+    """Show the currently configured default start date."""
+    date_str = cache_manager.get_start_date()
+    click.echo(f"Default start date: {date_str}")
+
+
+@config_start_date.command("clear")
+def config_sd_clear() -> None:
+    """Reset the default start date to the built-in default (2026-01-16)."""
+    cache_manager.set_start_date("2026-01-16")
+    click.echo("Default start date reset to: 2026-01-16")
+
+
+# ── config crank-llm ──────────────────────────────────────────────────────
+
+
+@config.group("crank-llm")
+def config_crank_llm() -> None:
+    """Manage the cached LLM configuration for the crank extension."""
+
+
+@config_crank_llm.command("set")
+@click.option("--api-base", required=True, help="LLM API endpoint URL.")
+@click.option("--api-key", required=True, help="API key for authentication.")
+@click.option("--model", required=True, help="Model name to use.")
+def config_llm_set(api_base: str, api_key: str, model: str) -> None:
+    """Cache LLM credentials for the crank archiver.
+
+    \033[2mExample:\033[0m
+      zhihu config crank-llm set --api-base https://api.openai.com/v1 --api-key sk-xxx --model gpt-4
+    """
+    try:
+        from zhihu_cli.extensions.crank.archiver import save_llm_config
+    except ImportError:
+        click.echo("Error: crank extension is not available (missing dependencies).", err=True)
+        raise SystemExit(1)
+
+    save_llm_config(api_base, api_key, model)
+    click.echo(f"LLM config saved:\n  api_base: {api_base}\n  model: {model}")
+
+
+@config_crank_llm.command("show")
+def config_llm_show() -> None:
+    """Show the currently cached LLM configuration."""
+    try:
+        from zhihu_cli.extensions.crank.archiver import load_llm_config
+    except ImportError:
+        click.echo("Error: crank extension is not available (missing dependencies).", err=True)
+        raise SystemExit(1)
+
+    cfg = load_llm_config()
+    if cfg:
+        click.echo("Cached LLM config:")
+        for k, v in cfg.items():
+            if k == "api_key" and v:
+                v = v[:8] + "..." if len(v) > 8 else v
+            click.echo(f"  {k}: {v}")
+    else:
+        click.echo("No cached LLM config found.")
+
+
+@config_crank_llm.command("clear")
+def config_llm_clear() -> None:
+    """Remove the cached LLM configuration."""
+    try:
+        from zhihu_cli.extensions.crank.archiver import LLM_CONFIG_PATH
+    except ImportError:
+        click.echo("Error: crank extension is not available (missing dependencies).", err=True)
+        raise SystemExit(1)
+
+    if os.path.exists(LLM_CONFIG_PATH):
+        os.remove(LLM_CONFIG_PATH)
+        click.echo("Cached LLM config removed.")
+    else:
+        click.echo("No cached LLM config to remove.")
+
+
 # ── profile ──────────────────────────────────────────────────────────────
 
 
