@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename, save_article, save_pin
-from zhihu_cli.content.handlers import get_data_dir, get_type_and_id
+from zhihu_cli.content.handlers import get_data_dir, get_type_and_id, get_user_agent, set_user_agent
 from zhihu_cli.content.handlers.agora import (
     VALID_VOTES,
     VOTE_LABELS,
@@ -397,6 +397,54 @@ def auth_captcha(test_url: str | None, open_browser: bool) -> None:
 
     # Restore original handler mode
     session.captcha_handler = old_handler
+
+
+# ── config ────────────────────────────────────────────────────────────────
+
+
+@main.group()
+def config() -> None:
+    """Manage zhihu-cli configuration."""
+
+
+@config.group("user-agent")
+def config_user_agent() -> None:
+    """Manage the custom User-Agent override."""
+
+
+@config_user_agent.command("set")
+@click.argument("user_agent")
+def config_ua_set(user_agent: str) -> None:
+    """Set a custom User-Agent for all requests.
+
+    \033[2mExample:\033[0m
+      zhihu config user-agent set "Mozilla/5.0 ... Chrome/145.0.0.0 Safari/537.36"
+    """
+    set_user_agent(user_agent)
+    from zhihu_cli.content.handlers.requests import reload_session
+
+    reload_session()
+    click.echo(f"User-Agent set to:\n{user_agent}")
+
+
+@config_user_agent.command("show")
+def config_ua_show() -> None:
+    """Show the currently configured User-Agent."""
+    ua = get_user_agent()
+    if ua:
+        click.echo(f"Configured User-Agent:\n{ua}")
+    else:
+        click.echo("No custom User-Agent configured (using per-profile default).")
+
+
+@config_user_agent.command("clear")
+def config_ua_clear() -> None:
+    """Remove the custom User-Agent override."""
+    set_user_agent(None)
+    from zhihu_cli.content.handlers.requests import reload_session
+
+    reload_session()
+    click.echo("Custom User-Agent cleared (now using per-profile default).")
 
 
 # ── profile ──────────────────────────────────────────────────────────────

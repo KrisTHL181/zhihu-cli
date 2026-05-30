@@ -8,6 +8,7 @@ from curl_cffi import CurlHttpVersion
 from curl_cffi import requests as _requests
 from user_agents import parse
 
+from zhihu_cli.content.handlers import get_user_agent
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.captcha import detect_captcha, handle_captcha
 
@@ -131,24 +132,38 @@ class ZhihuSession(_requests.Session):
         return resp
 
 
-headers = cache_manager.load_headers()
+def _resolve_user_agent(headers: dict[str, str]) -> str:
+    """Return the effective User-Agent: configured override > profile UA > empty."""
+    configured = get_user_agent()
+    if configured:
+        return configured
+    return headers.get("User-Agent", "")
 
-session = requests = ZhihuSession(
-    impersonate=get_browser(headers.get("User-Agent", "")),
-    http_version=CurlHttpVersion.V3,
-)
-requests.headers.update(headers)
+
+def _build_session() -> ZhihuSession:
+    """Create a ZhihuSession with the configured or profile User-Agent."""
+    hdrs = cache_manager.load_headers()
+    ua = _resolve_user_agent(hdrs)
+    sess = ZhihuSession(
+        impersonate=get_browser(ua),
+        http_version=CurlHttpVersion.V3,
+    )
+    sess.headers.update(hdrs)
+    if ua:
+        sess.headers["User-Agent"] = ua
+    return sess
+
+
+headers: dict[str, str] = {}
+session = requests = _build_session()
 
 
 def reload_session() -> None:
     """Reload the global session with headers from the active profile."""
     global headers, session, requests
-    headers = cache_manager.load_headers()
-    session = requests = ZhihuSession(
-        impersonate=get_browser(headers.get("User-Agent", "")),
-        http_version=CurlHttpVersion.V3,
-    )
-    requests.headers.update(headers)
+    sess = _build_session()
+    headers = dict(sess.headers)
+    session = requests = sess
 
 
 def get_page_entities(url: str) -> dict[str, Any]:

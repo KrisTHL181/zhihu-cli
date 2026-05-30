@@ -4,6 +4,8 @@ import time
 
 from curl_cffi import requests as curl_requests
 
+from zhihu_cli.content.handlers import get_user_agent
+
 DESKTOP_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 )
@@ -24,10 +26,11 @@ RISK_CONTROL_EXIT = object()
 
 
 def _desktop_headers(referer: str | None = None) -> dict[str, str]:
+    ua = get_user_agent() or DESKTOP_USER_AGENT
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
-        "User-Agent": DESKTOP_USER_AGENT,
+        "User-Agent": ua,
         "sec-ch-ua": DESKTOP_SEC_CH_UA,
         "sec-ch-ua-mobile": DESKTOP_SEC_CH_UA_MOBILE,
         "sec-ch-ua-platform": DESKTOP_SEC_CH_UA_PLATFORM,
@@ -249,7 +252,7 @@ def qr_login() -> dict[str, str]:
 
         headers = {
             "Cookie": _cookies_to_header(session),
-            "User-Agent": DESKTOP_USER_AGENT,
+            "User-Agent": get_user_agent() or DESKTOP_USER_AGENT,
         }
         return headers
 

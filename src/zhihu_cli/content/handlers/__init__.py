@@ -2,12 +2,32 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+USER_AGENT_FILE = Path.home() / ".zhihu-cli" / "user-agent"
+
 
 def get_data_dir() -> Path:
     """Return ~/.zhihu-cli/ data directory, creating it if needed."""
     data_dir = Path.home() / ".zhihu-cli"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
+
+
+def get_user_agent() -> str | None:
+    """Return the configured User-Agent from ~/.zhihu-cli/user-agent, or None."""
+    if USER_AGENT_FILE.exists():
+        ua = USER_AGENT_FILE.read_text(encoding="utf-8").strip()
+        if ua:
+            return ua
+    return None
+
+
+def set_user_agent(ua: str | None) -> None:
+    """Set (or clear) the User-Agent in ~/.zhihu-cli/user-agent."""
+    if ua is None:
+        USER_AGENT_FILE.unlink(missing_ok=True)
+    else:
+        get_data_dir()  # ensure directory exists
+        USER_AGENT_FILE.write_text(ua.strip(), encoding="utf-8")
 
 
 ZHIHU_ARTICLE_PATTERN = r"https?://zhuanlan\.zhihu\.com/p/(\d+)"
