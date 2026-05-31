@@ -71,6 +71,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_question,
 )
 from zhihu_cli.content.handlers.question_log import fetch_question_log
+from zhihu_cli.content.handlers.report import fetch_report_reasons, flatten_reasons, submit_report
 from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
@@ -2138,6 +2139,89 @@ def collect_list(url_token: str | None, limit: int, max_items: int | None, outpu
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
         click.echo(f"Saved {len(items)} items to {output}")
+
+
+# ── report ──────────────────────────────────────────────────────────────
+
+
+@interact.group("report")
+def interact_report() -> None:
+    """Report (举报) content — list reasons or submit a report."""
+
+
+@interact_report.command("reasons")
+@click.argument("object_type", default="answer")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def report_reasons(object_type: str, output_json: bool) -> None:
+    """List available report reasons for an object type.
+
+    OBJECT_TYPE: answer, question, article, comment, or pin (default: answer).
+    """
+    data = fetch_report_reasons(object_type)
+
+    if output_json:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    reasons = flatten_reasons(data)
+    if not reasons:
+        click.echo(f"No report reasons found for type '{object_type}'.")
+        return
+
+    click.echo(f"Report reasons for '{object_type}':\n")
+    current_category = None
+    for r in reasons:
+        if r["category"] and r["category"] != current_category:
+            current_category = r["category"]
+            click.echo(f"  [{current_category}]")
+        label = f"    {r['id']} — {r['text']}" if r["category"] else f"  {r['id']} — {r['text']}"
+        click.echo(label)
+
+
+@interact_report.command("submit")
+@click.argument("url")
+@click.option("--reason", "-r", "reason_id", required=True, help="Reason ID (from 'zhihu interact report reasons')")
+@click.option("--custom-reason", "-c", default="", help="Custom explanation text")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def report_submit(url: str, reason_id: str, custom_reason: str, output_json: bool) -> None:
+    """Submit a report for content at URL.
+
+    \b
+    Examples:
+      zhihu interact report reasons answer
+      zhihu interact report submit https://www.zhihu.com/question/123/answer/456 -r 1040-irrelevant-answer
+      zhihu interact report submit https://www.zhihu.com/question/123/answer/456 -r 1040-irrelevant-answer -c "广告垃圾"
+    """
+    item_type, item_id = _parse_item_url(url)
+    if item_type == "answers":
+        item_id = _resolve_answer_id(item_id)
+    # Map URL type to API object_type
+    type_map = {
+        "articles": "article",
+        "questions": "question",
+        "answers": "answer",
+        "pins": "pin",
+    }
+    object_type = type_map.get(item_type, item_type)
+
+    resp = submit_report(
+        resource_id=item_id,
+        object_type=object_type,
+        reason_id=reason_id,
+        custom_reason=custom_reason,
+        url=url,
+    )
+
+    if output_json:
+        click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+    else:
+        if resp.get("is_reported") or (isinstance(resp, dict) and resp.get("success", True)):
+            click.echo(f"✓ Report submitted for {item_type} {item_id}")
+            click.echo(f"  Reason: {reason_id}")
+            if custom_reason:
+                click.echo(f"  Detail: {custom_reason}")
+        else:
+            click.echo(f"✗ Report failed: {json.dumps(resp, ensure_ascii=False)}")
 
 
 # ── publish ──────────────────────────────────────────────────────────────
