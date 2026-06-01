@@ -140,6 +140,9 @@ class ZhihuMarkdownConverter:
         to
          $$B$$
         """
+        if not content:
+            return ""
+
         pattern = r"!\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(https://www\.zhihu\.com/equation\?tex=[^)]*\)"
 
         content = re.sub(pattern, lambda match: f"$${match.group(1)}$$", content)
@@ -172,6 +175,9 @@ class ZhihuMarkdownConverter:
         :param url: Optional URL for resolving relative links.
         :return: Markdown string.
         """
+        if not html_content:
+            return ""
+
         doc = lxml_html.fromstring(html_content)
 
         # Remove useless elements
@@ -484,6 +490,9 @@ class PageToMarkdown:
         :param url: Base URL for resolving relative links (optional).
         :return: Markdown string.
         """
+        if not html_content:
+            return ""
+
         content = self.converter.tex_normalize(html_content)
         result = self.converter.convert(content, url)
         return result.strip() if strip else result
@@ -491,6 +500,9 @@ class PageToMarkdown:
 
 def calculate_text_length(html_content: str) -> int:
     """Return the length of visible text in *html_content*, excluding markup."""
+    if not html_content:
+        return 0
+
     doc = lxml_html.fromstring(html_content)
 
     # self:: covers root element for single-img fragments
