@@ -3165,8 +3165,19 @@ def nlp_conetwork(source_dir: str, topk: int, window_size: int, min_edge_weight:
     help="Graph layout algorithm",
 )
 @click.option("--no-viz", is_flag=True, help="Print statistics only, skip image generation")
+@click.option("--depth", type=int, default=1, help="Graph depth: 1=ego-network, ≥2=recursively expand (default: 1)")
+@click.option("--max-expand", type=int, default=20, help="Max nodes to expand per hop level (default: 20)")
+@click.option("--max-per-node", type=int, default=50, help="Max followees fetched per expanded node (default: 50)")
 def nlp_graph(
-    url_token: str | None, max_followees: int, max_followers: int, output: str, layout: str, no_viz: bool
+    url_token: str | None,
+    max_followees: int,
+    max_followers: int,
+    output: str,
+    layout: str,
+    no_viz: bool,
+    depth: int,
+    max_expand: int,
+    max_per_node: int,
 ) -> None:
     """Social graph visualization of following/follower relationships."""
     from zhihu_cli.nlp_tools.graph import main as graph_main
@@ -3178,6 +3189,9 @@ def nlp_graph(
         output=output,
         layout=layout,
         no_viz=no_viz,
+        depth=depth,
+        max_expand=max_expand,
+        max_per_node=max_per_node,
     )
 
 
