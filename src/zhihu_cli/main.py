@@ -226,7 +226,7 @@ def auth_login(profile_name: str | None) -> None:
 def auth_status(output_json: bool) -> None:
     """Show authentication status and active profile."""
     active = cache_manager.get_active_profile()
-    profiles = cache_manager.list_profiles()
+    profiles = [p for p in cache_manager.list_profiles() if not p.startswith("_")]
     headers = cache_manager.load_headers()
     has_cookie = "cookie" in {k.lower() for k in headers} if headers else False
 
