@@ -70,7 +70,7 @@ def fetch_article_list(user_token: str) -> list[dict[str, Any]]:
         yield from data.get("data", [])
 
     print(f"Fetching article list for user: {user_token}")
-    items = list(stream_handler(initial_url, parser, delay=1.2))
+    items = list(stream_handler(initial_url, parser))
     print(f"Fetched {len(items)} articles total.")
     return items
 

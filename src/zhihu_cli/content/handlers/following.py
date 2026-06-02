@@ -62,7 +62,7 @@ def fetch_followees(
         f"&offset=0&limit={limit}"
     )
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_followees, delay=1.0):
+    for item in stream_handler(url, _parse_followees):
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
@@ -86,7 +86,7 @@ def fetch_followers(
         f"&offset=0&limit={limit}"
     )
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_followees, delay=1.0):
+    for item in stream_handler(url, _parse_followees):
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
@@ -127,7 +127,7 @@ def fetch_following_topics(
     url = f"{TOPIC_FOLLOWING_API.format(token=url_token)}?include=data%5B*%5D.topic.introduction&offset=0&limit={limit}"
     items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_following_topics, delay=1.0):
+        for item in stream_handler(url, _parse_following_topics):
             items.append(item)
             if max_items is not None and len(items) >= max_items:
                 break
@@ -167,7 +167,7 @@ def fetch_following_questions(
     url = f"{MEMBER_API.format(token=url_token)}/following-questions?offset=0&limit={limit}"
     items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_following_questions, delay=1.0):
+        for item in stream_handler(url, _parse_following_questions):
             items.append(item)
             if max_items is not None and len(items) >= max_items:
                 break
@@ -209,7 +209,7 @@ def fetch_following_columns(
     url = f"{MEMBER_API.format(token=url_token)}/following-columns?offset=0&limit={limit}"
     items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_following_columns, delay=1.0):
+        for item in stream_handler(url, _parse_following_columns):
             items.append(item)
             if max_items is not None and len(items) >= max_items:
                 break
@@ -259,7 +259,7 @@ def fetch_following_collections(
     )
     items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_following_collections, delay=1.0):
+        for item in stream_handler(url, _parse_following_collections):
             items.append(item)
             if max_items is not None and len(items) >= max_items:
                 break

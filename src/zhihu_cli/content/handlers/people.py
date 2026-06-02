@@ -105,7 +105,7 @@ def fetch_member_answers(
     """Fetch a member's answers list."""
     url = f"{MEMBER_API.format(token=url_token)}/answers?offset=0&limit={limit}&sort_by=created"
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_answer_list, delay=1.0):
+    for item in stream_handler(url, _parse_answer_list):
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
@@ -142,7 +142,7 @@ def fetch_member_articles(
     """Fetch a member's articles list."""
     url = f"{MEMBER_API.format(token=url_token)}/articles?offset=0&limit={limit}&sort_by=created"
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_article_list, delay=1.0):
+    for item in stream_handler(url, _parse_article_list):
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
@@ -185,7 +185,7 @@ def fetch_member_pins(
     """Fetch a member's pins (想法) list."""
     url = f"{MEMBER_API.format(token=url_token)}/pins?offset=0&limit={limit}&sort_by=created"
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_pin_list, delay=1.0):
+    for item in stream_handler(url, _parse_pin_list):
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
@@ -226,7 +226,7 @@ def fetch_member_questions(
     url = f"{MEMBER_API.format(token=url_token)}/questions?offset=0&limit={limit}"
     items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_question_list, delay=1.0):
+        for item in stream_handler(url, _parse_question_list):
             items.append(item)
             if max_items is not None and len(items) >= max_items:
                 break

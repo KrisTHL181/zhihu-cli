@@ -124,7 +124,7 @@ def _build_search(
     url = f"{SEARCH_URL}?t={search_type}&q={encoded_query}&offset=0&limit={limit}&search_source=Normal"
     parser = _make_parser(item_parser)
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, parser, delay=1.0):
+    for item in stream_handler(url, parser):
         if item.get("name"):
             item["name"] = replace_em(item["name"])
         if item.get("title"):
@@ -174,7 +174,7 @@ def search_articles(
     url = f"{ARTICLE_SEARCH_URL}?{params}"
     parser = _make_parser(_parse_article)
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, parser, delay=1.0):
+    for item in stream_handler(url, parser):
         url = item.get("url", "")
         if url.startswith("https://api.zhihu.com/"):
             url = url.replace("api.zhihu.com", "www.zhihu.com")

@@ -54,7 +54,6 @@ def fetch_notifications(limit: int = 20, max_items: int | None = None) -> list[d
     stream = stream_handler(
         NOTIFICATIONS_URL,
         _parse_notifications,
-        delay=0.5,
     )
     items: list[dict[str, Any]] = []
     for item in stream:

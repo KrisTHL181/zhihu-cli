@@ -60,7 +60,7 @@ def list_collections(
         f"&offset=0&limit={limit}"
     )
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_following_collections, delay=1.0):
+    for item in stream_handler(url, _parse_following_collections):
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
