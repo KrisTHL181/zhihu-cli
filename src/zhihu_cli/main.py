@@ -3150,6 +3150,36 @@ def nlp_conetwork(source_dir: str, topk: int, window_size: int, min_edge_weight:
     )
 
 
+@tools_nlp.command("graph")
+@click.option("--url-token", default=None, help="User url_token to analyze (auto-detects logged-in user if omitted)")
+@click.option("--max-followees", type=int, default=200, help="Max followees to fetch")
+@click.option("--max-followers", type=int, default=200, help="Max followers to fetch")
+@click.option(
+    "--output", "-o", default="", help="Output image path (default: ~/.zhihu-cli/plots/zhihu_social_graph.png)"
+)
+@click.option(
+    "--layout",
+    type=click.Choice(["spring", "kamada_kawai", "circular", "shell"]),
+    default="spring",
+    help="Graph layout algorithm",
+)
+@click.option("--no-viz", is_flag=True, help="Print statistics only, skip image generation")
+def nlp_graph(
+    url_token: str | None, max_followees: int, max_followers: int, output: str, layout: str, no_viz: bool
+) -> None:
+    """Social graph visualization of following/follower relationships."""
+    from zhihu_cli.nlp_tools.graph import main as graph_main
+
+    graph_main(
+        url_token=url_token,
+        max_followees=max_followees,
+        max_followers=max_followers,
+        output=output,
+        layout=layout,
+        no_viz=no_viz,
+    )
+
+
 # ── entry point ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
