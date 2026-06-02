@@ -69,6 +69,30 @@ def fetch_followees(
     return items
 
 
+# ── followers (关注者/粉丝) ────────────────────────────────────────────────────
+
+
+def fetch_followers(
+    url_token: str,
+    limit: int = 20,
+    max_items: int | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch a user's followers (people who follow them)."""
+    url = (
+        f"{MEMBER_API.format(token=url_token)}/followers"
+        "?include=data%5B*%5D.answer_count%2Carticles_count%2Cgender"
+        "%2Cfollower_count%2Cis_followed%2Cis_following"
+        "%2Cbadge%5B%3F(type%3Dbest_answerer)%5D.topics"
+        f"&offset=0&limit={limit}"
+    )
+    items: list[dict[str, Any]] = []
+    for item in stream_handler(url, _parse_followees, delay=1.0):
+        items.append(item)
+        if max_items is not None and len(items) >= max_items:
+            break
+    return items
+
+
 # ── following topics (关注的话题) ──────────────────────────────────────────────
 
 

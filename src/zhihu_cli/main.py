@@ -36,6 +36,7 @@ from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
 from zhihu_cli.content.handlers.following import (
     fetch_followees,
+    fetch_followers,
     fetch_following_collections,
     fetch_following_columns,
     fetch_following_questions,
@@ -1507,6 +1508,19 @@ def _following_command(
 def following_users(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
     """List users you follow."""
     _following_command(fetch_followees, url_token, limit, max_items, output_json, output, "followed users")
+
+
+@browse_following.command("followers")
+@click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+@click.option("--limit", type=int, default=20, help="Items per page")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+def following_followers(
+    url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str
+) -> None:
+    """List your followers (people who follow you)."""
+    _following_command(fetch_followers, url_token, limit, max_items, output_json, output, "followers")
 
 
 @browse_following.command("topics")
