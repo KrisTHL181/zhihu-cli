@@ -83,6 +83,7 @@ from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
+from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.extensions import discover_extensions
 
@@ -770,6 +771,49 @@ def download_pin(url: str, output_dir: str, output_json: bool, with_media: bool)
         return
     click.echo(f"Pin by {metadata.get('author', 'unknown')}")
     click.echo(f"  -> {filepath}")
+
+
+@download.command("video")
+@click.argument("url")
+@click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "videos"), help="Output directory")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+@click.option("--no-download-video", is_flag=True, default=False, help="Skip downloading the video file")
+def download_video(url: str, output_dir: str, output_json: bool, no_download_video: bool) -> None:
+    """Download a Zhihu zvideo and its metadata."""
+    metadata, markdown = scrape_zvideo(url)
+    filepath = _save_markdown(metadata, markdown, output_dir)
+
+    video_path: str | None = None
+    if not no_download_video:
+        video_url = get_best_video_url(metadata)
+        if video_url:
+            os.makedirs(output_dir, exist_ok=True)
+            title = sanitize_filename(metadata.get("title", "video"))
+            ext = ".mp4"
+            video_path = os.path.join(output_dir, f"{title}{ext}")[:200]
+            click.echo(f"  Downloading video ({metadata.get('quality_tiers', [{}])[0].get('tier', 'best')} quality)...")
+            try:
+                resp = session.get(video_url, timeout=300, stream=True)
+                resp.raise_for_status()
+                with open(video_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                click.echo(f"  Video saved to {video_path}")
+            except Exception as e:
+                click.echo(f"  Warning: video download failed: {e}", err=True)
+                video_path = None
+
+    if output_json:
+        result: dict = {"metadata": metadata, "filepath": filepath}
+        if video_path:
+            result["video_path"] = video_path
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    click.echo(f"{metadata.get('title', 'untitled')}")
+    click.echo(f"  -> {filepath}")
+    if video_path:
+        click.echo(f"  -> {video_path}")
 
 
 @download.command("batch-answers")
