@@ -8,7 +8,13 @@ from pathlib import Path
 
 import click
 
-from zhihu_cli.content.download_contents import ContentDownloader, sanitize_filename, save_article, save_pin
+from zhihu_cli.content.download_contents import (
+    ContentDownloader,
+    download_media_files,
+    sanitize_filename,
+    save_article,
+    save_pin,
+)
 from zhihu_cli.content.handlers import get_data_dir, get_type_and_id, get_user_agent, set_user_agent
 from zhihu_cli.content.handlers.agora import (
     VALID_VOTES,
@@ -684,9 +690,14 @@ def download() -> None:
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "articles"), help="Output directory")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def download_article(url: str, output_dir: str, output_json: bool) -> None:
+@click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+def download_article(url: str, output_dir: str, output_json: bool, with_media: bool) -> None:
     """Download a single Zhihu article as Markdown."""
     metadata, markdown = scrape_article(url)
+    if with_media:
+        markdown, n = download_media_files(markdown, output_dir)
+        if n:
+            metadata = {**metadata, "media_files": n}
     filepath = _save_markdown(metadata, markdown, output_dir)
     if output_json:
         click.echo(json.dumps({"metadata": metadata, "filepath": filepath}, ensure_ascii=False, indent=2))
@@ -699,12 +710,17 @@ def download_article(url: str, output_dir: str, output_json: bool) -> None:
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "questions"), help="Output directory")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def download_question(url: str, output_dir: str, output_json: bool) -> None:
+@click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+def download_question(url: str, output_dir: str, output_json: bool, with_media: bool) -> None:
     """Download a Zhihu question and all its answers as Markdown."""
     q_meta, q_detail_md = scrape_question_data(url)
     os.makedirs(output_dir, exist_ok=True)
 
     title = sanitize_filename(q_meta.get("title", "untitled"))
+
+    # Question detail
+    if with_media:
+        q_detail_md, _ = download_media_files(q_detail_md, output_dir)
     filepath = os.path.join(output_dir, f"{title}_question.md")[:200]
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# {q_meta['title']}\n\n{q_detail_md}\n")
@@ -714,9 +730,12 @@ def download_question(url: str, output_dir: str, output_json: bool) -> None:
     count = 0
     for ans in scrape_answers(q_meta):
         count += 1
+        content = ans["content"]
+        if with_media:
+            content, _ = download_media_files(content, ans_dir)
         afile = os.path.join(ans_dir, f"{count:04d}_{sanitize_filename(ans['author'])}.md")[:200]
         with open(afile, "w", encoding="utf-8") as f:
-            f.write(f"# Answer by {ans['author']} (+{ans['vote']})\n\n{ans['content']}\n")
+            f.write(f"# Answer by {ans['author']} (+{ans['vote']})\n\n{content}\n")
 
     if output_json:
         click.echo(
@@ -737,9 +756,14 @@ def download_question(url: str, output_dir: str, output_json: bool) -> None:
 @click.argument("url")
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "pins"), help="Output directory")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def download_pin(url: str, output_dir: str, output_json: bool) -> None:
+@click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+def download_pin(url: str, output_dir: str, output_json: bool, with_media: bool) -> None:
     """Download a single Zhihu pin as Markdown."""
     metadata, markdown = scrape_pin(url)
+    if with_media:
+        markdown, n = download_media_files(markdown, output_dir)
+        if n:
+            metadata = {**metadata, "media_files": n}
     filepath = _save_markdown(metadata, markdown, output_dir)
     if output_json:
         click.echo(json.dumps({"metadata": metadata, "filepath": filepath}, ensure_ascii=False, indent=2))
@@ -759,7 +783,10 @@ def download_pin(url: str, output_dir: str, output_json: bool) -> None:
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "answers"), help="Output directory")
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests (seconds)")
 @click.option("--no-cache-headers", is_flag=True, help="Force re-paste of cURL")
-def download_batch_answers(input_file: str, output_dir: str, delay: float, no_cache_headers: bool) -> None:
+@click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+def download_batch_answers(
+    input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool
+) -> None:
     """Batch download all answers listed in an assets JSON file."""
     if not os.path.exists(input_file):
         click.echo(f"Error: file not found: {input_file}", err=True)
@@ -774,7 +801,7 @@ def download_batch_answers(input_file: str, output_dir: str, delay: float, no_ca
         return
 
     click.echo(f"Found {len(urls)} answers.")
-    dl = ContentDownloader(output_dir=output_dir)
+    dl = ContentDownloader(output_dir=output_dir, with_media=with_media)
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
     dl.download_answers(urls, delay=delay)
@@ -791,7 +818,10 @@ def download_batch_answers(input_file: str, output_dir: str, delay: float, no_ca
 @click.option("--output-dir", "-o", default=str(get_data_dir() / "downloads" / "articles"), help="Output directory")
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests (seconds)")
 @click.option("--no-cache-headers", is_flag=True, help="Force re-paste of cURL")
-def download_batch_articles(input_file: str, output_dir: str, delay: float, no_cache_headers: bool) -> None:
+@click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+def download_batch_articles(
+    input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool
+) -> None:
     """Batch download all articles listed in an assets JSON file."""
     if not os.path.exists(input_file):
         click.echo(f"Error: file not found: {input_file}", err=True)
@@ -806,7 +836,7 @@ def download_batch_articles(input_file: str, output_dir: str, delay: float, no_c
         return
 
     click.echo(f"Found {len(urls)} articles.")
-    dl = ContentDownloader(output_dir=output_dir)
+    dl = ContentDownloader(output_dir=output_dir, with_media=with_media)
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
     dl.download_articles(urls, delay=delay)
@@ -826,7 +856,15 @@ def download_batch_articles(input_file: str, output_dir: str, delay: float, no_c
     type=click.Choice(["answers", "articles", "pins", "all"]),
     help="Content types to download (default: all)",
 )
-def download_user(user: str, output_dir: str | None, delay: float, max_items: int | None, content_types: str) -> None:
+@click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+def download_user(
+    user: str,
+    output_dir: str | None,
+    delay: float,
+    max_items: int | None,
+    content_types: str,
+    with_media: bool,
+) -> None:
     """Download all answers, articles, and pins from a Zhihu user."""
     url_token = _extract_url_token(user)
 
@@ -855,7 +893,7 @@ def download_user(user: str, output_dir: str | None, delay: float, max_items: in
                     "author": meta.get("author", "unknown"),
                     "created": meta.get("created", "unknown"),
                 }
-                filepath = save_article(item["url"], save_meta, md, answers_dir)
+                filepath = save_article(item["url"], save_meta, md, answers_dir, with_media=with_media)
                 click.echo(f"  [{i}/{len(answer_items)}] {save_meta['title'][:50]} -> {os.path.basename(filepath)}")
                 downloaded["answers"] += 1
             except Exception as e:
@@ -878,7 +916,7 @@ def download_user(user: str, output_dir: str | None, delay: float, max_items: in
                     "author": author_name,
                     "created": (meta.get("created_time", "unknown") or "unknown")[:10],
                 }
-                filepath = save_article(item["url"], save_meta, md, articles_dir)
+                filepath = save_article(item["url"], save_meta, md, articles_dir, with_media=with_media)
                 click.echo(f"  [{i}/{len(article_items)}] {save_meta['title'][:50]} -> {os.path.basename(filepath)}")
                 downloaded["articles"] += 1
             except Exception as e:
@@ -901,7 +939,7 @@ def download_user(user: str, output_dir: str | None, delay: float, max_items: in
                     "created": (meta.get("created_time", "unknown") or "unknown")[:10],
                     "pin_id": str(meta.get("id", "")),
                 }
-                filepath = save_pin(item["url"], save_meta, md, pins_dir)
+                filepath = save_pin(item["url"], save_meta, md, pins_dir, with_media=with_media)
                 preview = (meta.get("excerpt", "") or "")[:30]
                 click.echo(f"  [{i}/{len(pin_items)}] {preview} -> {os.path.basename(filepath)}")
                 downloaded["pins"] += 1

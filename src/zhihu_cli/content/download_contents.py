@@ -1,17 +1,124 @@
 import argparse
 import html
+import mimetypes
 import os
 import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
+
+# ── media download helpers ──────────────────────────────────────────────────
+
+# Regex patterns for media references in markdown / html
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+_HTML_VIDEO_RE = re.compile(r'<video[^>]*\ssrc="([^"]+)"[^>]*>')
+_HTML_IMG_RE = re.compile(r'<img[^>]*\ssrc="([^"]+)"[^>]*>')
+
+_ZHIMG_HOST_RE = re.compile(r"\.zhimg\.com$", re.IGNORECASE)
+
+
+def download_media_files(markdown: str, output_dir: str) -> tuple[str, int]:
+    """Download media files referenced in *markdown* and rewrite URLs to local paths.
+
+    Files are saved to ``<output_dir>/media/``.  Image alt-text is preferred as
+    the filename stem; when unavailable a hash of the URL is used.  The session
+    singleton is reused so Zhihu CDN images are fetched with auth cookies.
+
+    Returns ``(updated_markdown, downloaded_count)``.
+    """
+    # ── collect (alt_text, url) pairs ──────────────────────────────────────
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for m in _MD_IMAGE_RE.finditer(markdown):
+        alt, url = m.group(1), m.group(2)
+        if url and url not in seen:
+            pairs.append((alt, url))
+            seen.add(url)
+
+    for pattern in (_HTML_IMG_RE, _HTML_VIDEO_RE):
+        for m in pattern.finditer(markdown):
+            url = m.group(1)
+            if url and url not in seen:
+                pairs.append(("", url))
+                seen.add(url)
+
+    if not pairs:
+        return markdown, 0
+
+    # ── download ───────────────────────────────────────────────────────────
+    media_dir = os.path.join(output_dir, "media")
+    os.makedirs(media_dir, exist_ok=True)
+
+    url_to_local: dict[str, str] = {}
+    downloaded = 0
+
+    for alt, url in pairs:
+        try:
+            resp = session.get(url, timeout=30)
+            resp.raise_for_status()
+        except Exception:
+            continue
+
+        # Guess extension: Content-Type → URL path → .jpg fallback
+        ext = ""
+        content_type = resp.headers.get("Content-Type", "")
+        if content_type:
+            ext = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ""
+
+        if not ext:
+            parsed = urlparse(url)
+            path = parsed.path
+            # Strip Zhihu query params that mask the real extension
+            if _ZHIMG_HOST_RE.search(parsed.hostname or ""):
+                path = path.split("?")[0]
+            guess = os.path.splitext(path)[1]
+            if guess:
+                ext = guess.lower()
+
+        if not ext:
+            ext = ".jpg"
+
+        # Prefer alt-text as filename stem, otherwise hash the URL
+        stem = sanitize_filename(alt)[:80] if alt and alt.strip() else ""
+        if not stem:
+            import hashlib
+
+            stem = hashlib.sha256(url.encode()).hexdigest()[:12]
+
+        # Deduplicate within this batch
+        candidate = f"{stem}{ext}"
+        filepath = os.path.join(media_dir, candidate)
+        counter = 1
+        while os.path.exists(filepath):
+            candidate = f"{stem}_{counter}{ext}"
+            filepath = os.path.join(media_dir, candidate)
+            counter += 1
+
+        with open(filepath, "wb") as f:
+            f.write(resp.content)
+
+        rel_path = os.path.join("media", candidate)
+        url_to_local[url] = rel_path
+        downloaded += 1
+
+    if not url_to_local:
+        return markdown, 0
+
+    # ── rewrite references ─────────────────────────────────────────────────
+    updated = markdown
+    for remote_url, local_path in url_to_local.items():
+        updated = updated.replace(remote_url, local_path)
+
+    return updated, downloaded
 
 
 def extract_config_from_curl(curl_text: str) -> tuple[str, dict[str, str]]:
@@ -144,11 +251,16 @@ def build_yaml_frontmatter(metadata: dict[str, str]) -> str:
     return f"---\n{body}\n---\n\n"
 
 
-def save_article(url: str, metadata: dict[str, str], markdown: str, output_dir: str) -> str:
+def save_article(url: str, metadata: dict[str, str], markdown: str, output_dir: str, with_media: bool = False) -> str:
     """Save a downloaded article as Markdown with YAML frontmatter.
 
     Returns the file path.
     """
+    if with_media:
+        markdown, n = download_media_files(markdown, output_dir)
+        if n:
+            metadata = {**metadata, "media_files": n}
+
     title = sanitize_filename(metadata.get("title", "untitled"))
     author = sanitize_filename(metadata.get("author", "unknown"))
     created = metadata.get("created", "") or "unknown"
@@ -165,11 +277,16 @@ def save_article(url: str, metadata: dict[str, str], markdown: str, output_dir: 
     return filepath
 
 
-def save_pin(url: str, metadata: dict[str, str], markdown: str, output_dir: str) -> str:
+def save_pin(url: str, metadata: dict[str, str], markdown: str, output_dir: str, with_media: bool = False) -> str:
     """Save a downloaded pin as Markdown with YAML frontmatter.
 
     Returns the file path.
     """
+    if with_media:
+        markdown, n = download_media_files(markdown, output_dir)
+        if n:
+            metadata = {**metadata, "media_files": n}
+
     author = sanitize_filename(metadata.get("author", "unknown"))
     created = metadata.get("created", "unknown")
     preview = re.sub(r"\s+", " ", markdown)[:30]
@@ -228,7 +345,7 @@ def _resolve_created(answer_data: dict, question_data: dict) -> str:
 class ContentDownloader:
     """Zhihu content downloader."""
 
-    def __init__(self, output_dir: str | None = None) -> None:
+    def __init__(self, output_dir: str | None = None, with_media: bool = False) -> None:
         if output_dir is None:
             output_dir = str(Path.home() / ".zhihu-cli" / "downloads")
         self.output_dir = output_dir
@@ -236,6 +353,7 @@ class ContentDownloader:
             os.makedirs(self.output_dir)
         self.headers: dict[str, str] = {}
         self.md_converter: PageToMarkdown = PageToMarkdown(skip_empty=True)
+        self.with_media = with_media
 
     def load_headers_from_curl(self, quick_mode: bool = False) -> bool:
         """Load request headers from user-pasted cURL command."""
@@ -296,7 +414,7 @@ class ContentDownloader:
                     "author": author,
                     "created": created,
                 }
-                filepath = save_article(url, meta, answer_markdown, self.output_dir)
+                filepath = save_article(url, meta, answer_markdown, self.output_dir, with_media=self.with_media)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
@@ -359,7 +477,7 @@ class ContentDownloader:
         for url in urls:
             try:
                 metadata, markdown_content = self.fetch_article(url)
-                filepath = save_article(url, metadata, markdown_content, self.output_dir)
+                filepath = save_article(url, metadata, markdown_content, self.output_dir, with_media=self.with_media)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
@@ -443,7 +561,7 @@ class ContentDownloader:
                     "ip": ip_info,
                     "pin_id": pin_id,
                 }
-                filepath = save_pin(url, meta, markdown_content, self.output_dir)
+                filepath = save_pin(url, meta, markdown_content, self.output_dir, with_media=self.with_media)
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
