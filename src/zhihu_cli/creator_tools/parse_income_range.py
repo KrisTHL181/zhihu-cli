@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.utils.wait import wait
 
 DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "creator_income_items.json")
 RANGE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/range"
@@ -76,7 +76,7 @@ def _fetch_batch(
                 break
 
             page += 1
-            time.sleep(1.0)
+            wait(1.0)
 
         except Exception as e:
             print(f"error: {e}")
@@ -123,7 +123,7 @@ def run_task(
         batch_start = batch_end + timedelta(days=1)
         if batch_start > end_dt:
             break
-        time.sleep(1.0)
+        wait(1.0)
 
     if not all_items:
         print("\n[!] No data fetched.")
@@ -182,7 +182,9 @@ def run_task(
     print("=" * 60)
     print(f"  Per-Content Income: {start_date} → {end_date}")
     print("=" * 60)
-    print(f"  Total items:      {len(unique_items):>6}  (answers: {answer_count}, articles: {article_count}, pins: {pin_count})")
+    print(
+        f"  Total items:      {len(unique_items):>6}  (answers: {answer_count}, articles: {article_count}, pins: {pin_count})"
+    )
     print(f"  Total income:     {total_income_salt:>6} 盐粒 = ¥{total_income_salt / 100:.2f}")
     print(f"  Total reads:      {total_read:>6}")
     print(f"  Total interactions:{total_interaction:>6}")

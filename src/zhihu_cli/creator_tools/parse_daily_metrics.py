@@ -1,7 +1,6 @@
 import csv
 import json
 import os
-import time
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.utils.wait import wait
 
 DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "daily_metrics.json")
 DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/member/daily"
@@ -99,7 +99,7 @@ def run_task() -> None:
         if batch_end >= end_dt - timedelta(days=1):
             break
         current_dt = batch_end + timedelta(days=1)
-        time.sleep(1.5)
+        wait(1.5)
 
     all_details = existing_details + new_records
     unique_data = {item["date"]: item for item in all_details}

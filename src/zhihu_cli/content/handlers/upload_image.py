@@ -9,11 +9,11 @@ import hashlib
 import hmac
 import mimetypes
 import re
-import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.utils.wait import wait
 
 ZHIHU_IMAGE_API: str = "https://api.zhihu.com/images"
 ZHIHU_OSS_UPLOAD_URL: str = "https://zhihu-pics-upload.zhimg.com"
@@ -124,7 +124,7 @@ def _poll_image(image_id: str, max_attempts: int = 15, interval: float = 2.0) ->
                 "watermark": data.get("watermark", "watermark"),
                 "watermark_src": data.get("watermark_src", ""),
             }
-        time.sleep(interval)
+        wait(interval, forced_to_wait=True)
     raise RuntimeError("Image processing timed out")
 
 

@@ -3,7 +3,6 @@
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 import click
@@ -87,6 +86,7 @@ from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
 from zhihu_cli.content.universal_converter import convert_items, load_json
+from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.extensions import discover_extensions
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -944,7 +944,7 @@ def download_user(
                 downloaded["answers"] += 1
             except Exception as e:
                 click.echo(f"  [{i}/{len(answer_items)}] Error: {e}", err=True)
-            time.sleep(delay)
+            wait(delay)
 
     if content_types in ("articles", "all"):
         articles_dir = str(base_dir / "articles")
@@ -967,7 +967,7 @@ def download_user(
                 downloaded["articles"] += 1
             except Exception as e:
                 click.echo(f"  [{i}/{len(article_items)}] Error: {e}", err=True)
-            time.sleep(delay)
+            wait(delay)
 
     if content_types in ("pins", "all"):
         pins_dir = str(base_dir / "pins")
@@ -991,7 +991,7 @@ def download_user(
                 downloaded["pins"] += 1
             except Exception as e:
                 click.echo(f"  [{i}/{len(pin_items)}] Error: {e}", err=True)
-            time.sleep(delay)
+            wait(delay)
 
     click.echo(f"\nDone! Downloaded from {user_name}:")
     click.echo(f"  Answers: {downloaded['answers']}")

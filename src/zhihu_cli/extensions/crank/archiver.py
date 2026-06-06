@@ -17,7 +17,6 @@ import random
 import shutil
 import sys
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +25,7 @@ from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.universal_converter import convert_items
+from zhihu_cli.content.utils.wait import wait
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 
@@ -252,7 +252,7 @@ def run_archiver(
             print(f"  [OK] {url} → {os.path.basename(filepath)}")
         except Exception as e:
             print(f"  [Error] {url}: {e}", file=sys.stderr)
-        time.sleep(1.0)
+        wait(1.0)
 
     # 4. Gather downloaded files
     md_files = sorted(

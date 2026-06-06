@@ -11,8 +11,7 @@ MEMBER_API = "https://www.zhihu.com/api/v4/members/{token}"
 TOPIC_FOLLOWING_API = "https://www.zhihu.com/api/v5.1/topics/{token}/following_topics_contributions"
 
 
-def get_my_url_token() -> str | None:
-    """Get the logged-in user's url_token from /api/v4/me."""
+def get_my_url_token():
     try:
         resp = session.get("https://www.zhihu.com/api/v4/me")
         if resp.status_code == 200:

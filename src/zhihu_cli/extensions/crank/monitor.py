@@ -15,12 +15,12 @@ import json
 import os
 import re
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zhihu_cli.content.download_contents import build_yaml_frontmatter, get_safe_filename, sanitize_filename
 from zhihu_cli.content.handlers.article import scrape_article
+from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.extensions.crank.archiver import (
     call_llm_for_name,
     fetch_article_list,
@@ -381,7 +381,7 @@ class CrankMonitor:
 
             print(f"      → {filepath}")
             saved.append(filepath)
-            time.sleep(1.0)
+            wait(1.0)
 
         return saved
 
@@ -413,7 +413,7 @@ class CrankMonitor:
             title = metadata.get("title") or art.get("title") or "untitled"
             filename = generate_filename(author_name, title, (metadata.get("created_time") or "")[:10] or "unknown")
             samples.append((filename, markdown))
-            time.sleep(1.0)
+            wait(1.0)
 
         if not samples:
             print("    [error] No samples to send to LLM.", file=sys.stderr)

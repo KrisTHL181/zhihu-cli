@@ -1,6 +1,5 @@
 import json
 import os
-import time
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Any
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.utils.wait import wait
 
 DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/daily"
 AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/aggr"
@@ -220,7 +220,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
         except Exception as e:
             print(f"  Exception: {e}")
 
-        time.sleep(1.2)
+        wait(1.2)
 
     print("\n" + "=" * 40)
     print("Batch harvest finished!")

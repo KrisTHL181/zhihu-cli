@@ -4,7 +4,6 @@ import mimetypes
 import os
 import re
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +13,7 @@ import yaml
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
+from zhihu_cli.content.utils.wait import wait
 
 # ── media download helpers ──────────────────────────────────────────────────
 
@@ -428,7 +428,7 @@ class ContentDownloader:
             except Exception as e:
                 print(f"[Error] Failed to process {url}: {e}")
                 continue
-            time.sleep(delay)
+            wait(delay)
 
     def fetch_article(self, url: str) -> tuple[dict[str, str], str]:
         """Fetch and convert a single article. Returns (metadata, markdown_content)."""
@@ -488,7 +488,7 @@ class ContentDownloader:
             except TimeoutError:
                 print(f"[Timeout] {url}")
                 continue
-            time.sleep(delay)
+            wait(delay)
 
     def download_pins(self, urls: list[str], delay: float = 1.0) -> None:
         """Download pin pages and convert to Markdown."""
@@ -575,7 +575,7 @@ class ContentDownloader:
             except Exception as e:
                 print(f"[Error] Failed to process {url}: {e}")
                 continue
-            time.sleep(delay)
+            wait(delay)
 
 
 def main() -> None:

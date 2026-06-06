@@ -5,6 +5,7 @@ import time
 from curl_cffi import requests as curl_requests
 
 from zhihu_cli.content.handlers import get_user_agent
+from zhihu_cli.content.utils.wait import wait
 
 DESKTOP_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
@@ -238,7 +239,7 @@ def qr_login() -> dict[str, str]:
         except Exception:
             pass
 
-        time.sleep(1)
+        wait(1.0)
 
     if not _cookie_value(session, "z_c0"):
         raise RuntimeError("QR code expired or login was not completed. Please try again.")

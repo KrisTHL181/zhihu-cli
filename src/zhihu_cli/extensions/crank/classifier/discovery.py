@@ -6,11 +6,11 @@ report authors with high crank-to-normal ratio.
 
 from __future__ import annotations
 
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.extensions.crank.classifier.config import CRANK_KEYWORDS, DISCOVERY_THRESHOLD
 from zhihu_cli.extensions.crank.classifier.model import (
     load_model,
@@ -82,7 +82,7 @@ def discover_cranks(
 
             author_articles[author_name].append((url, is_c, prob, title, author.get("url_token", "")))
 
-        time.sleep(delay)
+        wait(delay)
 
     # Aggregate and filter
     results: list[DiscoveryResult] = []

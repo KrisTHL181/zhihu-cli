@@ -1,16 +1,16 @@
-import time
 import warnings
 from collections.abc import Callable, Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.utils.wait import wait
 
 
 def stream_handler(
     initial_url: str,
     parser: Callable[[dict[str, Any]], Iterable[Any]],
     extract_next: Callable[[dict[str, Any]], str | None] | None = None,
-    delay: float | None = None,
+    delay: float = 1.0,
 ) -> Iterable[Any]:
     """Paginate a Zhihu API endpoint, yielding parsed items one by one.
 
@@ -20,14 +20,8 @@ def stream_handler(
             parsed items per page.
         extract_next: Optional custom pagination resolver.  When omitted,
             ``paging.next`` / ``paging.is_end`` is used.
-        delay: Seconds to sleep between pages.  ``None`` (the default)
-            auto-detects: 0.0 when authenticated, 1.0 otherwise.
     """
     current_url = initial_url
-    if delay is None:
-        from zhihu_cli.content.handlers.following import get_my_url_token
-
-        delay = 0.0 if get_my_url_token() is not None else 1.0
 
     api_totals = 0
     yielded_count = 0
@@ -57,7 +51,7 @@ def stream_handler(
         if current_url:
             current_url = current_url.replace("http://", "https://")
 
-        time.sleep(delay)
+        wait(delay)
 
     # ── natural end of stream — check completeness ──────────────────────────
     if api_totals > 0 and yielded_count < api_totals:
