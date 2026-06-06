@@ -82,6 +82,7 @@ from zhihu_cli.content.handlers.report import fetch_report_reasons, flatten_reas
 from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
+from zhihu_cli.content.handlers.upload_image import upload_image
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
 from zhihu_cli.content.universal_converter import convert_items, load_json
@@ -2380,6 +2381,27 @@ def publish_modify_article(article_id: str, title: str, file: str | None) -> Non
         raise SystemExit(1)
     resp = modify_article(article_id, title, content)
     click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+
+
+@publish.command("upload-image")
+@click.argument("file_path")
+@click.option(
+    "--source",
+    "-s",
+    default="article",
+    help="Upload context: article (default), pin, answer, question",
+)
+def publish_upload_image(file_path: str, source: str) -> None:
+    """Upload an image to Zhihu. Outputs the uploaded image URL."""
+    try:
+        info = upload_image(file_path, source=source)
+        click.echo(info["src"])
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
 
 
 # ── chat ─────────────────────────────────────────────────────────────────
