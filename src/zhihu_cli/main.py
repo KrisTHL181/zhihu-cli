@@ -83,6 +83,7 @@ from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
 from zhihu_cli.content.handlers.upload_image import to_visible_url, upload_image
+from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
 from zhihu_cli.content.universal_converter import convert_items, load_json
@@ -2825,8 +2826,7 @@ def _generic_list_scrape(api_description: str, output_file: str) -> None:
     """Generic stdin-based list scraper. User pastes the API's cURL command."""
     import re
 
-    headers = cache_manager.load_headers()
-    if not headers:
+    if not cache_manager.load_headers():
         click.echo("No cached headers. Run 'zhihu auth paste' first.", err=True)
         raise SystemExit(1)
 
@@ -2845,46 +2845,16 @@ def _generic_list_scrape(api_description: str, output_file: str) -> None:
         click.echo("Error: could not parse URL from cURL.", err=True)
         raise SystemExit(1)
 
-    full_url = url_match.group(1)
-    from urllib.parse import parse_qs, urlencode, urlparse
+    initial_url = url_match.group(1).replace("http://", "https://")
 
-    parsed = urlparse(full_url)
-    query = parse_qs(parsed.query, keep_blank_values=True)
-    for k, v in query.items():
-        if isinstance(v, list) and len(v) == 1:
-            query[k] = v[0]
+    def parse_items(data: dict) -> list[dict]:
+        return data.get("data", [])
 
-    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
     all_items: list[dict] = []
-    limit_val = int(query.get("limit", 20))
-    offset_val = int(query.get("offset", 0))
-    is_end = False
-
-    while not is_end:
-        query["offset"] = offset_val
-        request_url = f"{base_url}?{urlencode(query, doseq=True)}"
-        try:
-            resp = session.get(request_url, headers=headers, timeout=15)
-            if resp.status_code != 200:
-                click.echo(f"Error: HTTP {resp.status_code}", err=True)
-                break
-            data = resp.json()
-            items = data.get("data", [])
-            all_items.extend(items)
-            paging = data.get("paging", {})
-            is_end = paging.get("is_end", True)
-            click.echo(f"  Page: {len(items)} items (total: {len(all_items)})")
-            if not is_end:
-                next_url = paging.get("next", "")
-                next_match = re.search(r"[?&]offset=(\d+)", next_url)
-                if next_match:
-                    offset_val = int(next_match.group(1))
-                else:
-                    offset_val += limit_val
-        except Exception as e:
-            click.echo(f"Error: {e}", err=True)
-            break
-        time.sleep(1.5)
+    for item in stream_handler(initial_url, parse_items):
+        all_items.append(item)
+        if len(all_items) % 20 == 0:
+            click.echo(f"  Collected {len(all_items)} items...")
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(all_items, f, ensure_ascii=False, indent=2)

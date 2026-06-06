@@ -1,5 +1,4 @@
-import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -7,6 +6,7 @@ from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter, replace_with_text
 
 
@@ -93,38 +93,30 @@ def _parse_messages_page(
 
 
 def iter_chat_history(chat_id: str) -> Generator[dict[str, str], None, None]:
-    current_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
-    all_messages: list[dict[str, str]] = []
+    """Stream chat history pages via waterfall, collecting and reversing for chronological order."""
+    initial_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
 
-    while current_url:
-        resp = session.get(current_url, timeout=15)
+    # Closure state shared between parser and extract_next
+    state: dict[str, str | None] = {"last_id": None, "current_url": initial_url}
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Chat history request failed: {resp.status_code} for {current_url}")
-
-        try:
-            data = resp.json()
-        except Exception:
-            raise RuntimeError(f"Chat history returned invalid JSON for {current_url}")
-
+    def parse_messages(data: dict[str, Any]) -> Iterable[dict[str, str]]:
         page_msgs, last_id, _ = _parse_messages_page(data)
-        if not page_msgs:
-            break
+        state["last_id"] = last_id
+        yield from page_msgs
 
-        all_messages.extend(page_msgs)
-
+    def extract_next(data: dict[str, Any]) -> str | None:
         paging = data.get("paging", {})
-
         if paging.get("is_end", True):
-            break
+            return None
+        last_id = state["last_id"]
+        if not last_id:
+            return None
+        next_url = _build_next_url(str(state["current_url"]), str(last_id))
+        state["current_url"] = next_url
+        return next_url
 
-        if last_id:
-            current_url = _build_next_url(current_url, last_id)
-            time.sleep(0.6)
-        else:
-            break
-
-    # API returns messages newest-first; reverse to chronological order
+    # API returns messages newest-first; collect and reverse to chronological order
+    all_messages = list(stream_handler(initial_url, parse_messages, extract_next, delay=0.6))
     yield from reversed(all_messages)
 
 

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import stream_handler
 
 NEXT_CONTENT_RENDER = "https://api.zhihu.com/next-content-render"
 
@@ -128,58 +129,47 @@ def fetch_yanxuan_segments(
         with keys: id, type, text, marks.
     """
     meta: dict[str, str] = {}
-    all_segments: list[dict[str, Any]] = []
-    current_offset = offset
-    pages_fetched = 0
+    initial_url = (
+        f"{NEXT_CONTENT_RENDER}?{urlencode({'offset': offset, 'url_token': url_token, 'content_type': content_type})}"
+    )
 
-    while True:
-        if max_pages is not None and pages_fetched >= max_pages:
-            break
-        if max_segments is not None and len(all_segments) >= max_segments:
-            break
+    # Track pagination state in closures
+    state: dict[str, int] = {"next_offset": offset, "pages": 0}
 
-        params = {
-            "offset": current_offset,
-            "url_token": url_token,
-            "content_type": content_type,
-        }
-        url = f"{NEXT_CONTENT_RENDER}?{urlencode(params)}"
+    def parse_segments(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
+        for seg in data.get("segments", []):
+            seg_type = seg.get("type", "paragraph")
+            # Extract card metadata on first encounter
+            if seg_type == "card" and not meta:
+                meta.update(_extract_card_meta(seg))
+            yield {
+                "id": seg.get("id", ""),
+                "type": seg_type,
+                "text": _segment_text(seg),
+                "marks": _segment_marks(seg),
+            }
 
-        resp = session.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-
+    def extract_next(data: dict[str, Any]) -> str | None:
         # paging is a JSON-encoded string — parse it
         paging_raw = data.get("paging", "{}")
         paging = json.loads(paging_raw) if isinstance(paging_raw, str) else paging_raw
-
-        segments = data.get("segments", [])
-        for seg in segments:
-            if max_segments is not None and len(all_segments) >= max_segments:
-                break
-
-            seg_type = seg.get("type", "paragraph")
-
-            # Extract card metadata on first encounter
-            if seg_type == "card" and not meta:
-                meta = _extract_card_meta(seg)
-
-            all_segments.append(
-                {
-                    "id": seg.get("id", ""),
-                    "type": seg_type,
-                    "text": _segment_text(seg),
-                    "marks": _segment_marks(seg),
-                }
-            )
-
-        pages_fetched += 1
-
         if paging.get("is_end", False):
-            break
+            return None
+        state["pages"] += 1
+        if max_pages is not None and state["pages"] >= max_pages:
+            return None
+        # Advance offset by number of segments in this page
+        state["next_offset"] += len(data.get("segments", []))
+        return (
+            f"{NEXT_CONTENT_RENDER}?"
+            f"{urlencode({'offset': state['next_offset'], 'url_token': url_token, 'content_type': content_type})}"
+        )
 
-        # Advance offset for next page
-        current_offset += len(segments)
+    all_segments: list[dict[str, Any]] = []
+    for seg in stream_handler(initial_url, parse_segments, extract_next):
+        all_segments.append(seg)
+        if max_segments is not None and len(all_segments) >= max_segments:
+            break
 
     return meta, all_segments
 

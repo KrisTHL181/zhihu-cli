@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import time
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import stream_handler
 
 DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "creator_score_detail.json")
 SCORE_URL: str = "https://www.zhihu.com/api/v4/creators/creator_score_detail"
@@ -60,55 +60,38 @@ def run_task() -> None:
     start_ts = _date_to_ts(start_date)
     end_ts = _date_to_ts(today_str, end_of_day=True)
 
-    new_records: list[dict[str, Any]] = []
-    offset = 0
     limit = 20
+    initial_url = f"{SCORE_URL}?start_at={start_ts}&end_at={end_ts}&limit={limit}&offset=0"
 
-    while True:
-        params = {
-            "start_at": start_ts,
-            "end_at": end_ts,
-            "limit": limit,
-            "offset": offset,
-        }
+    def parse_score_detail(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
+        for item in data.get("data", {}).get("detail", []):
+            yield {
+                "p_date": item["p_date"],
+                "score_type": item["score_type"],
+                "score_type_int": item["score_type_int"],
+                "change_score": item["change_score"],
+                "score": item["score"],
+                "reason": item["reason"],
+                "detail": item["detail"],
+            }
 
-        print(f"  Fetching offset={offset}...", end=" ")
+    # Use manual offset tracking — this creator API may not provide paging.next
+    state = {"offset": 0}
 
-        try:
-            resp = session.get(SCORE_URL, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
+    def extract_next(data: dict[str, Any]) -> str | None:
+        paging = data.get("paging", {})
+        if paging.get("is_end", True):
+            return None
+        state["offset"] += limit
+        return f"{SCORE_URL}?start_at={start_ts}&end_at={end_ts}&limit={limit}&offset={state['offset']}"
 
-            detail_list = data.get("data", {}).get("detail", [])
-            if not detail_list:
-                print("no more data")
-                break
-
-            for item in detail_list:
-                new_records.append(
-                    {
-                        "p_date": item["p_date"],
-                        "score_type": item["score_type"],
-                        "score_type_int": item["score_type_int"],
-                        "change_score": item["change_score"],
-                        "score": item["score"],
-                        "reason": item["reason"],
-                        "detail": item["detail"],
-                    }
-                )
-
-            print(f"got {len(detail_list)} records")
-
-            paging = data.get("paging", {})
-            if paging.get("is_end", True):
-                break
-
-            offset += limit
-            time.sleep(1.0)
-
-        except Exception as e:
-            print(f"error: {e}")
-            break
+    new_records: list[dict[str, Any]] = []
+    try:
+        for item in stream_handler(initial_url, parse_score_detail, extract_next):
+            new_records.append(item)
+        print(f"  Fetched {len(new_records)} records")
+    except Exception as e:
+        print(f"error: {e}")
 
     # Merge and deduplicate by (p_date, score_type_int)
     all_details = existing_details + new_records

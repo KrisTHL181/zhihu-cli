@@ -1,12 +1,14 @@
 import json
 import os
 import time
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import stream_handler
 
 DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/daily"
 AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/aggr"
@@ -38,57 +40,33 @@ def get_date(d: dict[str, Any]) -> str | None:
 
 def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
     """Scrape all user creations and save to output_path. Returns the asset list."""
-    headers = cache_manager.load_headers()
-    if not headers:
+    if not cache_manager.load_headers():
         print("No cached headers found. Run: zhihu auth paste")
         return []
 
-    base_url = "https://www.zhihu.com/api/v4/creators/creations/v2/all"
-    all_assets: list[dict[str, str]] = []
-    offset = 0
-    limit = 20
+    initial_url = (
+        "https://www.zhihu.com/api/v4/creators/creations/v2/all"
+        "?start=0&end=0&limit=20&offset=0&need_co_creation=1&sort_type=created"
+    )
+
+    def parse_creations(data: dict[str, Any]) -> Iterable[dict[str, str]]:
+        for item in data.get("data", []):
+            asset_type = item.get("type")
+            asset_id = item.get("data", {}).get("id")
+            if asset_id and asset_type in ("answer", "pin", "article"):
+                yield {
+                    "id": asset_id,
+                    "type": asset_type,
+                    "title": item.get("data", {}).get("title", ""),
+                    "created_time": item.get("data", {}).get("created_time", 0),
+                }
 
     print("Scanning your Zhihu creations...")
-    while True:
-        params = {
-            "start": 0,
-            "end": 0,
-            "limit": limit,
-            "offset": offset,
-            "need_co_creation": 1,
-            "sort_type": "created",
-        }
-        try:
-            resp = session.get(base_url, headers=headers, params=params, timeout=15)
-            if resp.status_code != 200:
-                print(f"  HTTP {resp.status_code}, interrupted")
-                break
-
-            data = resp.json()
-            for item in data.get("data", []):
-                asset_type = item.get("type")
-                asset_id = item.get("data", {}).get("id")
-                if asset_id and asset_type in ("answer", "pin", "article"):
-                    all_assets.append(
-                        {
-                            "id": asset_id,
-                            "type": asset_type,
-                            "title": item.get("data", {}).get("title", ""),
-                            "created_time": item.get("data", {}).get("created_time", 0),
-                        }
-                    )
-
-            paging = data.get("paging", {})
-            totals = paging.get("totals", 0)
-            offset += limit
-            print(f"  {min(offset, totals)}/{totals} — Collected {len(all_assets)} items")
-
-            if paging.get("is_end", True) or offset >= totals:
-                break
-        except Exception as e:
-            print(f"  Exception: {e}")
-            break
-        time.sleep(1.2)
+    all_assets: list[dict[str, str]] = []
+    for i, item in enumerate(stream_handler(initial_url, parse_creations)):
+        all_assets.append(item)
+        if (i + 1) % 20 == 0:
+            print(f"  Collected {len(all_assets)} items...")
 
     os.makedirs(output_path.parent, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
