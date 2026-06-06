@@ -46,7 +46,6 @@ from zhihu_cli.content.handlers.following import (
     fetch_following_columns,
     fetch_following_questions,
     fetch_following_topics,
-    get_my_url_token,
 )
 from zhihu_cli.content.handlers.hot import fetch_hot_list
 from zhihu_cli.content.handlers.people import (
@@ -57,6 +56,7 @@ from zhihu_cli.content.handlers.people import (
     fetch_member_profile,
     fetch_member_questions,
     follow,
+    get_my_url_token,
     unblock,
     unfollow,
 )

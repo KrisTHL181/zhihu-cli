@@ -233,3 +233,14 @@ def fetch_member_questions(
     except Exception:
         pass
     return items
+
+
+def get_my_url_token():
+    try:
+        resp = session.get("https://www.zhihu.com/api/v4/me")
+        if resp.status_code == 200:
+            me = resp.json()
+            return me.get("url_token") or me.get("urlToken")
+    except Exception:
+        pass
+    return None

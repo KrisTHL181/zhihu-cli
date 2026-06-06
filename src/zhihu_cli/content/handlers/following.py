@@ -4,22 +4,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 MEMBER_API = "https://www.zhihu.com/api/v4/members/{token}"
 TOPIC_FOLLOWING_API = "https://www.zhihu.com/api/v5.1/topics/{token}/following_topics_contributions"
-
-
-def get_my_url_token():
-    try:
-        resp = session.get("https://www.zhihu.com/api/v4/me")
-        if resp.status_code == 200:
-            me = resp.json()
-            return me.get("url_token") or me.get("urlToken")
-    except Exception:
-        pass
-    return None
 
 
 # ── followees (关注的用户) ────────────────────────────────────────────────────

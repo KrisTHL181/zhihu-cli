@@ -26,8 +26,8 @@ def wait(sleep_factor: float, forced_to_wait: bool = False) -> None:
     delay = 1.0
 
     if not forced_to_wait:
-        from zhihu_cli.content.handlers.following import get_my_url_token
+        from zhihu_cli.content.handlers.cache_manager import cache_manager
 
-        delay = 0.0 if get_my_url_token() is not None else 1.0  # Don't delay if logged in
+        delay = 0.0 if cache_manager.get_active_profile() is not None else 1.0  # Don't delay if logged in
 
     time.sleep(delay * min(generate_lognormal(sleep_factor, 0.5), 3 * sleep_factor))

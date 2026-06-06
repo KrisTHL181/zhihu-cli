@@ -595,7 +595,7 @@ def main(
         max_expand: Max nodes to expand per hop level.
         max_per_node: Max followees per expanded node.
     """
-    from zhihu_cli.content.handlers.following import get_my_url_token
+    from zhihu_cli.content.handlers.people import get_my_url_token
 
     if not output:
         output = str(DATA_DIR / "plots" / "zhihu_social_graph.png")
