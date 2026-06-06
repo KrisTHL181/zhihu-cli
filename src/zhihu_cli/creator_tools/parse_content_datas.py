@@ -185,6 +185,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                     clean_data = []
                     for d in data:
                         advanced = d.get("advanced") or {}
+
                         clean_data.append(
                             {
                                 "type": token["type"],
@@ -199,11 +200,6 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                                 "collect": d.get("collect", 0),
                                 "comment": d.get("comment", 0),
                                 "share": d.get("share", 0),
-                                "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
-                                "positive_interact_percent": convert_percent(
-                                    advanced.get("positive_interact_percent", "0.0%")
-                                ),
-                                "follower_translate": advanced.get("follower_translate", "0"),
                             }
                         )
                     entries_label = f"{len(clean_data)} entries"
