@@ -8,8 +8,10 @@ import email.utils
 import hashlib
 import hmac
 import mimetypes
+import re
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from zhihu_cli.content.handlers.requests import session
 
@@ -124,3 +126,27 @@ def _poll_image(image_id: str, max_attempts: int = 15, interval: float = 2.0) ->
             }
         time.sleep(interval)
     raise RuntimeError("Image processing timed out")
+
+
+def to_visible_url(src: str) -> str:
+    """Convert a pic-private.zhihu.com URL to a visible pic1.zhimg.com URL.
+
+    Extracts the image ID (e.g. ``v2-a019cc18bc079641a6e9dff3dcf471cb``)
+    and rewrites it to the public ``pic1.zhimg.com`` domain with a
+    ``.jpg`` suffix, preserving the ``source`` query param when
+    available.
+    """
+    match = re.search(r"/(v\d+-[a-f0-9]+)", src)
+    if not match:
+        return src
+
+    image_id = match.group(1)
+
+    parsed = urlparse(src)
+    params = parse_qs(parsed.query)
+    source = params.get("source", [None])[0]
+
+    url = f"https://pic1.zhimg.com/{image_id}.jpg"
+    if source:
+        url += f"?source={source}"
+    return url

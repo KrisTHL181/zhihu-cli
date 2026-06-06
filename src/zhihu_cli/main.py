@@ -82,7 +82,7 @@ from zhihu_cli.content.handlers.report import fetch_report_reasons, flatten_reas
 from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
-from zhihu_cli.content.handlers.upload_image import upload_image
+from zhihu_cli.content.handlers.upload_image import to_visible_url, upload_image
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
 from zhihu_cli.content.universal_converter import convert_items, load_json
@@ -2396,6 +2396,8 @@ def publish_upload_image(file_path: str, source: str) -> None:
     try:
         info = upload_image(file_path, source=source)
         click.echo(info["src"])
+        visible = to_visible_url(info.get("original_src", info["src"]))
+        click.echo(click.style(f"Visible URL: {visible}", fg="green"))
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
