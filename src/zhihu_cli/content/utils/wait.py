@@ -30,4 +30,4 @@ def wait(sleep_factor: float, forced_to_wait: bool = False) -> None:
 
         delay = 0.0 if get_my_url_token() is not None else 1.0  # Don't delay if logged in
 
-    time.sleep(delay * generate_lognormal(sleep_factor, 0.5))
+    time.sleep(delay * min(generate_lognormal(sleep_factor, 0.5), 3 * sleep_factor))
