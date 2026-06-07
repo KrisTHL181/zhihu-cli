@@ -65,6 +65,22 @@ def run_task() -> None:
     print("\n=== 活跃度 ===")
     _format_section(all_follower.get("activeness", []))
 
+    print("\n=== 活跃时段 ===")
+    active_time = all_follower.get("active_time", [])
+    if active_time:
+        # Find the max real_value for scaling the bar
+        max_val = max(item["real_value"] for item in active_time)
+        bar_width = 40
+        for item in active_time:
+            hour = item["name"]
+            pct = item["value"] * 100
+            real = item["real_value"]
+            bar_len = int(item["real_value"] / max_val * bar_width)
+            bar = "█" * bar_len
+            print(f"  {hour}  {bar} {pct:>5.1f}%  ({real:,})")
+    else:
+        print("  (no data)")
+
     print("\n=== 性别分布 ===")
     _format_section(all_follower.get("gender", []))
 
