@@ -40,14 +40,13 @@ def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | No
     if child_comment_count == 0:
         return []
 
-    child_offset = parent_comment.get("child_comment_next_offset")
-    # offset=None means API didn't provide one, try from 0
-    # offset=0 is a valid value, don't use `not child_offset`
-    if child_offset is None:
-        child_offset = 0
-
+    # Always start from offset=0 — the APIʼs child_comment_next_offset is a
+    # cursor (e.g. "1781270884_11506206037_0") that follows the last inline
+    # child, not a numeric offset.  Using it would skip children that exist
+    # between offset 0 and the cursor but were not included in the inline
+    # child_comments array.  Rely on seen_ids dedup for the overlap.
     base_url = f"https://www.zhihu.com/api/v4/comment_v5/comment/{parent_comment['id']}/child_comment"
-    initial_url = f"{base_url}?limit=20&offset={child_offset}"
+    initial_url = f"{base_url}?limit=20&offset=0"
 
     def child_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for child in data.get("data", []):
