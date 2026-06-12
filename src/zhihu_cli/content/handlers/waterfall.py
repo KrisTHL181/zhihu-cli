@@ -1,9 +1,18 @@
 import warnings
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.wait import wait
+
+
+def should_suppress_incomplete_warning() -> bool:
+    """Check if the environment variable to suppress incomplete stream warnings is set."""
+    import os
+
+    env = os.getenv("ZHIHU_CLI_SUPPRESS_INCOMPLETE_WARNING", "0") == "1"
+    return env or (Path.home() / ".zhihu-cli" / "suppress-incomplete-warning").exists()
 
 
 def stream_handler(
@@ -56,7 +65,8 @@ def stream_handler(
     # ── natural end of stream — check completeness ──────────────────────────
     if api_totals > 0 and yielded_count < api_totals:
         missing = api_totals - yielded_count
-        warnings.warn(
-            f"API reported {api_totals} total items but only {yielded_count} were returned (missing {missing}).",
-            stacklevel=2,
-        )
+        if not should_suppress_incomplete_warning():
+            warnings.warn(
+                f"API reported {api_totals} total items but only {yielded_count} were returned (missing {missing}).",
+                stacklevel=2,
+            )
