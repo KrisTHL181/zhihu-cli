@@ -1,6 +1,7 @@
 from collections.abc import Iterable, Iterator
 from typing import Any
 
+from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils import markdown2html
@@ -60,6 +61,7 @@ def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | No
                 "like_count": child.get("like_count", 0),
                 "dislike_count": child.get("dislike_count", 0),
                 "content": _convert_content(child.get("content", "")),
+                "created_time": child.get("created_time"),
                 "id": cid,
             }
 
@@ -80,6 +82,7 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
                 "dislike_count": comment.get("dislike_count", 0),
                 "content": _convert_content(comment.get("content", "")),
                 "id": comment.get("id"),
+                "created_time": comment.get("created_time"),
                 "child_comments": [],
             }
 
@@ -97,6 +100,7 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
                         "like_count": child.get("like_count", 0),
                         "dislike_count": child.get("dislike_count", 0),
                         "content": _convert_content(child.get("content", "")),
+                        "created_time": child.get("created_time"),
                         "id": cid,
                     }
                 )
@@ -119,7 +123,7 @@ def print_comments(item_type: str, item_id: str) -> None:
     comment_id = 1
     for comment in fetch_root_comments(item_type, item_id):
         print(
-            f"\n[{comment_id}] Author: {comment['author']} | Likes: {comment['like_count']} | Dislikes: {comment['dislike_count']}"
+            f"\n[{comment_id}] Author: {comment['author']} | Likes: {comment['like_count']} | Dislikes: {comment['dislike_count']} | Created: {fmt_time(comment['created_time'])}"
         )
         print("-" * 20)
         print(comment["content"])
@@ -127,7 +131,7 @@ def print_comments(item_type: str, item_id: str) -> None:
             print("\n  ↳ Replies:")
             for child in comment["child_comments"]:
                 print(
-                    f"    - Author: {child['author']} | Likes: {child['like_count']} | Dislikes: {child['dislike_count']}"
+                    f"    - Author: {child['author']} | Likes: {child['like_count']} | Dislikes: {child['dislike_count']} | Created: {fmt_time(child['created_time'])}"
                 )
                 print(f"      {child['content']}\n")
         print("-" * 20)
