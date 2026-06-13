@@ -6,6 +6,7 @@ from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils import markdown2html
 from zhihu_cli.content.utils.html2markdown import converter
+from zhihu_cli.output import divider, echo, f_green, f_meta, f_name, f_num, item_index
 
 COMMENT_API: dict[str, str] = {
     "answers": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
@@ -121,19 +122,28 @@ def fetch_comments(item_type: str, item_id: str) -> list[dict[str, Any]]:
 def print_comments(item_type: str, item_id: str) -> None:
     comment_id = 1
     for comment in fetch_root_comments(item_type, item_id):
-        print(
-            f"\n[{comment_id}] Author: {comment['author']} | Likes: {comment['like_count']} | Dislikes: {comment['dislike_count']} | Created: {fmt_time(comment['created_time'])}"
+        header = (
+            f"\n{item_index(comment_id)} "
+            f"{f_name(comment['author'])} "
+            f"{f_meta('| Likes:')} {f_num(comment['like_count'])} "
+            f"{f_meta('| Dislikes:')} {f_num(comment['dislike_count'])} "
+            f"{f_meta('| Created:')} {f_meta(fmt_time(comment['created_time']))}"
         )
-        print("-" * 20)
-        print(comment["content"])
+        echo(header)
+        divider("-", 20)
+        echo(comment["content"])
         if comment["child_comments"]:
-            print("\n  ↳ Replies:")
+            echo(f"\n  {f_green('↳ Replies:')}")
             for child in comment["child_comments"]:
-                print(
-                    f"    - Author: {child['author']} | Likes: {child['like_count']} | Dislikes: {child['dislike_count']} | Created: {fmt_time(child['created_time'])}"
+                child_header = (
+                    f"    - {f_name(child['author'])} "
+                    f"{f_meta('| Likes:')} {f_num(child['like_count'])} "
+                    f"{f_meta('| Dislikes:')} {f_num(child['dislike_count'])} "
+                    f"{f_meta('| Created:')} {f_meta(fmt_time(child['created_time']))}"
                 )
-                print(f"      {child['content']}\n")
-        print("-" * 20)
+                echo(child_header)
+                echo(f"      {child['content']}\n")
+        divider("-", 20)
         comment_id += 1
 
 

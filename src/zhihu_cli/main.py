@@ -88,6 +88,31 @@ from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.extensions import discover_extensions
+from zhihu_cli.output import (
+    blank,
+    echo,
+    error,
+    f_bold,
+    f_dim,
+    f_green,
+    f_label,
+    f_meta,
+    f_name,
+    f_num,
+    f_path,
+    f_tag,
+    f_title,
+    f_url,
+    file_saved,
+    heading,
+    info,
+    item_index,
+    print_json,
+    section,
+    stat,
+    success,
+    warning,
+)
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -166,17 +191,17 @@ def auth_paste(profile_name: str | None) -> None:
     Use --profile to save to a named profile (e.g. work, personal).
     """
     if profile_name and profile_name.startswith("_"):
-        click.echo("Profile names starting with '_' are reserved for internal use.", err=True)
+        error("Profile names starting with '_' are reserved for internal use.")
         raise SystemExit(1)
 
-    print("Paste cURL command (Ctrl+D to finish):")
+    echo("Paste cURL command (Ctrl+D to finish):")
     try:
         curl_text = sys.stdin.read()
     except EOFError:
         curl_text = ""
 
     if not curl_text.strip():
-        click.echo("Error: no input detected.", err=True)
+        error("No input detected.")
         raise SystemExit(1)
 
     import re
@@ -189,12 +214,12 @@ def auth_paste(profile_name: str | None) -> None:
                 headers[k.strip()] = v.strip()
 
     if not headers:
-        click.echo("Error: could not parse any headers from the input.", err=True)
+        error("Could not parse any headers from the input.")
         raise SystemExit(1)
 
     cache_manager.save_headers(headers, profile_name=profile_name)
     active = cache_manager.get_active_profile() or "default"
-    click.echo(f"Saved {len(headers)} headers to profile '{active}'")
+    success(f"Saved {len(headers)} headers to profile '{active}'")
 
 
 @auth.command("login")
@@ -209,25 +234,25 @@ def auth_login(profile_name: str | None) -> None:
     don't need to manually paste cURL headers.
     """
     if profile_name and profile_name.startswith("_"):
-        click.echo("Profile names starting with '_' are reserved for internal use.", err=True)
+        error("Profile names starting with '_' are reserved for internal use.")
         raise SystemExit(1)
 
     from zhihu_cli.content.handlers.auth_login import qr_login
 
-    click.echo("Starting QR code login...")
+    info("Starting QR code login...")
     try:
         headers = qr_login()
     except RuntimeError as e:
-        click.echo(f"Error: {e}", err=True)
+        error(f"{e}")
         raise SystemExit(1)
 
     if not headers:
-        click.echo("Login failed.", err=True)
+        error("Login failed.")
         raise SystemExit(1)
 
     cache_manager.save_headers(headers, profile_name=profile_name)
     active = cache_manager.get_active_profile() or "default"
-    click.echo(f"Saved credentials to profile '{active}'")
+    success(f"Saved credentials to profile '{active}'")
     reload_session()
 
 
@@ -256,52 +281,48 @@ def auth_status(output_json: bool) -> None:
             pass  # Silently ignore — user info is a best-effort bonus
 
     if output_json:
-        click.echo(
-            json.dumps(
-                {
-                    "active_profile": active,
-                    "profiles": profiles,
-                    "headers_count": len(headers),
-                    "has_cookie": has_cookie,
-                    "username": username,
-                    "user_id": user_id,
-                    "url_token": url_token,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+        print_json(
+            {
+                "active_profile": active,
+                "profiles": profiles,
+                "headers_count": len(headers),
+                "has_cookie": has_cookie,
+                "username": username,
+                "user_id": user_id,
+                "url_token": url_token,
+            }
         )
         return
 
     if active:
-        click.echo(f"Active profile: {active}")
+        echo(f"  {f_label('Active profile:')} {f_bold(active)}")
     else:
-        click.echo("No active profile set.")
+        info("No active profile set.")
 
     if profiles:
-        click.echo(f"Saved profiles: {', '.join(profiles)}")
+        echo(f"  {f_label('Saved profiles:')} {', '.join(profiles)}")
 
     if headers:
-        click.echo(f"Headers: {len(headers)} cached")
+        echo(f"  {f_label('Headers:')} {f_num(len(headers))} cached")
         if has_cookie:
-            click.echo("Cookie: present")
+            echo(f"  {f_label('Cookie:')} {f_green('present')}")
             if username:
-                click.echo(f"Username: {username}")
+                echo(f"  {f_label('Username:')} {f_name(username)}")
                 if user_id:
-                    click.echo(f"User ID: {user_id}")
+                    echo(f"  {f_label('User ID:')} {f_num(user_id)}")
                 if url_token:
-                    click.echo(f"URL token: {url_token}")
+                    echo(f"  {f_label('URL token:')} {url_token}")
         else:
-            click.echo("Warning: no Cookie header found.", err=True)
+            warning("No Cookie header found.")
     else:
-        click.echo("No headers cached. Run 'zhihu auth paste' first.", err=True)
+        error("No headers cached. Run 'zhihu auth paste' first.")
 
 
 @auth.command("clear")
 def auth_clear() -> None:
     """Remove cached headers."""
     cache_manager.save_headers({})
-    click.echo("Headers cache cleared.")
+    success("Headers cache cleared.")
 
 
 @auth.command("captcha")
@@ -324,8 +345,8 @@ def auth_captcha(test_url: str | None, open_browser: bool) -> None:
     if test_url is None:
         test_url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=1&desktop=true"
 
-    click.echo(f"Testing endpoint for captcha: {test_url}")
-    click.echo()
+    info(f"Testing endpoint for captcha: {test_url}")
+    blank()
 
     # Temporarily disable automatic captcha handling — we control the flow here
     old_handler = session.captcha_handler
@@ -339,53 +360,53 @@ def auth_captcha(test_url: str | None, open_browser: bool) -> None:
         resp = _test_request()
     except Exception as e:
         session.captcha_handler = old_handler
-        click.echo(f"Error making request: {e}", err=True)
+        error(f"Error making request: {e}")
         raise SystemExit(1)
 
     captcha_error = detect_captcha(resp)
     if captcha_error is None:
         if resp.status_code == 200:
-            click.echo("✅ No captcha detected — session is working normally.")
+            success("No captcha detected — session is working normally.")
         else:
-            click.echo(f"Status: {resp.status_code} (non-captcha error)")
+            echo(f"  {f_label('Status:')} {resp.status_code} (non-captcha error)")
             try:
                 body = resp.text[:500]
-                click.echo(f"Response: {body}")
+                echo(f"  {f_label('Response:')} {body}")
             except Exception:
                 pass
         return
 
     # Captcha detected
-    click.echo("⚠️  Captcha/risk-control detected!")
-    click.echo()
+    warning("Captcha/risk-control detected!")
+    blank()
 
     redirect_url = captcha_error.get("redirect", "")
     params = parse_redirect(redirect_url)
     captcha_type = params.get("type", "unknown")
     session_id = params.get("session", "")
 
-    click.echo(f"  Type:    {captcha_type}")
-    click.echo(f"  Session: {session_id}")
-    click.echo(f"  Message: {captcha_error.get('message', 'N/A')}")
-    click.echo()
+    echo(f"  {f_label('Type:')}    {captcha_type}")
+    echo(f"  {f_label('Session:')} {session_id}")
+    echo(f"  {f_label('Message:')} {captcha_error.get('message', 'N/A')}")
+    blank()
 
     # Try to get more details from the appeal API
     if session_id:
         try:
-            info = get_captcha_info(session, session_id)
-            click.echo(f"  Block level: {info.get('block_level', 'N/A')}")
-            img = info.get("img_base64", "")
+            captcha_info = get_captcha_info(session, session_id)
+            echo(f"  {f_label('Block level:')} {captcha_info.get('block_level', 'N/A')}")
+            img = captcha_info.get("img_base64", "")
             if img:
-                click.echo(f"  Captcha image: {len(img)} chars (base64)")
-            redirect_msg = info.get("redirect_url", "")
+                echo(f"  {f_label('Captcha image:')} {len(img)} chars (base64)")
+            redirect_msg = captcha_info.get("redirect_url", "")
             if redirect_msg:
                 from urllib.parse import unquote
 
-                click.echo(f"  Detail: {unquote(redirect_msg)[:200]}")
+                echo(f"  {f_label('Detail:')} {unquote(redirect_msg)[:200]}")
         except Exception as e:
-            click.echo(f"  (Could not fetch captcha details: {e})")
+            info(f"(Could not fetch captcha details: {e})")
 
-    click.echo()
+    blank()
 
     # Handle the captcha
     result = handle_captcha(
@@ -397,22 +418,22 @@ def auth_captcha(test_url: str | None, open_browser: bool) -> None:
 
     if result == "resolved":
         # Verify by retesting
-        click.echo()
+        blank()
         try:
             resp2 = _test_request()
             if resp2.status_code == 200:
-                click.echo("✅ Verification successful — session is now working.")
+                success("Verification successful — session is now working.")
             else:
-                click.echo(f"⚠️  Still getting status {resp2.status_code} after verification.")
+                warning(f"Still getting status {resp2.status_code} after verification.")
                 captcha_error2 = detect_captcha(resp2)
                 if captcha_error2:
-                    click.echo("   Captcha is still active. Try using a browser or 'zhihu auth login'.")
+                    echo("   Captcha is still active. Try using a browser or 'zhihu auth login'.")
         except Exception as e:
-            click.echo(f"⚠️  Error during verification test: {e}")
+            warning(f"Error during verification test: {e}")
     elif result == "skipped":
-        click.echo("Skipped. You can retry later with 'zhihu auth captcha'.")
+        echo("Skipped. You can retry later with 'zhihu auth captcha'.")
     else:
-        click.echo("Cancelled.")
+        echo("Cancelled.")
 
     # Restore original handler mode
     session.captcha_handler = old_handler
@@ -443,7 +464,7 @@ def config_ua_set(user_agent: str) -> None:
     from zhihu_cli.content.handlers.requests import reload_session
 
     reload_session()
-    click.echo(f"User-Agent set to:\n{user_agent}")
+    success(f"User-Agent set to:\n{user_agent}")
 
 
 @config_user_agent.command("show")
@@ -451,9 +472,9 @@ def config_ua_show() -> None:
     """Show the currently configured User-Agent."""
     ua = get_user_agent()
     if ua:
-        click.echo(f"Configured User-Agent:\n{ua}")
+        echo(f"{f_label('Configured User-Agent:')}\n{ua}")
     else:
-        click.echo("No custom User-Agent configured (using per-profile default).")
+        info("No custom User-Agent configured (using per-profile default).")
 
 
 @config_user_agent.command("clear")
@@ -463,7 +484,7 @@ def config_ua_clear() -> None:
     from zhihu_cli.content.handlers.requests import reload_session
 
     reload_session()
-    click.echo("Custom User-Agent cleared (now using per-profile default).")
+    success("Custom User-Agent cleared (now using per-profile default).")
 
 
 # ── config start-date ─────────────────────────────────────────────────────
@@ -485,21 +506,21 @@ def config_sd_set(date_str: str) -> None:
       zhihu config start-date set 2024-01-01
     """
     cache_manager.set_start_date(date_str)
-    click.echo(f"Default start date set to: {date_str}")
+    success(f"Default start date set to: {date_str}")
 
 
 @config_start_date.command("show")
 def config_sd_show() -> None:
     """Show the currently configured default start date."""
     date_str = cache_manager.get_start_date()
-    click.echo(f"Default start date: {date_str}")
+    echo(f"{f_label('Default start date:')} {date_str}")
 
 
 @config_start_date.command("clear")
 def config_sd_clear() -> None:
     """Reset the default start date to the built-in default (2026-01-16)."""
     cache_manager.set_start_date("2026-01-16")
-    click.echo("Default start date reset to: 2026-01-16")
+    success("Default start date reset to: 2026-01-16")
 
 
 # ── config crank-llm ──────────────────────────────────────────────────────
@@ -523,11 +544,11 @@ def config_llm_set(api_base: str, api_key: str, model: str) -> None:
     try:
         from zhihu_cli.extensions.crank.archiver import save_llm_config
     except ImportError:
-        click.echo("Error: crank extension is not available (missing dependencies).", err=True)
+        error("crank extension is not available (missing dependencies).")
         raise SystemExit(1)
 
     save_llm_config(api_base, api_key, model)
-    click.echo(f"LLM config saved:\n  api_base: {api_base}\n  model: {model}")
+    success(f"LLM config saved:\n  {f_label('api_base:')} {api_base}\n  {f_label('model:')} {model}")
 
 
 @config_crank_llm.command("show")
@@ -536,18 +557,18 @@ def config_llm_show() -> None:
     try:
         from zhihu_cli.extensions.crank.archiver import load_llm_config
     except ImportError:
-        click.echo("Error: crank extension is not available (missing dependencies).", err=True)
+        error("crank extension is not available (missing dependencies).")
         raise SystemExit(1)
 
     cfg = load_llm_config()
     if cfg:
-        click.echo("Cached LLM config:")
+        echo(f"{f_title('Cached LLM config:')}")
         for k, v in cfg.items():
             if k == "api_key" and v:
                 v = v[:8] + "..." if len(v) > 8 else v
-            click.echo(f"  {k}: {v}")
+            echo(f"  {f_label(k + ':')} {v}")
     else:
-        click.echo("No cached LLM config found.")
+        info("No cached LLM config found.")
 
 
 @config_crank_llm.command("clear")
@@ -556,14 +577,14 @@ def config_llm_clear() -> None:
     try:
         from zhihu_cli.extensions.crank.archiver import LLM_CONFIG_PATH
     except ImportError:
-        click.echo("Error: crank extension is not available (missing dependencies).", err=True)
+        error("crank extension is not available (missing dependencies).")
         raise SystemExit(1)
 
     if os.path.exists(LLM_CONFIG_PATH):
         os.remove(LLM_CONFIG_PATH)
-        click.echo("Cached LLM config removed.")
+        success("Cached LLM config removed.")
     else:
-        click.echo("No cached LLM config to remove.")
+        info("No cached LLM config to remove.")
 
 
 # ── profile ──────────────────────────────────────────────────────────────
@@ -582,9 +603,9 @@ def profile_list(output_json: bool) -> None:
     profiles = [p for p in cache_manager.list_profiles() if not p.startswith("_")]
     if not profiles:
         if output_json:
-            click.echo(json.dumps([], ensure_ascii=False, indent=2))
+            print_json([])
         else:
-            click.echo("No profiles found. Use 'zhihu auth paste --profile <name>' to create one.")
+            info("No profiles found. Use 'zhihu auth paste --profile <name>' to create one.")
         return
     if output_json:
         result = []
@@ -596,7 +617,7 @@ def profile_list(output_json: bool) -> None:
             except (json.JSONDecodeError, OSError):
                 has_cookie = False
             result.append({"name": name, "active": name == active, "has_cookie": has_cookie})
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result)
         return
     for name in profiles:
         marker = " *" if name == active else ""
@@ -607,7 +628,7 @@ def profile_list(output_json: bool) -> None:
         except (json.JSONDecodeError, OSError):
             cookie = False
         status = "cookie" if cookie else "no cookie"
-        click.echo(f"  {name}{marker}  ({status})")
+        echo(f"  {f_bold(name)}{marker}  ({f_meta(status)})")
 
 
 @profile.command("switch")
@@ -617,9 +638,9 @@ def profile_switch(name: str) -> None:
     try:
         cache_manager.switch_profile(name)
         reload_session()
-        click.echo(f"Switched to profile '{name}'.")
+        success(f"Switched to profile '{name}'.")
     except ValueError:
-        click.echo(f"Profile '{name}' does not exist. Use 'zhihu profile list' to see saved profiles.", err=True)
+        error(f"Profile '{name}' does not exist. Use 'zhihu profile list' to see saved profiles.")
         raise SystemExit(1)
 
 
@@ -630,17 +651,17 @@ def profile_delete(name: str, force: bool) -> None:
     """Delete a saved profile."""
     profiles = cache_manager.list_profiles()
     if name not in profiles:
-        click.echo(f"Profile '{name}' does not exist.", err=True)
+        error(f"Profile '{name}' does not exist.")
         raise SystemExit(1)
     if name.startswith("_"):
-        click.echo(f"Cannot delete internal profile '{name}'.", err=True)
+        error(f"Cannot delete internal profile '{name}'.")
         raise SystemExit(1)
 
     if not force:
         click.confirm(f"Delete profile '{name}'?", abort=True)
 
     cache_manager.delete_profile(name)
-    click.echo(f"Deleted profile '{name}'.")
+    success(f"Deleted profile '{name}'.")
 
 
 @profile.command("current")
@@ -649,12 +670,12 @@ def profile_current(output_json: bool) -> None:
     """Show the currently active profile."""
     active = cache_manager.get_active_profile()
     if output_json:
-        click.echo(json.dumps({"active_profile": active}, ensure_ascii=False, indent=2))
+        print_json({"active_profile": active})
         return
     if active:
-        click.echo(active)
+        echo(active)
     else:
-        click.echo("No active profile set.", err=True)
+        error("No active profile set.")
 
 
 _LOGOUT_PROFILE = "_logout_"
@@ -669,7 +690,7 @@ def profile_logout() -> None:
     """
     active = cache_manager.get_active_profile()
     if active == _LOGOUT_PROFILE:
-        click.echo("Already logged out.")
+        info("Already logged out.")
         return
 
     # Ensure the hidden logout profile exists with empty headers
@@ -678,7 +699,7 @@ def profile_logout() -> None:
 
     cache_manager.switch_profile(_LOGOUT_PROFILE)
     reload_session()
-    click.echo("Logged out. Use 'zhihu profile switch <name>' to log back in.")
+    echo("Logged out. Use 'zhihu profile switch <name>' to log back in.")
 
 
 # ── download ─────────────────────────────────────────────────────────────
@@ -703,10 +724,10 @@ def download_article(url: str, output_dir: str, output_json: bool, with_media: b
             metadata = {**metadata, "media_files": n}
     filepath = _save_markdown(metadata, markdown, output_dir)
     if output_json:
-        click.echo(json.dumps({"metadata": metadata, "filepath": filepath}, ensure_ascii=False, indent=2))
+        print_json({"metadata": metadata, "filepath": filepath})
         return
-    click.echo(f"{metadata.get('title', 'untitled')}")
-    click.echo(f"  -> {filepath}")
+    echo(f"  {f_title(str(metadata.get('title', 'untitled')))}")
+    file_saved(filepath)
 
 
 @download.command("question")
@@ -741,18 +762,12 @@ def download_question(url: str, output_dir: str, output_json: bool, with_media: 
             f.write(f"# Answer by {ans['author']} (+{ans['vote']})\n\n{content}\n")
 
     if output_json:
-        click.echo(
-            json.dumps(
-                {"metadata": q_meta, "filepath": filepath, "answers_count": count, "answers_dir": ans_dir},
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print_json({"metadata": q_meta, "filepath": filepath, "answers_count": count, "answers_dir": ans_dir})
         return
 
-    click.echo(f"Question: {q_meta['title']}")
-    click.echo(f"  -> {filepath}")
-    click.echo(f"  {count} answers saved to {ans_dir}")
+    echo(f"  {f_title('Question:')} {q_meta['title']}")
+    file_saved(filepath)
+    echo(f"  {f_num(count)} answers saved to {f_path(ans_dir)}")
 
 
 @download.command("pin")
@@ -769,10 +784,10 @@ def download_pin(url: str, output_dir: str, output_json: bool, with_media: bool)
             metadata = {**metadata, "media_files": n}
     filepath = _save_markdown(metadata, markdown, output_dir)
     if output_json:
-        click.echo(json.dumps({"metadata": metadata, "filepath": filepath}, ensure_ascii=False, indent=2))
+        print_json({"metadata": metadata, "filepath": filepath})
         return
-    click.echo(f"Pin by {metadata.get('author', 'unknown')}")
-    click.echo(f"  -> {filepath}")
+    echo(f"  {f_title('Pin')} by {f_name(str(metadata.get('author', 'unknown')))}")
+    file_saved(filepath)
 
 
 @download.command("video")
@@ -793,29 +808,29 @@ def download_video(url: str, output_dir: str, output_json: bool, no_download_vid
             title = sanitize_filename(metadata.get("title", "video"))
             ext = ".mp4"
             video_path = os.path.join(output_dir, f"{title}{ext}")[:200]
-            click.echo(f"  Downloading video ({metadata.get('quality_tiers', [{}])[0].get('tier', 'best')} quality)...")
+            info(f"Downloading video ({metadata.get('quality_tiers', [{}])[0].get('tier', 'best')} quality)...")
             try:
                 resp = session.get(video_url, timeout=300, stream=True)
                 resp.raise_for_status()
                 with open(video_path, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
-                click.echo(f"  Video saved to {video_path}")
+                success(f"Video saved to {f_path(video_path)}")
             except Exception as e:
-                click.echo(f"  Warning: video download failed: {e}", err=True)
+                warning(f"Video download failed: {e}")
                 video_path = None
 
     if output_json:
         result: dict = {"metadata": metadata, "filepath": filepath}
         if video_path:
             result["video_path"] = video_path
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result)
         return
 
-    click.echo(f"{metadata.get('title', 'untitled')}")
-    click.echo(f"  -> {filepath}")
+    echo(f"  {f_title(str(metadata.get('title', 'untitled')))}")
+    file_saved(filepath)
     if video_path:
-        click.echo(f"  -> {video_path}")
+        file_saved(video_path)
 
 
 @download.command("batch-answers")
@@ -835,7 +850,7 @@ def download_batch_answers(
 ) -> None:
     """Batch download all answers listed in an assets JSON file."""
     if not os.path.exists(input_file):
-        click.echo(f"Error: file not found: {input_file}", err=True)
+        error(f"file not found: {input_file}")
         raise SystemExit(1)
 
     with open(input_file, encoding="utf-8") as f:
@@ -843,10 +858,10 @@ def download_batch_answers(
 
     urls = [f"https://www.zhihu.com/answer/{a['id']}" for a in assets if a.get("type") == "answer"]
     if not urls:
-        click.echo("No answers found in the assets file.")
+        info("No answers found in the assets file.")
         return
 
-    click.echo(f"Found {len(urls)} answers.")
+    echo(f"  {f_label('Found')} {f_num(len(urls))} {f_dim('answers.')}")
     dl = ContentDownloader(output_dir=output_dir, with_media=with_media)
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
@@ -870,7 +885,7 @@ def download_batch_articles(
 ) -> None:
     """Batch download all articles listed in an assets JSON file."""
     if not os.path.exists(input_file):
-        click.echo(f"Error: file not found: {input_file}", err=True)
+        error(f"file not found: {input_file}")
         raise SystemExit(1)
 
     with open(input_file, encoding="utf-8") as f:
@@ -878,10 +893,10 @@ def download_batch_articles(
 
     urls = [f"https://zhuanlan.zhihu.com/p/{a['id']}" for a in assets if a.get("type") == "article"]
     if not urls:
-        click.echo("No articles found in the assets file.")
+        info("No articles found in the assets file.")
         return
 
-    click.echo(f"Found {len(urls)} articles.")
+    echo(f"  {f_label('Found')} {f_num(len(urls))} {f_dim('articles.')}")
     dl = ContentDownloader(output_dir=output_dir, with_media=with_media)
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
@@ -916,7 +931,7 @@ def download_user(
 
     profile = fetch_member_profile(url_token)
     user_name = profile["name"] if profile else url_token
-    click.echo(f"User: {user_name} (url_token: {url_token})")
+    echo(f"  {f_label('User:')} {f_name(user_name)} (url_token: {f_meta(url_token)})")
 
     if output_dir is None:
         base_dir = get_data_dir() / "downloads" / sanitize_filename(user_name)
@@ -927,9 +942,9 @@ def download_user(
 
     if content_types in ("answers", "all"):
         answers_dir = str(base_dir / "answers")
-        click.echo(f"\nFetching answers list for {user_name}...")
+        info(f"\nFetching answers list for {user_name}...")
         answer_items = fetch_member_answers(url_token, max_items=max_items)
-        click.echo(f"  Found {len(answer_items)} answers. Downloading full content...")
+        echo(f"  {f_label('Found')} {f_num(len(answer_items))} {f_dim('answers. Downloading full content...')}")
 
         for i, item in enumerate(answer_items, 1):
             try:
@@ -940,17 +955,19 @@ def download_user(
                     "created": meta.get("created", "unknown"),
                 }
                 filepath = save_article(item["url"], save_meta, md, answers_dir, with_media=with_media)
-                click.echo(f"  [{i}/{len(answer_items)}] {save_meta['title'][:50]} -> {os.path.basename(filepath)}")
+                echo(
+                    f"  {item_index(i, len(answer_items))} {save_meta['title'][:50]} -> {f_path(os.path.basename(filepath))}"
+                )
                 downloaded["answers"] += 1
             except Exception as e:
-                click.echo(f"  [{i}/{len(answer_items)}] Error: {e}", err=True)
+                error(f"  {item_index(i, len(answer_items))} Error: {e}")
             wait(delay)
 
     if content_types in ("articles", "all"):
         articles_dir = str(base_dir / "articles")
-        click.echo(f"\nFetching articles list for {user_name}...")
+        info(f"\nFetching articles list for {user_name}...")
         article_items = fetch_member_articles(url_token, max_items=max_items)
-        click.echo(f"  Found {len(article_items)} articles. Downloading full content...")
+        echo(f"  {f_label('Found')} {f_num(len(article_items))} {f_dim('articles. Downloading full content...')}")
 
         for i, item in enumerate(article_items, 1):
             try:
@@ -963,17 +980,19 @@ def download_user(
                     "created": (meta.get("created_time", "unknown") or "unknown")[:10],
                 }
                 filepath = save_article(item["url"], save_meta, md, articles_dir, with_media=with_media)
-                click.echo(f"  [{i}/{len(article_items)}] {save_meta['title'][:50]} -> {os.path.basename(filepath)}")
+                echo(
+                    f"  {item_index(i, len(article_items))} {save_meta['title'][:50]} -> {f_path(os.path.basename(filepath))}"
+                )
                 downloaded["articles"] += 1
             except Exception as e:
-                click.echo(f"  [{i}/{len(article_items)}] Error: {e}", err=True)
+                error(f"  {item_index(i, len(article_items))} Error: {e}")
             wait(delay)
 
     if content_types in ("pins", "all"):
         pins_dir = str(base_dir / "pins")
-        click.echo(f"\nFetching pins list for {user_name}...")
+        info(f"\nFetching pins list for {user_name}...")
         pin_items = fetch_member_pins(url_token, max_items=max_items)
-        click.echo(f"  Found {len(pin_items)} pins. Downloading full content...")
+        echo(f"  {f_label('Found')} {f_num(len(pin_items))} {f_dim('pins. Downloading full content...')}")
 
         for i, item in enumerate(pin_items, 1):
             try:
@@ -987,17 +1006,17 @@ def download_user(
                 }
                 filepath = save_pin(item["url"], save_meta, md, pins_dir, with_media=with_media)
                 preview = (meta.get("excerpt", "") or "")[:30]
-                click.echo(f"  [{i}/{len(pin_items)}] {preview} -> {os.path.basename(filepath)}")
+                echo(f"  {item_index(i, len(pin_items))} {preview} -> {f_path(os.path.basename(filepath))}")
                 downloaded["pins"] += 1
             except Exception as e:
-                click.echo(f"  [{i}/{len(pin_items)}] Error: {e}", err=True)
+                error(f"  {item_index(i, len(pin_items))} Error: {e}")
             wait(delay)
 
-    click.echo(f"\nDone! Downloaded from {user_name}:")
-    click.echo(f"  Answers: {downloaded['answers']}")
-    click.echo(f"  Articles: {downloaded['articles']}")
-    click.echo(f"  Pins: {downloaded['pins']}")
-    click.echo(f"  Output: {base_dir}")
+    section(f"Done! Downloaded from {f_name(user_name)}:")
+    echo(f"  {f_label('Answers:')}  {f_num(downloaded['answers'])}")
+    echo(f"  {f_label('Articles:')} {f_num(downloaded['articles'])}")
+    echo(f"  {f_label('Pins:')}     {f_num(downloaded['pins'])}")
+    echo(f"  {f_label('Output:')}   {f_path(str(base_dir))}")
 
 
 # ── browse ───────────────────────────────────────────────────────────────
@@ -1019,9 +1038,7 @@ def browse_question(url: str, reading_mode: bool, output_json: bool) -> None:
     answers = list(scrape_answers(q_meta))
 
     if output_json:
-        click.echo(
-            json.dumps({"question": q_meta, "detail_md": q_detail_md, "answers": answers}, ensure_ascii=False, indent=2)
-        )
+        print_json({"question": q_meta, "detail_md": q_detail_md, "answers": answers})
         return
 
     if reading_mode:
@@ -1042,12 +1059,22 @@ def browse_question(url: str, reading_mode: bool, output_json: bool) -> None:
                 )
                 console.print(Markdown(ans["content"]))
     else:
-        click.echo(question_md)
+        echo(question_md)
         for i, ans in enumerate(answers, 1):
-            click.echo(
-                f"\n--- Answer #{i} (ID: {ans['id']}) by {ans['author']} (+{ans['vote']} votes, {ans['comment']} comments, {ans['favorite']} favorites) ---"
+            ans_id = ans["id"]
+            author = ans["author"]
+            vote = ans["vote"]
+            comment = ans["comment"]
+            favorite = ans["favorite"]
+            echo(
+                f"\n{f_bold('--- Answer')} #{i} "
+                f"({f_label('ID:')} {ans_id}) "
+                f"{f_bold('by')} {f_name(author)} "
+                f"({f_green('+' + str(vote))} {f_meta('votes')}, "
+                f"{f_num(comment)} {f_meta('comments')}, "
+                f"{f_num(favorite)} {f_meta('favorites')}) ---"
             )
-            click.echo(ans["content"])
+            echo(ans["content"])
 
 
 @browse.command("answer")
@@ -1059,7 +1086,7 @@ def browse_answer(url: str, reading_mode: bool, output_json: bool) -> None:
     metadata, markdown = scrape_answer_page(url)
 
     if output_json:
-        click.echo(json.dumps({"metadata": metadata, "content_md": markdown}, ensure_ascii=False, indent=2))
+        print_json({"metadata": metadata, "content_md": markdown})
         return
 
     if reading_mode:
@@ -1083,9 +1110,9 @@ def browse_answer(url: str, reading_mode: bool, output_json: bool) -> None:
             console.print(Markdown(header))
             console.print(Markdown(markdown))
     else:
-        click.echo(header)
-        click.echo()
-        click.echo(markdown)
+        echo(header)
+        blank()
+        echo(markdown)
 
 
 @browse.command("article")
@@ -1097,7 +1124,7 @@ def browse_article(url: str, reading_mode: bool, output_json: bool) -> None:
     metadata, markdown = scrape_article(url)
 
     if output_json:
-        click.echo(json.dumps({"metadata": metadata, "content_md": markdown}, ensure_ascii=False, indent=2))
+        print_json({"metadata": metadata, "content_md": markdown})
         return
 
     if reading_mode:
@@ -1121,9 +1148,9 @@ def browse_article(url: str, reading_mode: bool, output_json: bool) -> None:
             console.print(Markdown(header))
             console.print(Markdown(markdown))
     else:
-        click.echo(header)
-        click.echo()
-        click.echo(markdown)
+        echo(header)
+        blank()
+        echo(markdown)
 
 
 @browse.command("log")
@@ -1138,11 +1165,11 @@ def browse_log(url: str, output_json: bool) -> None:
     entries = fetch_question_log(question_id)
 
     if output_json:
-        click.echo(json.dumps(entries, ensure_ascii=False, indent=2))
+        print_json(entries)
         return
 
     if not entries:
-        click.echo("No edit history found.")
+        info("No edit history found.")
         return
 
     for entry in entries:
@@ -1151,10 +1178,10 @@ def browse_log(url: str, output_json: bool) -> None:
         time_str = entry["time"]
         detail = entry["detail"]
 
-        click.echo(f"[{time_str}] {user} {action}")
+        echo(f"  {f_meta(f'[{time_str}]')} {f_name(user)} {action}")
         if detail:
-            click.echo(f"  {detail[:200]}")
-        click.echo()
+            echo(f"    {f_dim(detail[:200])}")
+        blank()
 
 
 @browse.command("comments")
@@ -1166,7 +1193,7 @@ def browse_comments(url: str, output_json: bool) -> None:
     if item_type == "answers":
         item_id = _resolve_answer_id(item_id)
     if output_json:
-        click.echo(json.dumps(fetch_comments(item_type, item_id), ensure_ascii=False, indent=2))
+        print_json(fetch_comments(item_type, item_id))
         return
     print_comments(item_type, item_id)
 
@@ -1186,11 +1213,11 @@ def browse_feed(
     items = fetch_fn(feed_type, limit, max_items)
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(items)} items to {output}", err=True)
+            success(f"Saved {len(items)} items to {output}")
         return
 
     for item in items:
@@ -1200,18 +1227,18 @@ def browse_feed(
         url = item.get("url", "")
         excerpt = item.get("excerpt", "")
 
-        click.echo(f"[{ttype}] {title[:120]}")
+        echo(f"  {f_tag(ttype)} {f_bold(title[:120])}")
         if excerpt:
-            click.echo(f"  preview: {excerpt[:200]}")
-        click.echo(f"  author={author}  votes={item.get('voteup_count', 0)}")
+            echo(f"    {f_dim(f'preview: {excerpt[:200]}')}")
+        echo(f"    {f_label('author=')}{f_name(author)}  {f_label('votes=')}{f_num(item.get('voteup_count', 0))}")
         if url:
-            click.echo(f"  link: {url}")
-        click.echo()
+            echo(f"    {f_label('link:')} {f_url(url)}")
+        blank()
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        click.echo(f"Saved {len(items)} items to {output}")
+        success(f"Saved {len(items)} items to {output}")
 
 
 @browse.command("hot")
@@ -1226,11 +1253,11 @@ def browse_hot(limit: int, output_json: bool, output: str) -> None:
         items = items[:limit]
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(items)} items to {output}", err=True)
+            success(f"Saved {len(items)} items to {output}")
         return
 
     for i, item in enumerate(items, 1):
@@ -1242,33 +1269,33 @@ def browse_hot(limit: int, output_json: bool, output: str) -> None:
         answer_count = item["answer_count"]
         follower_count = item["follower_count"]
 
-        label_str = f" [{card_label}]" if card_label else ""
-        click.echo(f"[{i}] {heat}{label_str}  {ttype}")
-        click.echo(f"    {title}")
+        label_str = f" {f_tag(card_label)}" if card_label else ""
+        echo(f"  {item_index(i)} {f_num(heat)}{label_str}  {f_tag(ttype)}")
+        echo(f"    {f_bold(title)}")
         excerpt = item["excerpt"]
         if excerpt:
-            click.echo(f"    preview: {excerpt[:200]}")
+            echo(f"    {f_dim(f'preview: {excerpt[:200]}')}")
         author = item["author"]
         if author and author != "anonymous":
-            click.echo(f"    author: {author}")
+            echo(f"    {f_label('author:')} {f_name(author)}")
         if answer_count or follower_count:
             parts = []
             if answer_count:
-                parts.append(f"{answer_count} answers")
+                parts.append(f"{f_num(answer_count)} {f_dim('answers')}")
             if follower_count:
-                parts.append(f"{follower_count} followers")
-            click.echo(f"    {'  '.join(parts)}")
+                parts.append(f"{f_num(follower_count)} {f_dim('followers')}")
+            echo(f"    {'  '.join(parts)}")
         if url:
-            click.echo(f"    {url}")
-        click.echo()
+            echo(f"    {f_url(url)}")
+        blank()
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        click.echo(f"Saved {len(items)} items to {output}")
+        success(f"Saved {len(items)} items to {output}")
 
     if not items:
-        click.echo("No hot items found. Try logging in first: zhihu auth login")
+        info("No hot items found. Try logging in first: zhihu auth login")
 
 
 @browse.command("notifications")
@@ -1283,11 +1310,11 @@ def browse_notifications(limit: int, max_items: int | None, output_json: bool, o
     items = fetch_notifications(limit=limit, max_items=max_items)
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(items)} items to {output}", err=True)
+            success(f"Saved {len(items)} items to {output}")
         return
 
     for i, item in enumerate(items, 1):
@@ -1300,24 +1327,24 @@ def browse_notifications(limit: int, max_items: int | None, output_json: bool, o
         time_str = item["time"]
         merge = item["merge_count"]
 
-        merge_str = f" (+{merge - 1})" if merge > 1 else ""
+        merge_str = f" (+{f_num(merge - 1)})" if merge > 1 else ""
 
-        click.echo(f"[{i}]{marker} {actor} {verb}{merge_str}  ({rtype}: {target_text})")
+        echo(f"  {item_index(i)}{marker} {f_name(actor)} {verb}{merge_str}  ({f_tag(rtype)}: {target_text})")
         comment = item["comment_text"]
         if comment:
-            click.echo(f"    > {comment}")
+            echo(f"    {f_dim(f'> {comment}')}")
         if target_link:
-            click.echo(f"    {target_link}")
-        click.echo(f"    {time_str}")
-        click.echo()
+            echo(f"    {f_url(target_link)}")
+        echo(f"    {f_meta(time_str)}")
+        blank()
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        click.echo(f"Saved {len(items)} items to {output}")
+        success(f"Saved {len(items)} items to {output}")
 
     if not items:
-        click.echo("No notifications found. Try logging in first: zhihu auth login")
+        info("No notifications found. Try logging in first: zhihu auth login")
 
 
 @browse.command("history")
@@ -1332,41 +1359,41 @@ def browse_history(limit: int, max_items: int | None, output_json: bool, output:
     items = fetch_read_history(limit=limit, max_items=max_items)
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(items)} items to {output}", err=True)
+            success(f"Saved {len(items)} items to {output}")
         return
 
     for i, item in enumerate(items, 1):
         ctype = item["content_type"]
         title = item["title"] or "(no title)"
         author = item["author_name"]
-        summary = item["summary"]
+        summary_text = item["summary"]
         stats = item["stats_text"]
         url = item["url"]
         read_time = item["read_time"]
 
-        click.echo(f"[{i}] [{ctype}] {title[:120]}")
+        echo(f"  {item_index(i)} {f_tag(ctype)} {f_bold(title[:120])}")
         if author:
-            click.echo(f"    author: {author}")
-        if summary:
-            click.echo(f"    {summary[:200]}")
+            echo(f"    {f_label('author:')} {f_name(author)}")
+        if summary_text:
+            echo(f"    {f_dim(summary_text[:200])}")
         if stats:
-            click.echo(f"    {stats}")
+            echo(f"    {f_meta(stats)}")
         if url:
-            click.echo(f"    {url}")
-        click.echo(f"    read: {read_time}")
-        click.echo()
+            echo(f"    {f_url(url)}")
+        echo(f"    {f_label('read:')} {f_meta(read_time)}")
+        blank()
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        click.echo(f"Saved {len(items)} items to {output}")
+        success(f"Saved {len(items)} items to {output}")
 
     if not items:
-        click.echo("No read history found. Try logging in first: zhihu auth login")
+        info("No read history found. Try logging in first: zhihu auth login")
 
 
 @browse.command("yanxuan")
@@ -1401,15 +1428,15 @@ def browse_yanxuan(
     )
 
     if output_json:
-        click.echo(json.dumps({"meta": meta, "segments": segments}, ensure_ascii=False, indent=2))
+        print_json({"meta": meta, "segments": segments})
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump({"meta": meta, "segments": segments}, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(segments)} segments to {output}", err=True)
+            success(f"Saved {len(segments)} segments to {output}")
         return
 
     if not segments:
-        click.echo("No content found for this yanxuan item.")
+        info("No content found for this yanxuan item.")
         return
 
     # Build header from meta
@@ -1441,12 +1468,12 @@ def browse_yanxuan(
         with console.pager(styles=True, links=True):
             console.print(Markdown(full_text))
     else:
-        click.echo(full_text)
+        echo(full_text)
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             f.write(full_text)
-        click.echo(f"Saved {len(segments)} segments to {output}")
+        success(f"Saved {len(segments)} segments to {output}")
 
 
 # ── browse following ──────────────────────────────────────────────────────
@@ -1480,38 +1507,38 @@ def _display_following_items(items: list[dict], totals: int | None = None) -> No
             headline = item.get("headline", "")
             is_followed = item.get("is_followed", False)
             is_following = item.get("is_following", False)
-            mutual = " [互关]" if (is_followed and is_following) else ""
+            mutual = f" {f_green('[互关]')}" if (is_followed and is_following) else ""
             f_cnt = item.get("follower_count", 0)
             a_cnt = item.get("answer_count", 0)
             art_cnt = item.get("articles_count", 0)
-            stats = click.style(f"followers: {f_cnt}  answers: {a_cnt}  articles: {art_cnt}", dim=True)
-            click.echo(f"[{i}] {click.style(name, bold=True)}{mutual}")
+            stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('answers:')} {f_num(a_cnt)}  {f_label('articles:')} {f_num(art_cnt)}"
+            echo(f"  {item_index(i)} {f_bold(name)}{mutual}")
             if headline:
-                click.echo(f"    {headline[:120]}")
-            click.echo(f"    {stats}")
-            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+                echo(f"    {f_dim(headline[:120])}")
+            echo(f"    {f_dim(stats)}")
+            echo(f"    {f_url(item.get('url', ''))}")
 
         elif ttype == "topic":
             name = item.get("name", "")
             intro = item.get("introduction", "") or item.get("excerpt", "")
             f_cnt = item.get("followers_count", 0)
             q_cnt = item.get("questions_count", 0)
-            stats = click.style(f"followers: {f_cnt}  questions: {q_cnt}", dim=True)
-            click.echo(f"[{i}] {click.style(name, bold=True)} [topic]")
+            stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('questions:')} {f_num(q_cnt)}"
+            echo(f"  {item_index(i)} {f_bold(name)} {f_tag('topic')}")
             if intro:
-                click.echo(f"    {intro[:120]}")
-            click.echo(f"    {stats}")
-            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+                echo(f"    {f_dim(intro[:120])}")
+            echo(f"    {f_dim(stats)}")
+            echo(f"    {f_url(item.get('url', ''))}")
 
         elif ttype == "question":
             title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
             a_cnt = item.get("answer_count", 0)
             f_cnt = item.get("follower_count", 0)
             ctime = item.get("created_time", "")
-            stats = click.style(f"answers: {a_cnt}  followers: {f_cnt}  created: {ctime}", dim=True)
-            click.echo(f"[{i}] {title[:120]}")
-            click.echo(f"    {stats}")
-            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+            stats = f"{f_label('answers:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}  {f_label('created:')} {f_meta(ctime)}"
+            echo(f"  {item_index(i)} {f_bold(title[:120])}")
+            echo(f"    {f_dim(stats)}")
+            echo(f"    {f_url(item.get('url', ''))}")
 
         elif ttype == "column":
             title = item.get("title", "") or "(no title)"
@@ -1519,14 +1546,14 @@ def _display_following_items(items: list[dict], totals: int | None = None) -> No
             creator = item.get("creator", "")
             f_cnt = item.get("followers_count", 0)
             art_cnt = item.get("articles_count", 0)
-            stats = click.style(f"followers: {f_cnt}  articles: {art_cnt}", dim=True)
-            click.echo(f"[{i}] {click.style(title, bold=True)} [column]")
+            stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('articles:')} {f_num(art_cnt)}"
+            echo(f"  {item_index(i)} {f_bold(title)} {f_tag('column')}")
             if creator:
-                click.echo(f"    by {creator}")
+                echo(f"    {f_name(creator)}")
             if desc:
-                click.echo(f"    {desc[:120]}")
-            click.echo(f"    {stats}")
-            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+                echo(f"    {f_dim(desc[:120])}")
+            echo(f"    {f_dim(stats)}")
+            echo(f"    {f_url(item.get('url', ''))}")
 
         elif ttype == "collection":
             title = item.get("title", "") or "(no title)"
@@ -1534,20 +1561,20 @@ def _display_following_items(items: list[dict], totals: int | None = None) -> No
             creator_name = item.get("creator_name", "")
             a_cnt = item.get("answer_count", 0)
             f_cnt = item.get("follower_count", 0)
-            stats = click.style(f"items: {a_cnt}  followers: {f_cnt}", dim=True)
-            click.echo(f"[{i}] {click.style(title, bold=True)} [collection]")
+            stats = f"{f_label('items:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}"
+            echo(f"  {item_index(i)} {f_bold(title)} {f_tag('collection')}")
             if creator_name:
-                click.echo(f"    by {creator_name}")
+                echo(f"    {f_label('by')} {f_name(creator_name)}")
             if desc:
-                click.echo(f"    {desc[:120]}")
-            click.echo(f"    {stats}")
-            click.echo(f"    {click.style(item.get('url', ''), dim=True)}")
+                echo(f"    {f_dim(desc[:120])}")
+            echo(f"    {f_dim(stats)}")
+            echo(f"    {f_url(item.get('url', ''))}")
 
-        click.echo()
+        blank()
 
     if items:
         total_str = f"/{totals}" if totals else ""
-        click.echo(f"── {len(items)}{total_str} items")
+        echo(f"  {f_dim(f'── {len(items)}{total_str} items')}")
 
 
 def _following_command(
@@ -1561,19 +1588,19 @@ def _following_command(
 ) -> None:
     """Shared execution path for following sub-commands."""
     token = _resolve_following_token(url_token)
-    click.echo(f"Fetching {label} for {token}...", err=True)
+    info(f"Fetching {label} for {token}...")
     items = fetch_fn(token, limit=limit, max_items=max_items)
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(items)} items to {output}", err=True)
+            success(f"Saved {len(items)} items to {output}")
         return
 
     if not items:
-        click.echo(f"No {label} found.")
+        info(f"No {label} found.")
         return
 
     _display_following_items(items)
@@ -1581,7 +1608,7 @@ def _following_command(
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        click.echo(f"Saved {len(items)} items to {output}")
+        success(f"Saved {len(items)} items to {output}")
 
 
 @browse_following.command("users")
@@ -1675,32 +1702,32 @@ def _extract_url_token(token_or_url: str) -> str:
 
 def _print_stat(label: str, value: int) -> None:
     """Print a labeled stat line with dimmed label."""
-    click.echo(f"  {click.style(label + ':', dim=True)} {value}")
+    stat(label, value)
 
 
 def _print_content_item(item: dict, show_type: bool = False) -> None:
     """Print a single content item in a compact format."""
     ttype = item.get("type", "")
-    type_label = f"[{ttype}] " if show_type else ""
+    type_label = f"{f_tag(ttype)} " if show_type else ""
     title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
     created = item.get("created_time", "")
     votes = item.get("voteup_count", 0)
     comments = item.get("comment_count", 0)
 
-    parts = [created]
+    parts = [f_meta(created)]
     if votes:
-        parts.append(f"+{votes}")
+        parts.append(f_green(f"+{votes}"))
     if comments:
-        parts.append(f"{comments} comments")
+        parts.append(f"{f_num(comments)} {f_dim('comments')}")
     if "answer_count" in item and item["answer_count"]:
-        parts.append(f"{item['answer_count']} answers")
+        parts.append(f"{f_num(item['answer_count'])} {f_dim('answers')}")
     if "follower_count" in item and item["follower_count"]:
-        parts.append(f"{item['follower_count']} followers")
+        parts.append(f"{f_num(item['follower_count'])} {f_dim('followers')}")
 
-    click.echo(f"  {type_label}{title[:100]}")
-    click.echo(f"  {click.style('  '.join(parts), dim=True)}")
-    click.echo(f"  {click.style(item.get('url', ''), dim=True)}")
-    click.echo()
+    echo(f"  {type_label}{f_bold(title[:100])}")
+    echo(f"  {f_dim('  '.join(parts))}")
+    echo(f"  {f_url(item.get('url', ''))}")
+    blank()
 
 
 def _show_profile_rich(profile: dict) -> None:
@@ -1745,14 +1772,14 @@ def _show_profile_rich(profile: dict) -> None:
             padding=(1, 2),
         )
         console.print(panel)
-        click.echo(f"  Profile: https://www.zhihu.com/people/{url_token}")
-        click.echo()
+        echo(f"  {f_label('Profile:')} {f_url(f'https://www.zhihu.com/people/{url_token}')}")
+        blank()
     except ImportError:
-        click.echo(f"\n{click.style(profile.get('name', 'Unknown'), bold=True)}")
+        echo(f"\n{f_bold(profile.get('name', 'Unknown'))}")
         if headline := profile.get("headline"):
-            click.echo(f"  {headline}")
-        click.echo(f"  https://www.zhihu.com/people/{profile.get('url_token', '')}")
-        click.echo()
+            echo(f"  {f_dim(headline)}")
+        echo(f"  {f_url(f'https://www.zhihu.com/people/{profile.get("url_token", "")}')}")
+        blank()
         _print_stat("Followers", profile.get("follower_count", 0))
         _print_stat("Following", profile.get("following_count", 0))
         _print_stat("Answers", profile.get("answer_count", 0))
@@ -1760,7 +1787,7 @@ def _show_profile_rich(profile: dict) -> None:
         _print_stat("Pins", profile.get("pins_count", 0))
         _print_stat("Questions", profile.get("question_count", 0))
         _print_stat("Upvotes received", profile.get("voteup_count", 0))
-        click.echo()
+        blank()
 
 
 def _list_content_section(
@@ -1778,7 +1805,7 @@ def _list_content_section(
         return []
 
     if items:
-        click.echo(f"── Recent {len(items)} {section_title}" + "─" * 40)
+        heading(f"Recent {len(items)} {section_title}")
         for item in items:
             _print_content_item(item, show_type=show_type)
     return items
@@ -1801,10 +1828,10 @@ def people_show(url_token: str, limit: int, output_json: bool) -> None:
     """
     token = _extract_url_token(url_token)
 
-    click.echo(f"Fetching profile for {token}...", err=True)
+    info(f"Fetching profile for {token}...")
     profile = fetch_member_profile(token)
     if profile is None:
-        click.echo(f"Error: could not fetch profile for '{token}'. Check the token and try again.", err=True)
+        error(f"Could not fetch profile for '{token}'. Check the token and try again.")
         raise SystemExit(1)
 
     if output_json:
@@ -1819,7 +1846,7 @@ def people_show(url_token: str, limit: int, output_json: bool) -> None:
                 result[key] = fn(token, limit=limit, max_items=limit)
             except Exception:
                 result[key] = []
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result)
         return
 
     _show_profile_rich(profile)
@@ -1837,17 +1864,17 @@ def people_show(url_token: str, limit: int, output_json: bool) -> None:
 def people_answers(url_token: str, limit: int, output_json: bool) -> None:
     """List a user's answers."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching answers for {token}...", err=True)
+    info(f"Fetching answers for {token}...")
     items = fetch_member_answers(token, max_items=limit)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     if not items:
-        click.echo("No answers found.")
+        info("No answers found.")
         return
     for item in items:
         _print_content_item(item)
-    click.echo(f"── {len(items)} answers total")
+    echo(f"  {f_dim(f'── {len(items)} answers total')}")
 
 
 @people.command("articles")
@@ -1857,17 +1884,17 @@ def people_answers(url_token: str, limit: int, output_json: bool) -> None:
 def people_articles(url_token: str, limit: int, output_json: bool) -> None:
     """List a user's articles."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching articles for {token}...", err=True)
+    info(f"Fetching articles for {token}...")
     items = fetch_member_articles(token, max_items=limit)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     if not items:
-        click.echo("No articles found.")
+        info("No articles found.")
         return
     for item in items:
         _print_content_item(item)
-    click.echo(f"── {len(items)} articles total")
+    echo(f"  {f_dim(f'── {len(items)} articles total')}")
 
 
 @people.command("pins")
@@ -1877,22 +1904,24 @@ def people_articles(url_token: str, limit: int, output_json: bool) -> None:
 def people_pins(url_token: str, limit: int, output_json: bool) -> None:
     """List a user's pins (想法)."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching pins for {token}...", err=True)
+    info(f"Fetching pins for {token}...")
     items = fetch_member_pins(token, max_items=limit)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     if not items:
-        click.echo("No pins found.")
+        info("No pins found.")
         return
     for item in items:
-        t = click.style(item.get("created_time", ""), dim=True)
+        t = f_meta(item.get("created_time", ""))
         content = item.get("content_text", "") or item.get("excerpt", "")
-        click.echo(f"  {content[:120]}")
-        click.echo(f"  {t}  +{item.get('voteup_count', 0)}  {item.get('comment_count', 0)} comments")
-        click.echo(f"  {click.style(item.get('url', ''), dim=True)}")
-        click.echo()
-    click.echo(f"── {len(items)} pins total")
+        v = item.get("voteup_count", 0)
+        c = item.get("comment_count", 0)
+        echo(f"  {f_dim(content[:120])}")
+        echo(f"  {t}  {f_green(f'+{v}')}  {f_num(c)} {f_dim('comments')}")
+        echo(f"  {f_url(item.get('url', ''))}")
+        blank()
+    echo(f"  {f_dim(f'── {len(items)} pins total')}")
 
 
 @people.command("questions")
@@ -1902,17 +1931,17 @@ def people_pins(url_token: str, limit: int, output_json: bool) -> None:
 def people_questions(url_token: str, limit: int, output_json: bool) -> None:
     """List questions asked by a user."""
     token = _extract_url_token(url_token)
-    click.echo(f"Fetching questions for {token}...", err=True)
+    info(f"Fetching questions for {token}...")
     items = fetch_member_questions(token, max_items=limit)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     if not items:
-        click.echo("No questions found (this endpoint may not be available).")
+        info("No questions found (this endpoint may not be available).")
         return
     for item in items:
         _print_content_item(item)
-    click.echo(f"── {len(items)} questions total")
+    echo(f"  {f_dim(f'── {len(items)} questions total')}")
 
 
 # ── search ────────────────────────────────────────────────────────────────
@@ -1932,16 +1961,16 @@ def search_question_cmd(query: str, limit: int, max_items: int | None, output_js
     """Search Zhihu questions by keyword."""
     items = search_questions(query, limit=limit, max_items=max_items)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     for i, q in enumerate(items, 1):
-        click.echo(f"[{i}] {q['title']}")
-        click.echo(f"    {q['answer_count']} answers  {q['follower_count']} followers")
-        click.echo(f"    updated: {q['updated_time']}")
-        click.echo(f"    {q['url']}")
-        click.echo()
+        echo(f"  {item_index(i)} {f_bold(q['title'])}")
+        echo(f"    {f_num(q['answer_count'])} {f_dim('answers')}  {f_num(q['follower_count'])} {f_dim('followers')}")
+        echo(f"    {f_label('updated:')} {f_meta(q['updated_time'])}")
+        echo(f"    {f_url(q['url'])}")
+        blank()
     if not items:
-        click.echo(f"No questions found for '{query}'.")
+        info(f"No questions found for '{query}'.")
 
 
 @search.command("article")
@@ -1953,18 +1982,18 @@ def search_article_cmd(query: str, limit: int, max_items: int | None, output_jso
     """Search Zhihu articles by keyword."""
     items = search_articles(query, limit=limit, max_items=max_items)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     for i, a in enumerate(items, 1):
-        click.echo(f"[{i}] {a['title']}")
-        click.echo(f"    by {a['author']['name']}  {a['voteup_count']} upvotes")
+        echo(f"  {item_index(i)} {f_bold(a['title'])}")
+        echo(f"    {f_label('by')} {f_name(a['author']['name'])}  {f_num(a['voteup_count'])} {f_dim('upvotes')}")
         if a["excerpt"]:
-            click.echo(f"    {a['excerpt'][:120]}")
-        click.echo(f"    {a['created_time']}")
-        click.echo(f"    {a['url']}")
-        click.echo()
+            echo(f"    {f_dim(a['excerpt'][:120])}")
+        echo(f"    {f_meta(a['created_time'])}")
+        echo(f"    {f_url(a['url'])}")
+        blank()
     if not items:
-        click.echo(f"No articles found for '{query}'.")
+        info(f"No articles found for '{query}'.")
 
 
 @search.command("user")
@@ -1976,17 +2005,19 @@ def search_user_cmd(query: str, limit: int, max_items: int | None, output_json: 
     """Search Zhihu users by keyword."""
     items = search_users(query, limit=limit, max_items=max_items)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     for i, u in enumerate(items, 1):
-        click.echo(f"[{i}] {u['name']}  ({u['gender']})")
+        echo(f"  {item_index(i)} {f_name(u['name'])}  ({f_dim(u['gender'])})")
         if u["headline"]:
-            click.echo(f"    {u['headline']}")
-        click.echo(f"    {u['follower_count']} followers  {u['answer_count']} answers  {u['articles_count']} articles")
-        click.echo(f"    {u['url']}")
-        click.echo()
+            echo(f"    {f_dim(u['headline'])}")
+        echo(
+            f"    {f_num(u['follower_count'])} {f_dim('followers')}  {f_num(u['answer_count'])} {f_dim('answers')}  {f_num(u['articles_count'])} {f_dim('articles')}"
+        )
+        echo(f"    {f_url(u['url'])}")
+        blank()
     if not items:
-        click.echo(f"No users found for '{query}'.")
+        info(f"No users found for '{query}'.")
 
 
 @search.command("topic")
@@ -1998,18 +2029,20 @@ def search_topic_cmd(query: str, limit: int, max_items: int | None, output_json:
     """Search Zhihu topics by keyword."""
     items = search_topics(query, limit=limit, max_items=max_items)
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
     for i, t in enumerate(items, 1):
-        click.echo(f"[{i}] {t['name']}")
+        echo(f"  {item_index(i)} {f_bold(t['name'])}")
         intro = t["introduction"] or t["excerpt"]
         if intro:
-            click.echo(f"    {intro[:120]}")
-        click.echo(f"    {t['questions_count']} questions  {t['followers_count']} followers")
-        click.echo(f"    {t['url']}")
-        click.echo()
+            echo(f"    {f_dim(intro[:120])}")
+        echo(
+            f"    {f_num(t['questions_count'])} {f_dim('questions')}  {f_num(t['followers_count'])} {f_dim('followers')}"
+        )
+        echo(f"    {f_url(t['url'])}")
+        blank()
     if not items:
-        click.echo(f"No topics found for '{query}'.")
+        info(f"No topics found for '{query}'.")
 
 
 # ── interact ─────────────────────────────────────────────────────────────
@@ -2031,9 +2064,9 @@ def vote_up(url_or_id: str) -> None:
     """Upvote an answer or question."""
     item_type, item_id = _parse_item_url_safe(url_or_id)
     if item_type in ("answers", "answer"):
-        click.echo(upvote_answer(_resolve_answer_id(item_id)))
+        echo(upvote_answer(_resolve_answer_id(item_id)))
     elif item_type in ("questions", "question"):
-        click.echo(upvote_question(item_id))
+        echo(upvote_question(item_id))
     else:
         upvote_answer(url_or_id)  # treat as raw ID
 
@@ -2043,7 +2076,7 @@ def vote_up(url_or_id: str) -> None:
 def vote_neutral(url_or_id: str) -> None:
     """Remove vote from an answer."""
     item_type, item_id = _parse_item_url_safe(url_or_id)
-    click.echo(neutral_answer(_resolve_answer_id(item_id) if item_type else url_or_id))
+    echo(neutral_answer(_resolve_answer_id(item_id) if item_type else url_or_id))
 
 
 @interact_vote.command("down")
@@ -2052,9 +2085,9 @@ def vote_down(url_or_id: str) -> None:
     """Downvote an answer or question."""
     item_type, item_id = _parse_item_url_safe(url_or_id)
     if item_type in ("answers", "answer"):
-        click.echo(downvote_answer(_resolve_answer_id(item_id)))
+        echo(downvote_answer(_resolve_answer_id(item_id)))
     elif item_type in ("questions", "question"):
-        click.echo(downvote_question(item_id))
+        echo(downvote_question(item_id))
     else:
         downvote_answer(url_or_id)
 
@@ -2076,14 +2109,14 @@ def interact_thank() -> None:
 @click.argument("answer_id")
 def thank_add(answer_id: str) -> None:
     """Thank an answer."""
-    click.echo(thank_answer(answer_id))
+    echo(thank_answer(answer_id))
 
 
 @interact_thank.command("remove")
 @click.argument("answer_id")
 def thank_remove(answer_id: str) -> None:
     """Remove thanks from an answer."""
-    click.echo(unthank_answer(answer_id))
+    echo(unthank_answer(answer_id))
 
 
 @interact.group("follow")
@@ -2095,28 +2128,28 @@ def interact_follow() -> None:
 @click.argument("user_id")
 def follow_user(user_id: str) -> None:
     """Follow a user by URL token or ID."""
-    click.echo(follow(user_id))
+    echo(follow(user_id))
 
 
 @interact_follow.command("question")
 @click.argument("question_id")
 def follow_question_cmd(question_id: str) -> None:
     """Follow a question."""
-    click.echo(follow_question(question_id))
+    echo(follow_question(question_id))
 
 
 @interact_follow.command("unfollow-user")
 @click.argument("user_id")
 def unfollow_user(user_id: str) -> None:
     """Unfollow a user."""
-    click.echo(unfollow(user_id))
+    echo(unfollow(user_id))
 
 
 @interact_follow.command("unfollow-question")
 @click.argument("question_id")
 def unfollow_question_cmd(question_id: str) -> None:
     """Unfollow a question."""
-    click.echo(unfollow_question(question_id))
+    echo(unfollow_question(question_id))
 
 
 @interact.group("block")
@@ -2129,7 +2162,7 @@ def interact_block() -> None:
 def block_user(user_id: str) -> None:
     """Block a user."""
     block(user_id)
-    click.echo(f"Blocked {user_id}")
+    success(f"Blocked {user_id}")
 
 
 @interact_block.command("remove")
@@ -2137,7 +2170,7 @@ def block_user(user_id: str) -> None:
 def block_remove(user_id: str) -> None:
     """Unblock a user."""
     unblock(user_id)
-    click.echo(f"Unblocked {user_id}")
+    success(f"Unblocked {user_id}")
 
 
 @interact.group("comment")
@@ -2154,7 +2187,7 @@ def comment_post(url: str, content: str) -> None:
     if item_type == "answers":
         item_id = _resolve_answer_id(item_id)
     resp = comment_item(item_type, item_id, content)
-    click.echo(resp)
+    echo(resp)
 
 
 @interact_comment.command("delete")
@@ -2162,7 +2195,7 @@ def comment_post(url: str, content: str) -> None:
 def comment_delete(comment_id: str) -> None:
     """Delete a comment by ID."""
     delete_comment(comment_id)
-    click.echo(f"Deleted comment {comment_id}")
+    success(f"Deleted comment {comment_id}")
 
 
 @interact.group("collect")
@@ -2177,9 +2210,9 @@ def collect_add(url: str, collection_id: str | None) -> None:
     """Add an item to the default or specified collection."""
     item_type, item_id = _parse_item_url(url)
     if collection_id:
-        click.echo(add_to_collection(item_type, item_id, collection_id))
+        echo(add_to_collection(item_type, item_id, collection_id))
     else:
-        click.echo(collect(item_type, item_id))
+        echo(collect(item_type, item_id))
 
 
 @interact_collect.command("remove")
@@ -2188,7 +2221,7 @@ def collect_add(url: str, collection_id: str | None) -> None:
 def collect_remove(url: str, collection_id: str) -> None:
     """Remove an item from a collection."""
     item_type, item_id = _parse_item_url(url)
-    click.echo(delete_to_collection(item_type, item_id, collection_id))
+    echo(delete_to_collection(item_type, item_id, collection_id))
 
 
 @interact_collect.command("create")
@@ -2197,14 +2230,14 @@ def collect_remove(url: str, collection_id: str) -> None:
 @click.option("--public/--private", default=True, help="Visibility")
 def collect_create(title: str, description: str, public: bool) -> None:
     """Create a new collection."""
-    click.echo(create_collection(title, description, public))
+    echo(create_collection(title, description, public))
 
 
 @interact_collect.command("delete")
 @click.argument("collection_id")
 def collect_delete(collection_id: str) -> None:
     """Delete a collection."""
-    click.echo(delete_collection(collection_id))
+    echo(delete_collection(collection_id))
 
 
 @interact_collect.command("list")
@@ -2216,20 +2249,20 @@ def collect_delete(collection_id: str) -> None:
 def collect_list(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
     """List your collections."""
     token = _resolve_following_token(url_token)
-    click.echo(f"Fetching collections for {token}...", err=True)
+    info(f"Fetching collections for {token}...")
 
     items = list_collections(token, limit=limit, max_items=max_items)
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
-            click.echo(f"Saved {len(items)} items to {output}", err=True)
+            success(f"Saved {len(items)} items to {output}")
         return
 
     if not items:
-        click.echo("No collections found.")
+        info("No collections found.")
         return
 
     _display_following_items(items)
@@ -2237,7 +2270,7 @@ def collect_list(url_token: str | None, limit: int, max_items: int | None, outpu
     if output:
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        click.echo(f"Saved {len(items)} items to {output}")
+        success(f"Saved {len(items)} items to {output}")
 
 
 # ── report ──────────────────────────────────────────────────────────────
@@ -2259,22 +2292,22 @@ def report_reasons(object_type: str, output_json: bool) -> None:
     data = fetch_report_reasons(object_type)
 
     if output_json:
-        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        print_json(data)
         return
 
     reasons = flatten_reasons(data)
     if not reasons:
-        click.echo(f"No report reasons found for type '{object_type}'.")
+        info(f"No report reasons found for type '{object_type}'.")
         return
 
-    click.echo(f"Report reasons for '{object_type}':\n")
+    heading(f"Report reasons for '{object_type}'")
     current_category = None
     for r in reasons:
         if r["category"] and r["category"] != current_category:
             current_category = r["category"]
-            click.echo(f"  [{current_category}]")
+            echo(f"  {f_tag(current_category)}")
         label = f"    {r['id']} — {r['text']}" if r["category"] else f"  {r['id']} — {r['text']}"
-        click.echo(label)
+        echo(label)
 
 
 @interact_report.command("submit")
@@ -2312,15 +2345,15 @@ def report_submit(url: str, reason_id: str, custom_reason: str, output_json: boo
     )
 
     if output_json:
-        click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+        print_json(resp)
     else:
         if resp.get("is_reported") or (isinstance(resp, dict) and resp.get("success", True)):
-            click.echo(f"✓ Report submitted for {item_type} {item_id}")
-            click.echo(f"  Reason: {reason_id}")
+            success(f"Report submitted for {f_tag(item_type)} {item_id}")
+            echo(f"  {f_label('Reason:')} {reason_id}")
             if custom_reason:
-                click.echo(f"  Detail: {custom_reason}")
+                echo(f"  {f_label('Detail:')} {custom_reason}")
         else:
-            click.echo(f"✗ Report failed: {json.dumps(resp, ensure_ascii=False)}")
+            error(f"Report failed: {json.dumps(resp, ensure_ascii=False)}")
 
 
 # ── publish ──────────────────────────────────────────────────────────────
@@ -2338,10 +2371,10 @@ def publish_answer_cmd(question_id: str, file: str | None) -> None:
     """Publish a new answer to a question. Reads Markdown from file or stdin."""
     content = _read_content(file)
     if not content.strip():
-        click.echo("Error: empty content.", err=True)
+        error("Empty content.")
         raise SystemExit(1)
     resp = publish_answer(question_id, content)
-    click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+    print_json(resp)
 
 
 @publish.command("modify-answer")
@@ -2351,10 +2384,10 @@ def publish_modify_answer(answer_id: str, file: str | None) -> None:
     """Modify an existing answer."""
     content = _read_content(file)
     if not content.strip():
-        click.echo("Error: empty content.", err=True)
+        error("Empty content.")
         raise SystemExit(1)
     resp = modify_answer(answer_id, content)
-    click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+    print_json(resp)
 
 
 @publish.command("article")
@@ -2364,10 +2397,10 @@ def publish_article_cmd(title: str, file: str | None) -> None:
     """Publish a new article. Reads Markdown from file or stdin."""
     content = _read_content(file)
     if not content.strip():
-        click.echo("Error: empty content.", err=True)
+        error("Empty content.")
         raise SystemExit(1)
     resp = publish_article(title, content)
-    click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+    print_json(resp)
 
 
 @publish.command("modify-article")
@@ -2378,10 +2411,10 @@ def publish_modify_article(article_id: str, title: str, file: str | None) -> Non
     """Modify an existing article."""
     content = _read_content(file)
     if not content.strip():
-        click.echo("Error: empty content.", err=True)
+        error("Empty content.")
         raise SystemExit(1)
     resp = modify_article(article_id, title, content)
-    click.echo(json.dumps(resp, ensure_ascii=False, indent=2))
+    print_json(resp)
 
 
 @publish.command("upload-image")
@@ -2395,15 +2428,15 @@ def publish_modify_article(article_id: str, title: str, file: str | None) -> Non
 def publish_upload_image(file_path: str, source: str) -> None:
     """Upload an image to Zhihu. Outputs the uploaded image URL."""
     try:
-        info = upload_image(file_path, source=source)
-        click.echo(info["src"])
-        visible = to_visible_url(info.get("original_src", info["src"]))
-        click.echo(click.style(f"Visible URL: {visible}", fg="green"))
+        img_info = upload_image(file_path, source=source)
+        echo(img_info["src"])
+        visible = to_visible_url(img_info.get("original_src", img_info["src"]))
+        echo(f_green(f"Visible URL: {visible}"))
     except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
+        error(f"{e}")
         raise SystemExit(1)
     except RuntimeError as e:
-        click.echo(f"Error: {e}", err=True)
+        error(f"{e}")
         raise SystemExit(1)
 
 
@@ -2422,17 +2455,23 @@ def chat_inbox(limit: int, output_json: bool) -> None:
     """List recent conversations (paginated — walks all pages by default)."""
     messages, total_unread = get_inbox(limit=limit)
     if output_json:
-        click.echo(json.dumps(messages, ensure_ascii=False, indent=2))
+        print_json(messages)
         return
     if not messages:
-        click.echo("Inbox is empty.")
+        info("Inbox is empty.")
         return
-    click.echo(f"Total unread threads: {total_unread}  |  Showing {len(messages)} threads\n")
+    echo(
+        f"  {f_label('Total unread threads:')} {f_num(total_unread)}  {f_label('Showing')} {f_num(len(messages))} {f_dim('threads')}"
+    )
+    blank()
     for msg in messages:
-        click.echo(f"[{msg['unread_count']} unread] {msg['from']}")
-        click.echo(f"  {msg['snippet'][:80]}")
-        click.echo(f"  id={msg['id']}  token={msg['url_token']}  time={msg['updated_time']}")
-        click.echo()
+        unread = msg["unread_count"]
+        echo(f"  {f_tag(f'{unread} unread')} {f_name(msg['from'])}")
+        echo(f"    {f_dim(msg['snippet'][:80])}")
+        echo(
+            f"    {f_label('id=')}{msg['id']}  {f_label('token=')}{msg['url_token']}  {f_label('time=')}{f_meta(msg['updated_time'])}"
+        )
+        blank()
 
 
 @chat.command("history")
@@ -2449,10 +2488,12 @@ def chat_history(chat_id: str, limit: int, output_json: bool) -> None:
             count += 1
             if count >= limit:
                 break
-        click.echo(json.dumps(msgs, ensure_ascii=False, indent=2))
+        print_json(msgs)
         return
     for msg in iter_chat_history(chat_id):
-        click.echo(f"[{msg['time']}]{msg['sender']}: {msg['content']}")
+        t = msg["time"]
+        s = msg["sender"]
+        echo(f"  {f_meta(f'[{t}]')}{f_name(s)}: {msg['content']}")
         count += 1
         if count >= limit:
             break
@@ -2464,7 +2505,7 @@ def chat_history(chat_id: str, limit: int, output_json: bool) -> None:
 def chat_send(user_id: str, content: str) -> None:
     """Send a text message to a user."""
     resp = send_text_message(user_id, content)
-    click.echo(resp)
+    echo(resp)
 
 
 # ── listen ───────────────────────────────────────────────────────────────
@@ -2481,13 +2522,13 @@ def listen(url_token: str, topic: str, incognito: bool) -> None:
     from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, NOTIFICATION_TOPIC, ZhihuMessageListener
 
     topic_str = NOTIFICATION_TOPIC if topic == "notification" else IMCHAT_TOPIC
-    click.echo(f"Connecting to Zhihu MQTT ({topic})...")
+    info(f"Connecting to Zhihu MQTT ({topic})...")
     listener = ZhihuMessageListener(url_token, topic_str, incognito=incognito)
-    click.echo("Listening — press Ctrl+C to stop.")
+    echo("Listening — press Ctrl+C to stop.")
     try:
         listener.start()
     except KeyboardInterrupt:
-        click.echo("\nStopped.")
+        echo("\nStopped.")
 
 
 # ── agora ─────────────────────────────────────────────────────────────────
@@ -2511,7 +2552,7 @@ def agora_next(discussion_id: str | None, output_json: bool) -> None:
         raise click.ClickException(str(e))
 
     if output_json:
-        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        print_json(data)
         return
 
     juror = data.get("juror_info", {})
@@ -2521,43 +2562,45 @@ def agora_next(discussion_id: str | None, output_json: bool) -> None:
         today = juror.get("today_jury_count", 0)
         max_day = juror.get("max_day_jury_count", 20)
         remaining = max(0, max_day - today)
-        click.echo(f"众裁官 | 总投票: {juror.get('vote_count', 0)} | 今日: {today}/{max_day} (剩余 {remaining})")
+        echo(
+            f"  {f_title('众裁官')} | {f_label('总投票:')} {f_num(juror.get('vote_count', 0))} | {f_label('今日:')} {f_num(today)}/{f_num(max_day)} ({f_label('剩余')} {f_num(remaining)})"
+        )
     else:
-        click.echo(click.style("你尚不是众裁官", fg="yellow"))
+        warning("你尚不是众裁官")
 
     disc = data.get("current_discussion")
     if not disc:
         disc_id = data.get("discussion_id", "")
         if disc_id:
-            click.echo(f"\nDiscussion ID: {disc_id}")
-            click.echo("Discussion data not in initialData. Try fetching details with 'zhihu agora detail {disc_id}'.")
+            section(f"Discussion ID: {disc_id}")
+            info("Discussion data not in initialData. Try fetching details with 'zhihu agora detail {disc_id}'.")
         else:
-            click.echo("\nNo pending discussions. Check back later!")
+            section("No pending discussions. Check back later!")
         return
 
-    click.echo()
+    blank()
 
     # Report reason
     reason = disc.get("report_reason", "")
     note = disc.get("report_note", "")
-    click.echo(click.style(f"举报理由: {reason}", fg="red", bold=True))
+    echo(f"  {click.style(f'举报理由: {reason}', fg='red', bold=True)}")
     if note:
-        click.echo(f"  {note}")
-    click.echo()
+        echo(f"    {note}")
+    blank()
 
     # The reported comment
     comment = disc.get("comment", {})
     _print_agora_comment(comment, disc.get("reported_user", ""))
-    click.echo()
+    blank()
 
     # Origin context
     origin_title = disc.get("origin_title", "")
     origin_url = disc.get("origin_url", "")
     if origin_title:
-        click.echo(f"评论所在内容: {click.style(origin_title, bold=True)}")
+        echo(f"  {f_label('评论所在内容:')} {f_bold(origin_title)}")
     if origin_url:
-        click.echo(f"  {click.style(origin_url, dim=True)}")
-    click.echo()
+        echo(f"    {f_url(origin_url)}")
+    blank()
 
     # Status
     status = disc.get("status", "")
@@ -2565,11 +2608,11 @@ def agora_next(discussion_id: str | None, output_json: bool) -> None:
     status_str = f"状态: {status}"
     if my_vote:
         status_str += f"  我的投票: {my_vote}"
-    click.echo(click.style(status_str, dim=True))
+    echo(f"  {f_dim(status_str)}")
 
     if not my_vote and status == "Voting":
-        click.echo()
-        click.echo(
+        blank()
+        echo(
             "投票: zhihu agora vote {} -v {{affirmative,abstain,dissenting}}".format(
                 disc.get("id", data.get("discussion_id", "<id>"))
             )
@@ -2586,15 +2629,14 @@ def _print_agora_comment(comment: dict, reported_user: str) -> None:
     votes = comment.get("vote_count", 0)
     url = comment.get("url", "")
 
-    click.echo(
-        f"被举报评论 — {click.style(author_name, bold=True)}{' (' + reported_user + ')' if reported_user else ''}"
-    )
+    reported_str = f" ({reported_user})" if reported_user else ""
+    echo(f"  {f_label('被举报评论')} — {f_bold(author_name)}{reported_str}")
     if headline:
-        click.echo(f"  {click.style(headline, dim=True)}")
-    click.echo()
-    click.echo(f"  {content}")
-    click.echo()
-    click.echo(f"  赞同: {votes}  |  时间: {click.style(str(created), dim=True)}  |  {click.style(url, dim=True)}")
+        echo(f"    {f_dim(headline)}")
+    blank()
+    echo(f"    {content}")
+    blank()
+    echo(f"    {f_label('赞同:')} {f_num(votes)}  {f_label('时间:')} {f_meta(str(created))}  {f_url(url)}")
 
 
 @agora.command("me")
@@ -2604,28 +2646,28 @@ def agora_me(output_json: bool) -> None:
     data = fetch_agora_me()
 
     if output_json:
-        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        print_json(data)
         return
 
     juror = data.get("juror_info", {})
 
     if not data.get("is_juror"):
-        click.echo("You are not a juror (众裁官).")
+        info("You are not a juror (众裁官).")
         return
 
-    click.echo(click.style("众裁官 (Juror)", bold=True, fg="green"))
-    click.echo()
-    click.echo(f"  总投票 (total votes):      {juror.get('vote_count', 0)}")
-    click.echo(f"  总评审 (total reviews):     {juror.get('review_count', 0)}")
-    click.echo(f"  评审获赞 (review likes):    {juror.get('review_liked_count', 0)}")
-    click.echo()
-    click.echo(
-        f"  今日已裁 (today judged):    {juror.get('today_jury_count', 0)} / {juror.get('max_day_jury_count', 20)}"
+    echo(f"  {f_green(f_bold('众裁官 (Juror)'))}")
+    blank()
+    echo(f"  {f_label('总投票 (total votes):')}      {f_num(juror.get('vote_count', 0))}")
+    echo(f"  {f_label('总评审 (total reviews):')}     {f_num(juror.get('review_count', 0))}")
+    echo(f"  {f_label('评审获赞 (review likes):')}    {f_num(juror.get('review_liked_count', 0))}")
+    blank()
+    echo(
+        f"  {f_label('今日已裁 (today judged):')}    {f_num(juror.get('today_jury_count', 0))} / {f_num(juror.get('max_day_jury_count', 20))}"
     )
-    click.echo()
-    click.echo(f"  本周投票 (week votes):      {juror.get('week_vote_count', 0)}")
-    click.echo(f"  本周评审 (week reviews):    {juror.get('week_review_count', 0)}")
-    click.echo(f"  本周获赞 (week likes):      {juror.get('week_review_liked_count', 0)}")
+    blank()
+    echo(f"  {f_label('本周投票 (week votes):')}      {f_num(juror.get('week_vote_count', 0))}")
+    echo(f"  {f_label('本周评审 (week reviews):')}    {f_num(juror.get('week_review_count', 0))}")
+    echo(f"  {f_label('本周获赞 (week likes):')}      {f_num(juror.get('week_review_liked_count', 0))}")
 
 
 @agora.command("reviews")
@@ -2638,11 +2680,11 @@ def agora_reviews(discussion_id: str, limit: int, max_items: int | None, output_
     items = fetch_reviews(discussion_id, limit=limit, max_items=max_items)
 
     if output_json:
-        click.echo(json.dumps(items, ensure_ascii=False, indent=2))
+        print_json(items)
         return
 
     if not items:
-        click.echo("No review cases found.")
+        info("No review cases found.")
         return
 
     for i, item in enumerate(items, 1):
@@ -2653,15 +2695,17 @@ def agora_reviews(discussion_id: str, limit: int, max_items: int | None, output_
         status = item.get("status", "")
         my_vote = item.get("my_vote", "")
 
-        status_str = f" [{status}]" if status else ""
-        vote_str = f" my_vote={my_vote}" if my_vote else ""
+        status_str = f" {f_tag(status)}" if status else ""
+        vote_str = f" {f_label('my_vote=')}{my_vote}" if my_vote else ""
 
-        click.echo(f"[{i}] {click.style(author_name, bold=True)}{status_str}{vote_str}")
-        click.echo(f"    comment: {comment_content[:200]}")
+        echo(f"  {item_index(i)} {f_bold(author_name)}{status_str}{vote_str}")
+        echo(f"    {f_label('comment:')} {comment_content[:200]}")
         if reason:
-            click.echo(f"    reason: {reason}")
-        click.echo(f"    赞同: {item.get('affirmative_count', 0)}  反对: {item.get('dissenting_count', 0)}")
-        click.echo()
+            echo(f"    {f_label('reason:')} {reason}")
+        echo(
+            f"    {f_label('赞同:')} {f_num(item.get('affirmative_count', 0))}  {f_label('反对:')} {f_num(item.get('dissenting_count', 0))}"
+        )
+        blank()
 
 
 @agora.command("detail")
@@ -2672,41 +2716,42 @@ def agora_detail(discussion_id: str, output_json: bool) -> None:
     detail = fetch_comment_detail(discussion_id)
 
     if output_json:
-        click.echo(json.dumps(detail, ensure_ascii=False, indent=2))
+        print_json(detail)
         return
 
     comment = detail.get("comment", {})
     author = comment.get("author", {})
 
-    click.echo(f"Resource: {detail.get('resource_id', '?')}")
-    click.echo(f"Reported comment ID: {detail.get('reported_comment_id', '?')}")
-    click.echo()
+    echo(f"  {f_label('Resource:')} {detail.get('resource_id', '?')}")
+    echo(f"  {f_label('Reported comment ID:')} {detail.get('reported_comment_id', '?')}")
+    blank()
 
     author_name = author.get("name", "unknown")
-    click.echo(f"Author: {click.style(author_name, bold=True)}")
+    echo(f"  {f_label('Author:')} {f_bold(author_name)}")
     if author.get("headline"):
-        click.echo(f"  {author['headline']}")
-    click.echo(f"  url_token: {author.get('url_token', '?')}")
-    click.echo()
+        echo(f"    {author['headline']}")
+    echo(f"    {f_label('url_token:')} {author.get('url_token', '?')}")
+    blank()
 
-    click.echo(f"Comment (id={comment.get('id', '?')}):")
-    click.echo(f"  {comment.get('content', '(no content)')}")
-    click.echo()
-    click.echo(
-        f"created: {comment.get('created_time', '?')}  "
-        f"votes: {comment.get('vote_count', 0)}  "
-        f"child_comments: {comment.get('child_comment_count', 0)}"
+    cid = comment.get("id", "?")
+    echo(f"  {f_label(f'Comment (id={cid}):')}")
+    echo(f"    {comment.get('content', '(no content)')}")
+    blank()
+    echo(
+        f"    {f_label('created:')} {f_meta(str(comment.get('created_time', '?')))}  "
+        f"{f_label('votes:')} {f_num(comment.get('vote_count', 0))}  "
+        f"{f_label('child_comments:')} {f_num(comment.get('child_comment_count', 0))}"
     )
-    click.echo(f"url: {comment.get('url', '?')}")
-    click.echo()
+    echo(f"    {f_label('url:')} {f_url(str(comment.get('url', '?')))}")
+    blank()
 
     children = detail.get("child_comments", [])
     if children:
-        click.echo(f"Child comments ({len(children)}):")
+        echo(f"  {f_label(f'Child comments ({len(children)}):')}")
         for cc in children:
             cc_content = cc.get("content", "")[:150]
             cc_author = cc.get("author", {}).get("member", {}).get("name", "?")
-            click.echo(f"  [{cc_author}] {cc_content}")
+            echo(f"    [{f_name(cc_author)}] {cc_content}")
 
 
 @agora.command("vote")
@@ -2735,16 +2780,16 @@ def agora_vote(discussion_id: str, vote_type: str, output_json: bool) -> None:
         raise click.BadParameter(str(e))
 
     if output_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result)
         return
 
     label = VOTE_LABELS.get(vote_type, vote_type)
-    click.echo(f"Vote: {label}")
-    click.echo(f"  赞同 (affirmative): {result['affirmative_count']}")
-    click.echo(f"  反对 (dissenting):  {result['dissenting_count']}")
+    echo(f"  {f_label('Vote:')} {label}")
+    echo(f"  {f_label('赞同 (affirmative):')} {f_num(result['affirmative_count'])}")
+    echo(f"  {f_label('反对 (dissenting):')}  {f_num(result['dissenting_count'])}")
     if result["blind_test_wrong"]:
-        click.echo(f"  {click.style('盲测错误 (blind test wrong)', fg='yellow')}")
-        click.echo(f"  今日盲测错误: {result['blind_test_today_wrong_count']}")
+        warning("盲测错误 (blind test wrong)")
+        echo(f"  {f_label('今日盲测错误:')} {f_num(result['blind_test_today_wrong_count'])}")
 
 
 # ── stats ─────────────────────────────────────────────────────────────────
@@ -2771,38 +2816,38 @@ def stats(url: str, output_json: bool, with_share: bool, with_pv: bool, with_sho
     try:
         result = get_item_stats(url, with_share=with_share, with_pv=with_pv, with_show=with_show)
     except ValueError as e:
-        click.echo(f"Error: {e}", err=True)
+        error(f"{e}")
         raise SystemExit(1)
 
     if output_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result)
         return
 
-    click.echo(f"  {click.style(result['title'], bold=True)}")
-    click.echo(f"  {click.style(result['url'], dim=True)}")
-    click.echo()
-    click.echo(f"  赞同 (voteup):  {result['voteup_count']}")
-    click.echo(f"  收藏 (favorite): {result['favlists_count']}")
-    click.echo(f"  评论 (comment):  {result['comment_count']}")
-    click.echo(f"  喜欢 (thanks):   {result['thanks_count']}")
+    echo(f"  {f_bold(result['title'])}")
+    echo(f"  {f_url(result['url'])}")
+    blank()
+    echo(f"  {f_label('赞同 (voteup):')}  {f_num(result['voteup_count'])}")
+    echo(f"  {f_label('收藏 (favorite):')} {f_num(result['favlists_count'])}")
+    echo(f"  {f_label('评论 (comment):')}  {f_num(result['comment_count'])}")
+    echo(f"  {f_label('喜欢 (thanks):')}   {f_num(result['thanks_count'])}")
     if with_pv:
         pv = result.get("pv")
         if pv is None:
-            click.echo(f"  阅读 (pv):       {click.style('(not author / unavailable)', dim=True)}")
+            echo(f"  {f_label('阅读 (pv):')}       {f_dim('(not author / unavailable)')}")
         else:
-            click.echo(f"  阅读 (pv):       {pv}")
+            echo(f"  {f_label('阅读 (pv):')}       {f_num(pv)}")
     if with_show:
         show = result.get("show")
         if show is None:
-            click.echo(f"  展现 (show):     {click.style('(not author / unavailable)', dim=True)}")
+            echo(f"  {f_label('展现 (show):')}     {f_dim('(not author / unavailable)')}")
         else:
-            click.echo(f"  展现 (show):     {show}")
+            echo(f"  {f_label('展现 (show):')}     {f_num(show)}")
     if with_share:
         sc = result.get("share_count")
         if sc is None:
-            click.echo(f"  分享 (share):    {click.style('(not author / unavailable)', dim=True)}")
+            echo(f"  {f_label('分享 (share):')}    {f_dim('(not author / unavailable)')}")
         else:
-            click.echo(f"  分享 (share):    {sc}")
+            echo(f"  {f_label('分享 (share):')}    {f_num(sc)}")
 
 
 # ── scrape ───────────────────────────────────────────────────────────────
@@ -2829,22 +2874,22 @@ def _generic_list_scrape(api_description: str, output_file: str) -> None:
     import re
 
     if not cache_manager.load_headers():
-        click.echo("No cached headers. Run 'zhihu auth paste' first.", err=True)
+        error("No cached headers. Run 'zhihu auth paste' first.")
         raise SystemExit(1)
 
-    click.echo(f"Paste the cURL command for the {api_description} API (Ctrl+D to finish):")
+    echo(f"Paste the cURL command for the {api_description} API (Ctrl+D to finish):")
     try:
         curl_text = sys.stdin.read()
     except EOFError:
         curl_text = ""
 
     if not curl_text.strip():
-        click.echo("Error: no input.", err=True)
+        error("No input.")
         raise SystemExit(1)
 
     url_match = re.search(r"curl\s+'([^']+)'", curl_text)
     if not url_match:
-        click.echo("Error: could not parse URL from cURL.", err=True)
+        error("Could not parse URL from cURL.")
         raise SystemExit(1)
 
     initial_url = url_match.group(1).replace("http://", "https://")
@@ -2856,11 +2901,11 @@ def _generic_list_scrape(api_description: str, output_file: str) -> None:
     for item in stream_handler(initial_url, parse_items):
         all_items.append(item)
         if len(all_items) % 20 == 0:
-            click.echo(f"  Collected {len(all_items)} items...")
+            info(f"Collected {len(all_items)} items...")
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(all_items, f, ensure_ascii=False, indent=2)
-    click.echo(f"Saved {len(all_items)} items to {output_file}")
+    success(f"Saved {f_num(len(all_items))} items to {f_path(output_file)}")
 
 
 @scrape.command("activities")
@@ -2907,13 +2952,13 @@ def convert_universal(inputs: tuple[str, ...], output: str, forced_type: str | N
         all_items.extend(load_json(fpath))
 
     if not all_items:
-        click.echo("No valid items found.", err=True)
+        error("No valid items found.")
         raise SystemExit(1)
 
     converted = convert_items(all_items, forced_type)
     with open(output, "w", encoding="utf-8") as f:
         json.dump(converted, f, ensure_ascii=False, indent=2)
-    click.echo(f"Converted {len(converted)} items → {output}")
+    success(f"Converted {f_num(len(converted))} items {f_dim('→')} {f_path(output)}")
 
 
 @convert.command("user-act")
@@ -2922,14 +2967,14 @@ def convert_universal(inputs: tuple[str, ...], output: str, forced_type: str | N
 def convert_user_act(input_file: str, output_file: str) -> None:
     """Convert zhihu_user_activities.json to all_assets_list.json format."""
     if not os.path.exists(input_file):
-        click.echo(f"Error: file not found: {input_file}", err=True)
+        error(f"file not found: {input_file}")
         raise SystemExit(1)
 
     converted = convert_items(load_json(input_file))
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(converted, f, ensure_ascii=False, indent=2)
-    click.echo(f"Converted {len(converted)} items → {output_file}")
+    success(f"Converted {f_num(len(converted))} items {f_dim('→')} {f_path(output_file)}")
 
 
 @convert.command("draft")
@@ -2944,15 +2989,15 @@ def convert_draft(url: str, output: str | None) -> None:
     try:
         metadata, markdown = draft_to_markdown(url)
     except ValueError as e:
-        click.echo(f"Error: {e}", err=True)
+        error(f"{e}")
         raise SystemExit(1)
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
             f.write(markdown)
-        click.echo(f"Draft saved to {output}")
+        success(f"Draft saved to {f_path(output)}")
     else:
-        click.echo(markdown)
+        echo(markdown)
 
 
 # ── extensions ────────────────────────────────────────────────────────────
@@ -2997,7 +3042,7 @@ def creator_monthly(file_path: str, output_json: bool) -> None:
     from zhihu_cli.creator_tools.analyze_monthly_income import analyze_monthly_income, get_monthly_income_data
 
     if output_json:
-        click.echo(json.dumps(get_monthly_income_data(file_path), ensure_ascii=False, indent=2))
+        print_json(get_monthly_income_data(file_path))
         return
     analyze_monthly_income(file_path)
 
@@ -3008,7 +3053,7 @@ def creator_plot() -> None:
     from zhihu_cli.creator_tools.plot_zhihu_incomes import plot_analysis
 
     plot_analysis()
-    click.echo(f"Saved {get_data_dir() / 'plots' / 'income_analysis.png'}")
+    success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'income_analysis.png'))}")
 
 
 @tools_creator.command("advanced")
@@ -3017,7 +3062,7 @@ def creator_advanced() -> None:
     from zhihu_cli.creator_tools.plot_zhihu_incomes_advanced import plot_advanced_analysis
 
     plot_advanced_analysis()
-    click.echo(f"Saved {get_data_dir() / 'plots' / 'income_advanced_analysis.png'}")
+    success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'income_advanced_analysis.png'))}")
 
 
 @tools_creator.command("derivative")
@@ -3026,7 +3071,7 @@ def creator_derivative() -> None:
     from zhihu_cli.creator_tools.derivative_analysis import plot_derivative_analysis
 
     plot_derivative_analysis()
-    click.echo(f"Saved {get_data_dir() / 'plots' / 'derivative_analysis.png'}")
+    success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'derivative_analysis.png'))}")
 
 
 @tools_creator.command("weekday")
@@ -3035,7 +3080,7 @@ def creator_weekday() -> None:
     from zhihu_cli.creator_tools.weekday_income_analysis import plot_weekday_analysis
 
     plot_weekday_analysis()
-    click.echo(f"Saved {get_data_dir() / 'plots' / 'weekday_income_analysis.png'}")
+    success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'weekday_income_analysis.png'))}")
 
 
 @tools_creator.command("metrics")
@@ -3133,33 +3178,33 @@ def nlp_count(folder: str, no_code: bool, output_json: bool) -> None:
 
     if not word_counts:
         if output_json:
-            click.echo(json.dumps({"files": 0}, ensure_ascii=False, indent=2))
+            print_json({"files": 0})
         else:
-            click.echo("No markdown files found.")
+            info("No markdown files found.")
         return
 
     wc = [int(x) for x in word_counts]
     if output_json:
-        click.echo(
-            json.dumps(
-                {
-                    "files": len(wc),
-                    "mean": round(float(np.mean(wc)), 1),
-                    "std": round(float(np.std(wc)), 1),
-                    "p50": int(np.percentile(wc, 50)),
-                    "p90": int(np.percentile(wc, 90)),
-                    "max": int(max(wc)),
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+        print_json(
+            {
+                "files": len(wc),
+                "mean": round(float(np.mean(wc)), 1),
+                "std": round(float(np.std(wc)), 1),
+                "p50": int(np.percentile(wc, 50)),
+                "p90": int(np.percentile(wc, 90)),
+                "max": int(max(wc)),
+            }
         )
         return
 
-    click.echo(f"Files: {len(word_counts)}")
-    click.echo(f"Mean: {np.mean(word_counts):.0f}  Std: {np.std(word_counts):.0f}")
-    click.echo(f"P50: {np.percentile(word_counts, 50):.0f}  P90: {np.percentile(word_counts, 90):.0f}")
-    click.echo(f"Max: {max(word_counts)}")
+    echo(f"  {f_label('Files:')} {f_num(len(word_counts))}")
+    echo(
+        f"  {f_label('Mean:')} {f_num(f'{np.mean(word_counts):.0f}')}  {f_label('Std:')} {f_num(f'{np.std(word_counts):.0f}')}"
+    )
+    echo(
+        f"  {f_label('P50:')} {f_num(f'{np.percentile(word_counts, 50):.0f}')}  {f_label('P90:')} {f_num(f'{np.percentile(word_counts, 90):.0f}')}"
+    )
+    echo(f"  {f_label('Max:')} {f_num(max(word_counts))}")
 
 
 @tools_nlp.command("wordcloud")
@@ -3191,7 +3236,7 @@ def nlp_cluster(source_dir: str, output: str, n_clusters: int, n_terms: int, mod
 
     documents, file_names = load_and_clean_data(source_dir)
     if not documents:
-        click.echo("No documents found.", err=True)
+        error("No documents found.")
         return
 
     if evaluate_k:
@@ -3200,14 +3245,14 @@ def nlp_cluster(source_dir: str, output: str, n_clusters: int, n_terms: int, mod
         vectorizer = TfidfVectorizer(max_features=1500, min_df=2, max_df=0.95)
         X = vectorizer.fit_transform(documents)
         find_best_k(X, max_k=20)
-        click.echo("Check the elbow/silhouette plot to choose K.")
+        info("Check the elbow/silhouette plot to choose K.")
         return
 
     X, labels, vectorizer, kmeans = process_clusters(documents, n_clusters)
     visualize_with_plotly(
         X, labels, file_names, vectorizer, kmeans, n_clusters, mode=mode, output_path=output, n_terms=n_terms
     )  # type: ignore[arg-type]
-    click.echo(f"Saved {output}")
+    success(f"Saved {f_path(output)}")
 
 
 @tools_nlp.command("conetwork")
