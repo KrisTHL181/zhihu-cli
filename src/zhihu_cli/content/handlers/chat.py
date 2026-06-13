@@ -17,6 +17,8 @@ def _sanitize_html(raw: str) -> str:
     (link.zhihu.com redirects, invisible/visible spans, etc.).
     This extracts readable text and resolves link targets.
     """
+    if not raw or not raw.strip():
+        return raw
     doc = lxml_html.fromstring(raw)
 
     # Use xpath with self:: to also match the root element (handles single-<a> fragments)
