@@ -10,16 +10,38 @@ from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter, replace_with_text
 
 
+def _format_image_message(image_data: dict[str, Any] | None) -> str:
+    """Extract image URL from a chat message's ``image`` field.
+
+    For ``content_type=1`` (image) messages the Zhihu API returns an
+    ``image`` dict with ``url``, ``height`` and ``width`` keys.
+    """
+    if not isinstance(image_data, dict):
+        return "[]"
+    url = image_data.get("url", "")
+    if not url:
+        return "[]"
+    return f"![]({url})"
+
+
 def _sanitize_html(raw: str) -> str:
     """Convert chat message HTML to clean text.
 
     Zhihu chat messages contain raw HTML with link wrappers
-    (link.zhihu.com redirects, invisible/visible spans, etc.).
-    This extracts readable text and resolves link targets.
+    (link.zhihu.com redirects, invisible/visible spans, etc.) and
+    embedded ``<img>`` tags.  This extracts readable text, resolves
+    link targets, and preserves image references as Markdown.
     """
     if not raw or not raw.strip():
         return raw
     doc = lxml_html.fromstring(raw)
+
+    # Process <img> tags first so their Markdown survives text_content().
+    for img_tag in doc.xpath(".//img"):
+        src = img_tag.get("src") or img_tag.get("data-src") or img_tag.get("data-original") or ""
+        alt = img_tag.get("alt", "图片")
+        replacement = f"\n![{alt}]({src})\n" if src else f"[{alt}]"
+        replace_with_text(img_tag, replacement)
 
     # Use xpath with self:: to also match the root element (handles single-<a> fragments)
     for a_tag in doc.xpath(".//a | self::a"):
@@ -106,7 +128,11 @@ def _parse_messages_page(
             continue
 
         sender = sender_name if msg.get("user_type") == "sender" else receiver_name
-        content = _sanitize_html(msg.get("text", ""))
+        content_type = msg.get("content_type", 0)
+        if content_type == 1:  # image
+            content = _format_image_message(msg.get("image"))
+        else:
+            content = _sanitize_html(msg.get("text", ""))
         time_str = fmt_time(msg.get("created_time"))
         page_msgs.append({"sender": sender, "content": content, "time": time_str})
 
@@ -114,8 +140,13 @@ def _parse_messages_page(
     return page_msgs, last_id, (receiver_name, sender_name)
 
 
-def iter_chat_history(chat_id: str) -> Generator[dict[str, str], None, None]:
-    """Stream chat history pages via waterfall, collecting and reversing for chronological order."""
+def iter_chat_history(chat_id: str, limit: int = 0) -> Generator[dict[str, str], None, None]:
+    """Stream chat history pages via waterfall, yielding in chronological order.
+
+    The Zhihu API returns messages newest-first.  When *limit* > 0 only the
+    most recent *limit* messages are returned (applied before reversal so you
+    always get the freshest conversation tail).
+    """
     initial_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
 
     # Closure state shared between parser and extract_next
@@ -137,8 +168,11 @@ def iter_chat_history(chat_id: str) -> Generator[dict[str, str], None, None]:
         state["current_url"] = next_url
         return next_url
 
-    # API returns messages newest-first; collect and reverse to chronological order
+    # API returns messages newest-first; collect, optionally trim to newest N,
+    # then reverse to chronological order.
     all_messages = list(stream_handler(initial_url, parse_messages, extract_next, delay=0.6))
+    if limit > 0 and len(all_messages) > limit:
+        all_messages = all_messages[:limit]
     yield from reversed(all_messages)
 
 

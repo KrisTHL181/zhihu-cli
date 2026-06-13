@@ -2480,23 +2480,14 @@ def chat_inbox(limit: int, output_json: bool) -> None:
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 def chat_history(chat_id: str, limit: int, output_json: bool) -> None:
     """Read messages from a chat conversation."""
-    count = 0
     if output_json:
-        msgs = []
-        for msg in iter_chat_history(chat_id):
-            msgs.append(msg)
-            count += 1
-            if count >= limit:
-                break
+        msgs = list(iter_chat_history(chat_id, limit=limit))
         print_json(msgs)
         return
-    for msg in iter_chat_history(chat_id):
+    for msg in iter_chat_history(chat_id, limit=limit):
         t = msg["time"]
         s = msg["sender"]
         echo(f"  {f_meta(f'[{t}]')}{f_name(s)}: {msg['content']}")
-        count += 1
-        if count >= limit:
-            break
 
 
 @chat.command("send")
