@@ -2416,16 +2416,18 @@ def chat() -> None:
 
 
 @chat.command("inbox")
+@click.option("--limit", "-n", type=int, default=0, help="Max threads to fetch (0 = all pages)")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-def chat_inbox(output_json: bool) -> None:
-    """List recent conversations."""
-    messages = get_inbox()
+def chat_inbox(limit: int, output_json: bool) -> None:
+    """List recent conversations (paginated — walks all pages by default)."""
+    messages, total_unread = get_inbox(limit=limit)
     if output_json:
         click.echo(json.dumps(messages, ensure_ascii=False, indent=2))
         return
     if not messages:
         click.echo("Inbox is empty.")
         return
+    click.echo(f"Total unread threads: {total_unread}  |  Showing {len(messages)} threads\n")
     for msg in messages:
         click.echo(f"[{msg['unread_count']} unread] {msg['from']}")
         click.echo(f"  {msg['snippet'][:80]}")

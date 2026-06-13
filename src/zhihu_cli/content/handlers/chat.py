@@ -35,15 +35,28 @@ def _sanitize_html(raw: str) -> str:
     return doc.text_content()
 
 
-def get_inbox() -> list[dict[str, Any]]:
-    messages = []
-    resp = session.get("https://www.zhihu.com/api/v4/inbox")
-    resp.raise_for_status()
+def get_inbox(limit: int = 0) -> tuple[list[dict[str, Any]], int]:
+    """Fetch inbox threads with pagination.
 
-    inbox = resp.json()["data"]
-    for message in inbox:
-        messages.append(
-            {
+    The inbox API is paginated (waterfall-style).  This uses ``stream_handler``
+    to walk through all pages automatically.
+
+    Args:
+        limit: Max threads to fetch (0 = all pages).
+    Returns:
+        Tuple of (threads, total_unread) where *total_unread* is the
+        ``new_count`` reported by the first page.
+    """
+    messages: list[dict[str, Any]] = []
+    initial_url = "https://www.zhihu.com/api/v4/inbox?limit=20"
+    total_unread = 0
+
+    def parse_inbox(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
+        nonlocal total_unread
+        if total_unread == 0:
+            total_unread = data.get("new_count", 0)
+        for message in data.get("data", []):
+            yield {
                 "id": message.get("participant", {}).get("id"),
                 "url_token": message.get("participant", {}).get("url_token", ""),
                 "from": message.get("participant", {}).get("name", "unknown"),
@@ -52,8 +65,15 @@ def get_inbox() -> list[dict[str, Any]]:
                 "message_count": message.get("message_count", 0),
                 "unread_count": message.get("unread_count", 0),
             }
-        )
-    return messages
+
+    count = 0
+    for msg in stream_handler(initial_url, parse_inbox, delay=0.6):
+        messages.append(msg)
+        count += 1
+        if limit > 0 and count >= limit:
+            break
+
+    return messages, total_unread
 
 
 def _build_next_url(base_url: str, after_id: str) -> str:
