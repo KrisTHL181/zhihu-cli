@@ -3131,11 +3131,15 @@ def tools_creator_follower() -> None:
 
 
 @tools_creator_follower.command("fetch")
-@click.option("--days", type=int, default=90, help="Number of days to fetch (default: 90)")
-def creator_follower_fetch(days: int) -> None:
-    """Fetch follower detail data from Zhihu API."""
+def creator_follower_fetch() -> None:
+    """Fetch follower detail data from Zhihu API (from configured start-date to today)."""
+    from datetime import date, datetime
+
     from zhihu_cli.creator_tools.parse_follower_detail import run_task
 
+    start_str = cache_manager.get_start_date()
+    start = datetime.strptime(start_str, "%Y-%m-%d").date()
+    days = (date.today() - start).days
     run_task(days=days)
 
 
