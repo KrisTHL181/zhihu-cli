@@ -3151,6 +3151,14 @@ def creator_follower_analysis() -> None:
     run_task()
 
 
+@tools_creator_follower.command("plot")
+def creator_follower_plot() -> None:
+    """Plot follower detail line chart from follower_detail.json."""
+    from zhihu_cli.creator_tools.plot_follower_detail import plot_follower_detail
+
+    plot_follower_detail()
+
+
 @tools.group("nlp")
 def tools_nlp() -> None:
     """NLP text analysis on downloaded Markdown files."""
