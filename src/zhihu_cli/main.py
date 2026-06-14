@@ -82,6 +82,7 @@ from zhihu_cli.content.handlers.requests import reload_session, session
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
 from zhihu_cli.content.handlers.stats import get_item_stats
 from zhihu_cli.content.handlers.upload_image import to_visible_url, upload_image
+from zhihu_cli.content.handlers.upvoter import fetch_upvoters
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.content.handlers.zvideo import get_best_video_url, scrape_zvideo
@@ -1474,6 +1475,64 @@ def browse_yanxuan(
         with open(output, "w", encoding="utf-8") as f:
             f.write(full_text)
         success(f"Saved {len(segments)} segments to {output}")
+
+
+@browse.command("upvoters")
+@click.argument("url")
+@click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20, max: 20)")
+@click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+def browse_upvoters(url: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    """List users who upvoted an answer or article.
+
+    \b
+    URL can be an answer or article URL.
+    Examples:
+      zhihu browse upvoters https://www.zhihu.com/question/123/answer/456
+      zhihu browse upvoters https://zhuanlan.zhihu.com/p/123456
+    """
+    item_type, item_id = _parse_item_url(url)
+
+    if item_type not in ("answers", "articles"):
+        error(f"Upvoters are only available for answers and articles. Got: {item_type}")
+        raise SystemExit(1)
+
+    if item_type == "answers":
+        item_id = _resolve_answer_id(item_id)
+
+    info(f"Fetching upvoters for {item_type} {item_id}...")
+    items = fetch_upvoters(item_type, item_id, limit=limit, max_items=max_items)
+
+    if output_json:
+        print_json(items)
+        return
+
+    if not items:
+        info("No upvoters found.")
+        return
+
+    for i, u in enumerate(items, 1):
+        name = u["name"] or u["url_token"]
+        endorse = u.get("relationship_endorse", "")
+        influence = u.get("zhihu_influence", "")
+        headline = u.get("headline", "")
+
+        echo(f"  {f_bold(f'{i}.')} {f_name(name)}")
+        if headline:
+            echo(f"     {f_dim(headline[:100])}")
+        if influence:
+            echo(f"     {f_meta(influence)}")
+        if endorse:
+            echo(f"     {f_dim(endorse)}")
+        echo(f"     {f_url(u['url'])}")
+        echo(
+            f"     {f_label('followers:')} {f_num(u['follower_count'])}  "
+            f"{f_label('upvotes given:')} {f_num(u['member_upvote_cnt'])}"
+        )
+        if i < len(items):
+            blank()
+
+    echo(f"  {f_dim(f'── {len(items)} upvoters')}")
 
 
 # ── browse following ──────────────────────────────────────────────────────
