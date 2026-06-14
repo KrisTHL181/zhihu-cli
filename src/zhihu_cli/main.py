@@ -14,7 +14,7 @@ from zhihu_cli.content.download_contents import (
     save_article,
     save_pin,
 )
-from zhihu_cli.content.handlers import get_data_dir, get_type_and_id, get_user_agent, set_user_agent
+from zhihu_cli.content.handlers import fmt_time, get_data_dir, get_type_and_id, get_user_agent, set_user_agent
 from zhihu_cli.content.handlers.agora import (
     VALID_VOTES,
     VOTE_LABELS,
@@ -2627,7 +2627,7 @@ def _print_agora_comment(comment: dict, reported_user: str) -> None:
     blank()
     echo(f"    {content}")
     blank()
-    echo(f"    {f_label('赞同:')} {f_num(votes)}  {f_label('时间:')} {f_meta(str(created))}  {f_url(url)}")
+    echo(f"    {f_label('赞同:')} {f_num(votes)}  {f_label('时间:')} {f_meta(fmt_time(created))}  {f_url(url)}")
 
 
 @agora.command("me")
