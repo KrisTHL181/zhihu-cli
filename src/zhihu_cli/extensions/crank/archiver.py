@@ -17,6 +17,7 @@ import random
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -379,11 +380,30 @@ def call_llm_for_commit_message(
 # ── pipeline core ───────────────────────────────────────────────────────────
 
 
+def parse_since(since: str | None) -> float | None:
+    """Parse a --since date string into a Unix timestamp.
+
+    Accepts ``YYYY-MM-DD`` or ``YYYY/MM/DD``.  Returns *None* if *since* is
+    falsy or unparseable.
+    """
+    if not since:
+        return None
+    since = since.strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(since, fmt).timestamp()
+        except ValueError:
+            continue
+    print(f"Warning: could not parse --since date '{since}'. Expected YYYY-MM-DD or YYYY/MM/DD.", file=sys.stderr)
+    return None
+
+
 def run_archiver(
     user_token: str,
     output_dir: str = SERIAL_PAPERS_DIR,
     sample_count: int = 4,
     *,
+    since: str | None = None,
     dry_run: bool = False,
     api_base: str | None = None,
     api_key: str | None = None,
@@ -400,6 +420,18 @@ def run_archiver(
     if not raw_articles:
         print("No articles found. Exiting.", file=sys.stderr)
         return None
+
+    # 1b. Filter by --since cutoff
+    since_ts = parse_since(since)
+    if since_ts is not None:
+        before = len(raw_articles)
+        raw_articles = [a for a in raw_articles if a.get("created", 0) >= since_ts]
+        skipped = before - len(raw_articles)
+        if skipped:
+            print(f"Skipped {skipped} article(s) before {(since or '').strip()}.")
+        if not raw_articles:
+            print("No articles remain after --since filter. Exiting.", file=sys.stderr)
+            return None
 
     # Determine author name from first article
     first = raw_articles[0]
@@ -533,6 +565,11 @@ def main() -> None:
         help=f"Output directory for series (default: {SERIAL_PAPERS_DIR})",
     )
     parser.add_argument("--sample-count", "-n", type=int, default=4, help="Number of random samples (default: 4)")
+    parser.add_argument(
+        "--since",
+        default=None,
+        help="Only download articles created on or after this date (YYYY-MM-DD or YYYY/MM/DD)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Skip LLM naming, only download and show sample paths")
     args = parser.parse_args()
 
@@ -540,6 +577,7 @@ def main() -> None:
         user_token=args.user_token,
         output_dir=args.output_dir,
         sample_count=args.sample_count,
+        since=args.since,
         dry_run=args.dry_run,
     )
 

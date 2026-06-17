@@ -25,6 +25,7 @@ from zhihu_cli.extensions.crank.archiver import (
     call_llm_for_name,
     fetch_article_list,
     load_llm_config,
+    parse_since,
     save_llm_config,
 )
 
@@ -133,7 +134,7 @@ class CrankMonitor:
         with open(self.registry_path, "w", encoding="utf-8") as f:
             json.dump(self.registry, f, ensure_ascii=False, indent=2)
 
-    def upsert_author(self, name: str, zhihu_token: str, series_dir: str) -> None:
+    def upsert_author(self, name: str, zhihu_token: str, series_dir: str, since: str | None = None) -> None:
         """Add a new author or update an existing one in the registry.
 
         Unlike ``bootstrap_registry``, this fills in *zhihu_token* immediately
@@ -144,17 +145,22 @@ class CrankMonitor:
             if a["name"] == name:
                 a["zhihu_token"] = zhihu_token
                 a["series_dir"] = series_dir
+                if since:
+                    a["since"] = since
+                elif "since" in a:
+                    del a["since"]
                 self.save_registry()
                 print(f"Updated author in registry: {name} (token: {zhihu_token})")
                 return
-        self.registry["authors"].append(
-            {
-                "name": name,
-                "zhihu_token": zhihu_token,
-                "series_dir": series_dir,
-                "enabled": True,
-            }
-        )
+        entry: dict[str, object] = {
+            "name": name,
+            "zhihu_token": zhihu_token,
+            "series_dir": series_dir,
+            "enabled": True,
+        }
+        if since:
+            entry["since"] = since
+        self.registry["authors"].append(entry)
         self.save_registry()
         print(f"Added author to registry: {name} (token: {zhihu_token})")
 
@@ -280,6 +286,17 @@ class CrankMonitor:
         except Exception as e:
             print(f"  [error] Failed to fetch articles for {author_entry['name']}: {e}", file=sys.stderr)
             return []
+
+        # Apply since filter if author has one
+        since_str = author_entry.get("since")
+        if since_str:
+            since_ts = parse_since(str(since_str))
+            if since_ts is not None:
+                before = len(all_articles)
+                all_articles = [a for a in all_articles if a.get("created", 0) >= since_ts]
+                skipped = before - len(all_articles)
+                if skipped:
+                    print(f"  Skipped {skipped} article(s) before {since_str} (registry since).")
 
         new_articles: list[dict[str, Any]] = []
         for art in all_articles:
@@ -592,12 +609,18 @@ def register_commands(main_group: click.Group) -> None:
         help=f"Output directory for the new series (default: {SERIAL_PAPERS_DIR})",
     )
     @_click.option("--sample-count", "-n", type=int, default=4, help="Articles to sample for LLM naming")
+    @_click.option(
+        "--since",
+        default=None,
+        help="Only download articles created on or after this date (YYYY-MM-DD or YYYY/MM/DD)",
+    )
     @_click.option("--dry-run", is_flag=True, help="Download but skip LLM naming")
     @_llm_decorator
     def crank_archive(
         user_token: str,
         output_dir: str,
         sample_count: int,
+        since: str | None,
         dry_run: bool,
         api_endpoint: str | None,
         api_key: str | None,
@@ -617,6 +640,7 @@ def register_commands(main_group: click.Group) -> None:
             user_token=user_token,
             output_dir=output_dir,
             sample_count=sample_count,
+            since=since,
             dry_run=dry_run,
             api_base=api_base,
             api_key=api_key,
@@ -626,7 +650,7 @@ def register_commands(main_group: click.Group) -> None:
             series_dir_name = os.path.basename(result)
             author_name = (series_dir_name.split("-")[0] if "-" in series_dir_name else series_dir_name).strip()
             mon = CrankMonitor()
-            mon.upsert_author(author_name, user_token, series_dir_name)
+            mon.upsert_author(author_name, user_token, series_dir_name, since=since)
             print(f"\nSeries created: {result}")
 
     @crank_group.command("bootstrap")
