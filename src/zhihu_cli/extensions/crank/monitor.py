@@ -171,11 +171,12 @@ class CrankMonitor:
         if not authors:
             print("No authors in registry. Run 'zhihu crank bootstrap' or 'zhihu crank archive' first.")
             return
-        print(f"{'Name':<20} {'Token':<24} {'Series':<30} {'Enabled':<8}")
-        print("-" * 82)
+        print("\t".join(["Name", "Token", "Series", "Since", "Enabled"]))
+        print("-" * 100)
         for a in authors:
             enabled = "yes" if a.get("enabled", True) else "no"
-            print(f"{a['name']:<20} {a.get('zhihu_token', ''):<24} {a.get('series_dir', ''):<30} {enabled:<8}")
+            since = a.get("since", "-")
+            print("\t".join([a["name"], a.get("zhihu_token", ""), a.get("series_dir", ""), since, enabled]))
 
     def remove_author(self, name: str) -> bool:
         """Remove an author from the registry by name.
