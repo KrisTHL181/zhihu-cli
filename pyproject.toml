@@ -14,6 +14,9 @@ dependencies = [
     "cssselect",
     "pyyaml",
     "rich",
+    "paho-mqtt",
+    "qrcode",
+    "Pillow",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +26,24 @@ classifier = [
     "scikit-learn>=1.0.0",
     "jieba",
     "networkx",
+    "numpy",
+]
+nlp = [
+    "jieba",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "plotly",
+    "scikit-learn",
+    "wordcloud",
+    "networkx",
+]
+creator = [
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scipy",
+    "seaborn",
 ]
 
 [project.scripts]
