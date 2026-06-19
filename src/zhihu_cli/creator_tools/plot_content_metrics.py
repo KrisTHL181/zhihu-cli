@@ -39,6 +39,21 @@ METRIC_COLORS = {
 }
 
 
+def _lighten_color(hex_color: str, factor: float = 0.22) -> str:
+    """Return a lighter variant of *hex_color* by blending it toward white.
+
+    ``factor=0`` returns the original colour; ``factor=1`` returns white.
+    Default 0.22 gives a subtle but distinguishable lighter shade —
+    ideal for cumulative (dashed) lines paired with the original (solid) daily line.
+    """
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def _is_aggr_format(data: object) -> bool:
     """Return True if the loaded JSON is in --aggr format (dict with 'totals' key)."""
     return isinstance(data, dict) and "totals" in data
@@ -172,6 +187,7 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     # --- left axis (log): PV, Show — daily MA + cumulative -----------
     for key in LOG_METRICS:
         color = METRIC_COLORS[key]
+        cum_color = _lighten_color(color)
         # daily MA (solid, thinner, with fill)
         ax1.plot(
             agg["date"],
@@ -181,16 +197,16 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
             label=f"{METRIC_LABELS[key]} (daily MA, Σ={totals[key]:,})",
         )
         ax1.fill_between(agg["date"], agg[f"{key}_ma7"], alpha=0.08, color=color)
-        # cumulative (dashed, thicker)
+        # cumulative (dashed, lighter shade — same hue, visually paired)
         ax1.plot(
             agg["date"],
             agg[cum_cols[key]],
             linewidth=2.5,
-            color=color,
+            color=cum_color,
             linestyle="--",
             label=f"Cum. {METRIC_LABELS[key]} (Σ={final_cum[key]:,})",
         )
-        ax1.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.04, color=color)
+        ax1.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.04, color=cum_color)
 
     ax1.set_yscale("log")
     ax1.set_ylabel("PV / Show (log scale)", fontsize=11, color="#1a237e")
@@ -199,6 +215,7 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     # --- right axis (linear): engagement — daily MA + cumulative -----
     for key in LINEAR_METRICS:
         color = METRIC_COLORS[key]
+        cum_color = _lighten_color(color)
         # daily MA (solid, thinner, with fill)
         ax1_twin.plot(
             agg["date"],
@@ -208,16 +225,16 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
             label=f"{METRIC_LABELS[key]} (daily MA, Σ={totals[key]:,})",
         )
         ax1_twin.fill_between(agg["date"], agg[f"{key}_ma7"], alpha=0.05, color=color)
-        # cumulative (dashed, thicker)
+        # cumulative (dashed, lighter shade — same hue, visually paired)
         ax1_twin.plot(
             agg["date"],
             agg[cum_cols[key]],
             linewidth=2.0,
-            color=color,
+            color=cum_color,
             linestyle="--",
             label=f"Cum. {METRIC_LABELS[key]} (Σ={final_cum[key]:,})",
         )
-        ax1_twin.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.03, color=color)
+        ax1_twin.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.03, color=cum_color)
 
     ax1_twin.set_ylabel("Engagement (linear scale)", fontsize=11, color="#333")
     ax1_twin.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
