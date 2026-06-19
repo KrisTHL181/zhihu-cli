@@ -1,6 +1,6 @@
 import json
 import queue
-import time
+import random
 from typing import Any
 
 from paho.mqtt import client as mqtt_client
@@ -20,16 +20,25 @@ def get_pm_mqtt_topic(url_token: str) -> str:
 
 
 class ZhihuMessageListener:
-    def __init__(self, url_token: str, topic: str, incognito: bool = False) -> None:
+    def __init__(self, url_token: str, topic: str, incognito: bool = False, sender_filter: str | None = None) -> None:
         self.url_token = url_token
         self.user_hash = get_pm_mqtt_topic(url_token)
         self.msg_queue = queue.Queue()
 
         self.topic = topic.replace("{USER_HASH}", self.user_hash)
 
+        # Resolve sender_filter: accept url_token or raw user hash
+        if sender_filter:
+            if len(sender_filter) == 32 and all(c in "0123456789abcdef" for c in sender_filter):
+                self.receiver_id = sender_filter
+            else:
+                self.receiver_id = get_pm_mqtt_topic(sender_filter)
+        else:
+            self.receiver_id = None
+
         self.broker = "mqtt-web.zhihu.com"
         self.port = 443
-        self.client_id = f"mqttjs_{int(time.time() * 1000):x}"[:15]
+        self.client_id = f"mqttjs_{random.randint(0, 0xFFFFFFFF):08x}"
         self.incognito = incognito
         self.client = self._connect()
 
@@ -45,7 +54,7 @@ class ZhihuMessageListener:
         client.on_connect = self.on_connect
         client.on_message = self.on_message
 
-        client.connect(self.broker, self.port)
+        client.connect(self.broker, self.port, keepalive=30)
         return client
 
     def on_connect(
@@ -64,4 +73,17 @@ class ZhihuMessageListener:
         self.msg_queue.put(data)
 
     def start(self) -> None:
-        self.client.loop_forever()
+        """Start the MQTT listener and print incoming messages to stdout.
+
+        If ``receiver_id`` is set, only messages to that receiver are printed.
+        """
+        self.client.loop_start()
+        try:
+            while True:
+                data = self.msg_queue.get()
+                if self.receiver_id and data.get("meta", {}).get("receiver_id") != self.receiver_id:
+                    continue
+                print(json.dumps(data, ensure_ascii=False, indent=2))
+        except KeyboardInterrupt:
+            self.client.loop_stop()
+            self.client.disconnect()

@@ -2561,20 +2561,46 @@ def chat_send(user_id: str, content: str) -> None:
 # ── listen ───────────────────────────────────────────────────────────────
 
 
-@main.command("listen")
-@click.argument("url_token")
-@click.option(
-    "--topic", "-t", default="notification", type=click.Choice(["notification", "imchat"]), help="MQTT topic type"
-)
-@click.option("--incognito/--no-incognito", default=False, help="Connect incognito")
-def listen(url_token: str, topic: str, incognito: bool) -> None:
-    """Start real-time MQTT listener for notifications or messages."""
-    from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, NOTIFICATION_TOPIC, ZhihuMessageListener
+@main.group("listen")
+def listen_group() -> None:
+    """Listen to real-time MQTT events."""
+    pass
 
-    topic_str = NOTIFICATION_TOPIC if topic == "notification" else IMCHAT_TOPIC
-    info(f"Connecting to Zhihu MQTT ({topic})...")
-    listener = ZhihuMessageListener(url_token, topic_str, incognito=incognito)
-    echo("Listening — press Ctrl+C to stop.")
+
+@listen_group.command("notifications")
+@click.option("--incognito/--no-incognito", default=False, help="Connect incognito")
+def listen_notifications(incognito: bool) -> None:
+    """Listen to Zhihu notification badge events via MQTT."""
+    from zhihu_cli.content.handlers.imchat import NOTIFICATION_TOPIC, ZhihuMessageListener
+
+    url_token = get_my_url_token()
+    if not url_token:
+        raise click.UsageError("Cannot auto-detect your url_token. Please authenticate first (zhihu auth login).")
+    info("Connecting to Zhihu MQTT (notifications)...")
+    listener = ZhihuMessageListener(url_token, NOTIFICATION_TOPIC, incognito=incognito)
+    echo("Listening for notifications — press Ctrl+C to stop.")
+    try:
+        listener.start()
+    except KeyboardInterrupt:
+        echo("\nStopped.")
+
+
+@listen_group.command("messages")
+@click.option("--sender", "-s", default=None, help="Filter messages from a specific user (url_token or user hash)")
+@click.option("--incognito/--no-incognito", default=False, help="Connect incognito")
+def listen_messages(sender: str | None, incognito: bool) -> None:
+    """Listen to Zhihu private messages (IM) via MQTT."""
+    from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener
+
+    url_token = get_my_url_token()
+    if not url_token:
+        raise click.UsageError("Cannot auto-detect your url_token. Please authenticate first (zhihu auth login).")
+    info("Connecting to Zhihu MQTT (messages)...")
+    listener = ZhihuMessageListener(url_token, IMCHAT_TOPIC, incognito=incognito, sender_filter=sender)
+    if sender:
+        echo(f"Listening for messages from {sender} — press Ctrl+C to stop.")
+    else:
+        echo("Listening for messages — press Ctrl+C to stop.")
     try:
         listener.start()
     except KeyboardInterrupt:
