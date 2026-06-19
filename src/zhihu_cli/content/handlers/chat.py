@@ -1,7 +1,11 @@
+import json
+import queue
+import threading
 from collections.abc import Generator, Iterable
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+import click
 from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import fmt_time
@@ -140,12 +144,18 @@ def _parse_messages_page(
     return page_msgs, last_id, (receiver_name, sender_name)
 
 
-def iter_chat_history(chat_id: str, limit: int = 0) -> Generator[dict[str, str], None, None]:
+def iter_chat_history(
+    chat_id: str, limit: int = 0, partner_info: list[str] | None = None
+) -> Generator[dict[str, str], None, None]:
     """Stream chat history pages via waterfall, yielding in chronological order.
 
     The Zhihu API returns messages newest-first.  When *limit* > 0 only the
     most recent *limit* messages are returned (applied before reversal so you
     always get the freshest conversation tail).
+
+    If *partner_info* (a mutable list) is provided, the partner's and
+    the current user's display names from the first API page are appended
+    — ``partner_info[0]`` is the partner, ``partner_info[1]`` is you.
     """
     initial_url = f"https://www.zhihu.com/api/v4/chat?sender_id={chat_id}"
 
@@ -153,8 +163,11 @@ def iter_chat_history(chat_id: str, limit: int = 0) -> Generator[dict[str, str],
     state: dict[str, str | None] = {"last_id": None, "current_url": initial_url}
 
     def parse_messages(data: dict[str, Any]) -> Iterable[dict[str, str]]:
-        page_msgs, last_id, _ = _parse_messages_page(data)
+        page_msgs, last_id, (receiver_name, sender_name) = _parse_messages_page(data)
         state["last_id"] = last_id
+        if partner_info is not None and not partner_info:
+            partner_info.append(sender_name)  # [0] — the partner
+            partner_info.append(receiver_name)  # [1] — you
         yield from page_msgs
 
     def extract_next(data: dict[str, Any]) -> str | None:
@@ -187,3 +200,159 @@ def send_text_message(their_id: str, content: str) -> dict[str, Any]:
     resp.raise_for_status()
 
     return data
+
+
+def _fmt_chat_line(sender: str, content: str, ts: int | float | None) -> str:
+    """Format a single chat line in chat-history style: ``[time]sender: content``.
+
+    Timestamps are dimmed, sender names are green-bold — matching the output
+    of ``chat history`` and ``listen messages`` commands.
+    """
+    t = fmt_time(ts)
+    time_part = click.style(f"[{t}]", dim=True)
+    sender_part = click.style(sender, fg="green", bold=True)
+    return f"  {time_part}{sender_part}: {content}"
+
+
+def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None = None) -> None:
+    """Start an interactive chat session with real-time MQTT listener.
+
+    Combines chat history display, a background MQTT listener for incoming
+    messages, and a persistent input prompt — all rendered in a single
+    terminal interface without jitter, using *prompt_toolkit*.
+
+    Args:
+        chat_id: The other user's ID (for history and sending messages).
+        my_url_token: Current logged-in user's url_token (for MQTT connection).
+        sender_filter: Optional MQTT filter (defaults to *chat_id*).
+    """
+    from prompt_toolkit import PromptSession, print_formatted_text
+    from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.patch_stdout import patch_stdout
+
+    from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener
+
+    def _pt_echo(text: str) -> None:
+        """Print a string through prompt_toolkit's ANSI renderer.
+
+        Under ``patch_stdout()``, regular ``click.echo`` can't render ANSI
+        escape codes produced by ``click.style`` — the raw escape sequences
+        appear as literal characters.  ``print_formatted_text(ANSI(...))``
+        tells prompt_toolkit to interpret those codes and render them
+        correctly (dim, colours, bold, etc.).
+        """
+        print_formatted_text(ANSI(text))
+
+    # ── 1. Load chat history & capture both names ───────────────────────
+    partner_info: list[str] = []
+    history_msgs = list(iter_chat_history(chat_id, partner_info=partner_info))
+    if len(partner_info) >= 2:
+        partner_name = partner_info[0]
+        my_name = partner_info[1]
+    else:
+        partner_name = chat_id
+        my_name = "Me"
+
+    # ── 2. Setup MQTT listener ───────────────────────────────────────────
+    mqtt_filter = sender_filter if sender_filter else chat_id
+    listener = ZhihuMessageListener(my_url_token, IMCHAT_TOPIC, sender_filter=mqtt_filter)
+
+    # Replace on_message to route incoming data to our display queue.
+    display_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+
+    def on_message(client: Any, userdata: Any, msg: Any) -> None:
+        raw = msg.payload.decode("utf-8")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        # Filter by sender_id (not receiver_id — that is the logged-in user).
+        if listener.receiver_id and data.get("meta", {}).get("sender_id") != listener.receiver_id:
+            return
+        display_queue.put(data)
+
+    listener.client.on_message = on_message
+
+    # ── 3. Format an MQTT message for display ────────────────────────────
+    def _fmt_mqtt(data: dict[str, Any]) -> str:
+        """Format an MQTT IM message dict to a display line (matches _format_message)."""
+        meta = data.get("meta", {})
+        content = data.get("content", {})
+        sender = partner_name
+        content_type = meta.get("content_type", "text")
+
+        raw_ts = meta.get("created_at", 0)
+        ts = int(raw_ts) / 1000 if raw_ts else None
+
+        if content_type == "image":
+            img = content.get("image") or {}
+            img_url = img.get("url", "") if isinstance(img, dict) else ""
+            text = f"![]({img_url})" if img_url else "[图片]"
+        else:
+            text = content.get("text", "")
+
+        return _fmt_chat_line(sender, text, ts)
+
+    # ── 4. Background display thread ─────────────────────────────────────
+    stop_event = threading.Event()
+
+    def display_loop() -> None:
+        """Continuously drain the display queue and print formatted messages."""
+        while not stop_event.is_set():
+            try:
+                data = display_queue.get(timeout=0.15)
+            except queue.Empty:
+                continue
+            _pt_echo(_fmt_mqtt(data))
+
+    # ── 5. Run the interactive session ───────────────────────────────────
+    listener.client.loop_start()
+    display_thread = threading.Thread(target=display_loop, daemon=True)
+
+    with patch_stdout():
+        # Print history (history messages have pre-formatted time strings).
+        for msg in history_msgs:
+            t = msg.get("time", "")
+            time_part = click.style(f"[{t}]", dim=True) if t else ""
+            sender_part = click.style(msg["sender"], fg="green", bold=True)
+            _pt_echo(f"  {time_part}{sender_part}: {msg['content']}")
+
+        if history_msgs:
+            _pt_echo(click.style("  ── history loaded ──", dim=True))
+
+        display_thread.start()
+
+        session = PromptSession(history=InMemoryHistory())
+        try:
+            while True:
+                try:
+                    text = session.prompt("\n> ")
+                except (EOFError, KeyboardInterrupt):
+                    break
+
+                text = text.strip()
+                if not text:
+                    continue
+                if text in ("/quit", "/exit", "/q"):
+                    break
+
+                try:
+                    import sys as _sys
+                    import time as _time
+
+                    send_text_message(chat_id, text)
+                    now = _time.time()
+                    # Prompt is "\n> " (2 lines).  \x1b[2A goes up both
+                    # the blank line and "> text", \x1b[J clears to end
+                    # of screen so both lines are erased before we print
+                    # the sent message in the same space.
+                    _sys.__stdout__.write("\x1b[2A\r\x1b[J")
+                    _sys.__stdout__.flush()
+                    _pt_echo(_fmt_chat_line(my_name, text, now))
+                except Exception as exc:
+                    _pt_echo(f"  {click.style('[error]', fg='red')} Failed to send: {exc}")
+        finally:
+            stop_event.set()
+            listener.client.loop_stop()
+            listener.client.disconnect()

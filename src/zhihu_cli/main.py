@@ -27,7 +27,7 @@ from zhihu_cli.content.handlers.agora import (
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.captcha import detect_captcha, get_captcha_info, handle_captcha, parse_redirect
-from zhihu_cli.content.handlers.chat import get_inbox, iter_chat_history, send_text_message
+from zhihu_cli.content.handlers.chat import get_inbox, interactive_chat, iter_chat_history, send_text_message
 from zhihu_cli.content.handlers.collection import (
     add_to_collection,
     collect,
@@ -2556,6 +2556,35 @@ def chat_send(user_id: str, content: str) -> None:
     """Send a text message to a user."""
     resp = send_text_message(user_id, content)
     echo(resp)
+
+
+@chat.command("interactive")
+@click.argument("user_id")
+@click.option("--sender", "-s", default=None, help="MQTT filter override (defaults to user_id)")
+def chat_interactive(user_id: str, sender: str | None) -> None:
+    """Start an interactive chat session with real-time messages.
+
+    Loads chat history, starts a background MQTT listener for incoming
+    messages, and provides a persistent input prompt.  Incoming messages
+    appear in real time above the prompt without jitter.
+
+    Type a message and press Enter to send.  Use /quit, /exit, /q, or
+    Ctrl+D / Ctrl+C to exit.
+    """
+    try:
+        import prompt_toolkit  # noqa: F401
+    except ImportError:
+        raise click.UsageError(
+            "prompt_toolkit is required for interactive chat.  Install with: pip install prompt-toolkit"
+        )
+
+    url_token = get_my_url_token()
+    if not url_token:
+        raise click.UsageError("Cannot auto-detect your url_token. Please authenticate first (zhihu auth login).")
+
+    mqtt_filter = sender if sender else user_id
+    info(f"Connecting to Zhihu MQTT (messages from {mqtt_filter})...")
+    interactive_chat(user_id, url_token, mqtt_filter)
 
 
 # ── listen ───────────────────────────────────────────────────────────────

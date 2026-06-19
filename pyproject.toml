@@ -15,6 +15,7 @@ dependencies = [
     "pyyaml",
     "rich",
     "paho-mqtt",
+    "prompt-toolkit>=3.0",
     "qrcode",
     "Pillow",
 ]

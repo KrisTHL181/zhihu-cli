@@ -9,7 +9,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 
 NOTIFICATION_TOPIC: str = "zhihu/notification/badge/web/v1/{USER_HASH}/"
 IMCHAT_TOPIC: str = "zhihu/message/v1/im/user/{USER_HASH}/"
@@ -36,6 +36,14 @@ class ZhihuMessageListener:
         if sender_filter:
             if len(sender_filter) == 32 and all(c in "0123456789abcdef" for c in sender_filter):
                 self.receiver_id = sender_filter
+                # Resolve hash → human-readable name via chat API.
+                try:
+                    resp = session.get(f"https://www.zhihu.com/api/v4/chat?sender_id={sender_filter}")
+                    data = resp.json()
+                    partner = data.get("data", {}).get("sender", {})
+                    self.sender_label = partner.get("name") or partner.get("url_token") or sender_filter
+                except Exception:
+                    pass  # keep the hash as fallback
             else:
                 self.receiver_id = get_pm_mqtt_topic(sender_filter)
         else:
@@ -88,7 +96,9 @@ class ZhihuMessageListener:
         try:
             while True:
                 data = self.msg_queue.get()
-                if self.receiver_id and data.get("meta", {}).get("receiver_id") != self.receiver_id:
+                # `meta.sender_id` carries the sender's hash; `meta.receiver_id`
+                # is the recipient (i.e. the logged-in user).  Filter on sender.
+                if self.receiver_id and data.get("meta", {}).get("sender_id") != self.receiver_id:
                     continue
                 if output_json:
                     print(json.dumps(data, ensure_ascii=False, indent=2))
