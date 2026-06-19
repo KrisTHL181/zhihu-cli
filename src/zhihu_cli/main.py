@@ -3306,6 +3306,14 @@ def creator_score() -> None:
     run_task()
 
 
+@tools_creator.command("plot")
+def creator_metrics_plot() -> None:
+    """Plot content metrics charts from content_metrics/*.json data."""
+    from zhihu_cli.creator_tools.plot_content_metrics import plot_content_metrics
+
+    plot_content_metrics()
+
+
 @tools_creator_income.command("income")
 @click.option("--start-date", default=None, help="Start date (YYYY-MM-DD), default: 30 days ago")
 @click.option("--end-date", default=None, help="End date (YYYY-MM-DD), default: today")
