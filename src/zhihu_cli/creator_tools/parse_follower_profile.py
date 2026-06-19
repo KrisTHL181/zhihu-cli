@@ -39,15 +39,17 @@ def run_task() -> None:
         print(f"Error fetching follower profile: {e}")
         return
 
+    show_flag = data.get("show", False)
     profile = data.get("profile", {})
     interaction = data.get("interaction", {})
 
     if profile.get("status") != 1:
-        print("Profile data not available (status != 1).")
+        print(f"Profile data not available (status={profile.get('status')}, show={show_flag}).")
         return
 
     output = {
         "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "show": show_flag,
         "profile": profile,
         "interaction": interaction,
     }
@@ -104,6 +106,21 @@ def run_task() -> None:
     print("\n=== 创作者关注 (Top 5) ===")
     for u in interaction.get("creator_follow", [])[:5]:
         print(f"  {u['name']:<20} 关注数: {u['follow_num']:,}")
+
+    # ── new fields (2026-06 update) ──
+    interact_content = interaction.get("content", [])
+    if interact_content:
+        print("\n=== 互动内容来源 (Top 5) ===")
+        for item in interact_content[:5]:
+            title = item.get("content_title", "")[:60]
+            print(f"  [{item.get('content_type', '')}] {title:<60} 关注: {item.get('follow_num', 0):,}")
+
+    reason = profile.get("reason", "")
+    if reason:
+        print(f"\n  画像说明: {reason}")
+
+    if not show_flag:
+        print("\n  ⚠ 画像数据暂不展示 (show=False)")
 
     print(f"\nFile saved: {DB_FILE}")
 

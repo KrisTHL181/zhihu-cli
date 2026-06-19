@@ -80,19 +80,28 @@ def _extract_daily_item(d: dict[str, Any] | None, content_type: str = "") -> dic
     if not d:
         return None
     advanced = d.get("advanced") or {}
+    upvote_key = "reaction" if content_type == "pin" else "upvote"
     return {
         "date": d.get("p_date"),
+        # ── base metrics ──
         "pv": d.get("pv", 0),
         "show": d.get("show", 0),
         "play": d.get("play", 0),
-        "upvote": d.get("reaction", d.get("upvote", 0)) if content_type == "pin" else d.get("upvote", 0),
+        "upvote": d.get(upvote_key, d.get("upvote", 0)),
         "like": d.get("like", 0),
         "collect": d.get("collect", 0),
         "comment": d.get("comment", 0),
         "share": d.get("share", 0),
+        "new_follow_uv": d.get("new_follow_uv", 0),
+        "follower_conversion_rate": d.get("follower_conversion_rate", 0),
+        "pageshow_uv": d.get("pageshow_uv", 0),
+        "positive_interact_rate": d.get("positive_interact_rate", 0),
+        "re_pin": d.get("re_pin", 0),
+        # ── advanced ──
         "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
         "positive_interact_percent": convert_percent(advanced.get("positive_interact_percent", "0.0%")),
         "follower_translate": advanced.get("follower_translate", 0),
+        "advanced_status": advanced.get("status"),
     }
 
 
@@ -155,7 +164,11 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                 data = resp.json()
 
                 if use_aggr:
-                    advanced = data.get("advanced") or {}
+                    # API returns per-day metrics inside yesterday/today,
+                    # plus top-level answer metadata, content_mark, and advanced.
+                    advanced_top = data.get("advanced") or {}
+                    content_mark = data.get("content_mark") or {}
+                    answer_meta = data.get("answer") or {}
                     clean_data = {
                         "type": token["type"],
                         "totals": {
@@ -169,22 +182,46 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                             "collect": data.get("collect", 0),
                             "comment": data.get("comment", 0),
                             "share": data.get("share", 0),
+                            "new_follow_uv": data.get("new_follow_uv", 0),
+                            "follower_conversion_rate": data.get("follower_conversion_rate", 0),
+                            "pageshow_uv": data.get("pageshow_uv", 0),
+                            "positive_interact_rate": data.get("positive_interact_rate", 0),
+                            "re_pin": data.get("re_pin", 0),
                         },
-                        "advanced": {
-                            "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
+                        "content_mark": {
+                            "is_normal": content_mark.get("is_normal"),
+                            "is_collapsed": content_mark.get("is_collapsed"),
+                            "is_suggest": content_mark.get("is_suggest"),
+                        },
+                        "advanced_totals": {
+                            "finish_read_percent": convert_percent(advanced_top.get("finish_read_percent", "0.0%")),
                             "positive_interact_percent": convert_percent(
-                                advanced.get("positive_interact_percent", "0.0%")
+                                advanced_top.get("positive_interact_percent", "0.0%")
                             ),
-                            "follower_translate": advanced.get("follower_translate", 0),
+                            "follower_translate": advanced_top.get("follower_translate", 0),
+                            "status": advanced_top.get("status"),
                         },
                         "yesterday": _extract_daily_item(data.get("yesterday"), token["type"]),
                         "today": _extract_daily_item(data.get("today"), token["type"]),
                     }
+                    # Include answer metadata if present
+                    if answer_meta:
+                        clean_data["answer_meta"] = {
+                            "id": answer_meta.get("id"),
+                            "title": answer_meta.get("title"),
+                            "question_id": answer_meta.get("question_id"),
+                            "url_token": answer_meta.get("url_token"),
+                            "excerpt": answer_meta.get("excerpt"),
+                            "answer_type": answer_meta.get("answer_type"),
+                            "created_time": answer_meta.get("created_time"),
+                            "updated_time": answer_meta.get("updated_time"),
+                        }
                     entries_label = "aggregated"
                 else:
                     clean_data = []
                     for d in data:
                         advanced = d.get("advanced") or {}
+                        upvote_key = "reaction" if token["type"] == "pin" else "upvote"
 
                         clean_data.append(
                             {
@@ -193,13 +230,22 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                                 "pv": d.get("pv", 0),
                                 "show": d.get("show", 0),
                                 "play": d.get("play", 0),
-                                "upvote": d.get("reaction", d.get("upvote", 0))
-                                if token["type"] == "pin"
-                                else d.get("upvote", 0),
+                                "upvote": d.get(upvote_key, d.get("upvote", 0)),
                                 "like": d.get("like", 0),
                                 "collect": d.get("collect", 0),
                                 "comment": d.get("comment", 0),
                                 "share": d.get("share", 0),
+                                "new_follow_uv": d.get("new_follow_uv", 0),
+                                "follower_conversion_rate": d.get("follower_conversion_rate", 0),
+                                "pageshow_uv": d.get("pageshow_uv", 0),
+                                "positive_interact_rate": d.get("positive_interact_rate", 0),
+                                "re_pin": d.get("re_pin", 0),
+                                "finish_read_percent": convert_percent(advanced.get("finish_read_percent", "0.0%")),
+                                "positive_interact_percent": convert_percent(
+                                    advanced.get("positive_interact_percent", "0.0%")
+                                ),
+                                "follower_translate": advanced.get("follower_translate", 0),
+                                "advanced_status": advanced.get("status"),
                             }
                         )
                     entries_label = f"{len(clean_data)} entries"

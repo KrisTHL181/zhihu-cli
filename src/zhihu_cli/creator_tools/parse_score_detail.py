@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "creator_score_detail.json")
@@ -86,10 +87,24 @@ def run_task() -> None:
         return f"{SCORE_URL}?start_at={start_ts}&end_at={end_ts}&limit={limit}&offset={state['offset']}"
 
     new_records: list[dict[str, Any]] = []
+    data_updated_at: str | None = None
     try:
         for item in stream_handler(initial_url, parse_score_detail, extract_next):
             new_records.append(item)
         print(f"  Fetched {len(new_records)} records")
+
+        # Also fetch first page to get updated_at
+        try:
+            first_resp = session.get(
+                f"{SCORE_URL}?start_at={start_ts}&end_at={end_ts}&limit=1&offset=0",
+                headers=headers,
+                timeout=15,
+            )
+            if first_resp.status_code == 200:
+                first_data = first_resp.json()
+                data_updated_at = first_data.get("data", {}).get("updated_at")
+        except Exception:
+            pass
     except Exception as e:
         print(f"error: {e}")
 
@@ -111,6 +126,7 @@ def run_task() -> None:
                 "total_records": len(sorted_details),
                 "unique_dates": len({d["p_date"] for d in sorted_details}),
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "data_updated_at": data_updated_at,
             },
             "details": sorted_details,
         }

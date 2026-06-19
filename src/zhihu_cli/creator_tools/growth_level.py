@@ -88,12 +88,27 @@ def show_growth_level(json_output: bool = False) -> None:
     total_upper = overall["scoreUpper"]
     ratio = overall["ratio"]
     yesterday = overall.get("yesterdayUpdatedScore", 0)
+    score_text = overall.get("scoreText", "创作分")
+    last_level = overall.get("lastLevel")
+    last_ratio = overall.get("lastRatio")
+    creator_score_ab = overall.get("creatorScoreAb")
+    updated_ts = overall.get("updated")
 
     console.print()
     summary = Table(title="总览", highlight=True)
     summary.add_column("指标", style="cyan")
     summary.add_column("数值", justify="right", style="green")
-    summary.add_row("创作等级", f"Lv.{level}")
+    summary.add_row("分数类型", score_text)
+    summary.add_row("创作等级", f"Lv.{level}" + (f" (上期 Lv.{last_level})" if last_level is not None else ""))
     summary.add_row("创作总分", f"{_fmt_num(total_score)} / {_fmt_num(total_upper)} ({ratio}%)")
+    if last_ratio is not None:
+        summary.add_row("上期占比", f"{last_ratio}%")
     summary.add_row("昨日增长", f"+{_fmt_num(yesterday)}")
+    if creator_score_ab is not None:
+        summary.add_row("AB 分组", "A" if creator_score_ab == 0 else "B")
+    if updated_ts:
+        from datetime import datetime
+
+        updated_str = datetime.fromtimestamp(updated_ts / 1000).strftime("%Y-%m-%d %H:%M")
+        summary.add_row("数据更新", updated_str)
     console.print(summary)

@@ -72,7 +72,9 @@ def run_task() -> None:
                     if not row or "日期" in row[0]:
                         continue
 
-                    salt_grains = int(row[1]) if len(row) > 1 else 0
+                    # Handle empty income (e.g., today's not-yet-settled data)
+                    raw_salt = row[1].strip() if len(row) > 1 and row[1] else "0"
+                    salt_grains = int(raw_salt) if raw_salt else 0
                     yuan = round(salt_grains / 100.0, 2)
 
                     new_income_data.append({"date": row[0], "income_salt": salt_grains, "income_yuan": yuan})
