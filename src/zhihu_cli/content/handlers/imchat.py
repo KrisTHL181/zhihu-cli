@@ -3,9 +3,11 @@ import queue
 import random
 from typing import Any
 
+import click
 from paho.mqtt import client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
 
+from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 
@@ -27,7 +29,10 @@ class ZhihuMessageListener:
 
         self.topic = topic.replace("{USER_HASH}", self.user_hash)
 
-        # Resolve sender_filter: accept url_token or raw user hash
+        # Resolve sender_filter: accept url_token or raw user hash.
+        # When a filter is set, only messages from that sender are printed,
+        # and the sender's display name is shown instead of the raw hash.
+        self.sender_label: str | None = sender_filter
         if sender_filter:
             if len(sender_filter) == 32 and all(c in "0123456789abcdef" for c in sender_filter):
                 self.receiver_id = sender_filter
@@ -72,10 +77,12 @@ class ZhihuMessageListener:
         data = json.loads(raw_payload)
         self.msg_queue.put(data)
 
-    def start(self) -> None:
+    def start(self, output_json: bool = False) -> None:
         """Start the MQTT listener and print incoming messages to stdout.
 
         If ``receiver_id`` is set, only messages to that receiver are printed.
+        When *output_json* is False (the default), messages are formatted in
+        chat-history style (``[time]sender: content``).
         """
         self.client.loop_start()
         try:
@@ -83,7 +90,43 @@ class ZhihuMessageListener:
                 data = self.msg_queue.get()
                 if self.receiver_id and data.get("meta", {}).get("receiver_id") != self.receiver_id:
                     continue
-                print(json.dumps(data, ensure_ascii=False, indent=2))
+                if output_json:
+                    print(json.dumps(data, ensure_ascii=False, indent=2))
+                else:
+                    click.echo(self._format_message(data))
         except KeyboardInterrupt:
             self.client.loop_stop()
             self.client.disconnect()
+
+    def _format_message(self, data: dict) -> str:
+        """Format a single MQTT IM message in chat-history style.
+
+        Returns a string like ``  [2025-01-01 12:00:00]sender_hash: message text``
+        where the timestamp is dimmed and the sender is green-bold — matching
+        the ``chat history`` command's output format.
+
+        When a sender filter is active, the original filter value (url_token or
+        hash) is shown as the sender name instead of the raw ``meta.sender_id``.
+        """
+        meta = data.get("meta", {})
+        content = data.get("content", {})
+
+        # Use the original sender label when filtering, otherwise the raw hash.
+        sender = self.sender_label if self.sender_label else meta.get("sender_id", "unknown")
+        content_type = meta.get("content_type", "text")
+
+        # MQTT timestamps are in milliseconds; fmt_time expects seconds.
+        raw_ts = meta.get("created_at", 0)
+        ts = int(raw_ts) / 1000 if raw_ts else None
+        t = fmt_time(ts)
+
+        if content_type == "image":
+            img = content.get("image") or {}
+            img_url = img.get("url", "") if isinstance(img, dict) else ""
+            text = f"![]({img_url})" if img_url else "[图片]"
+        else:
+            text = content.get("text", "")
+
+        time_part = click.style(f"[{t}]", dim=True)
+        sender_part = click.style(sender, fg="green", bold=True)
+        return f"  {time_part}{sender_part}: {text}"

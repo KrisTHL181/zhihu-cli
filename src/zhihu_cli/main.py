@@ -2588,7 +2588,8 @@ def listen_notifications(incognito: bool) -> None:
 @listen_group.command("messages")
 @click.option("--sender", "-s", default=None, help="Filter messages from a specific user (url_token or user hash)")
 @click.option("--incognito/--no-incognito", default=False, help="Connect incognito")
-def listen_messages(sender: str | None, incognito: bool) -> None:
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output raw JSON")
+def listen_messages(sender: str | None, incognito: bool, output_json: bool) -> None:
     """Listen to Zhihu private messages (IM) via MQTT."""
     from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener
 
@@ -2602,7 +2603,7 @@ def listen_messages(sender: str | None, incognito: bool) -> None:
     else:
         echo("Listening for messages — press Ctrl+C to stop.")
     try:
-        listener.start()
+        listener.start(output_json=output_json)
     except KeyboardInterrupt:
         echo("\nStopped.")
 
