@@ -3212,15 +3212,20 @@ def tools_creator() -> None:
     """Zhihu creator analytics."""
 
 
-@tools_creator.command("fetch")
-def creator_fetch() -> None:
+@tools_creator.group("income")
+def tools_creator_income() -> None:
+    """Income analytics (收益分析)."""
+
+
+@tools_creator_income.command("fetch")
+def creator_income_fetch() -> None:
     """Fetch incremental income data from Zhihu creator API."""
     from zhihu_cli.creator_tools.parse_zhihu_incomes import run_task
 
     run_task()
 
 
-@tools_creator.command("monthly")
+@tools_creator_income.command("monthly")
 @click.option(
     "--file",
     "-f",
@@ -3239,7 +3244,7 @@ def creator_monthly(file_path: str, output_json: bool) -> None:
     analyze_monthly_income(file_path)
 
 
-@tools_creator.command("plot")
+@tools_creator_income.command("plot")
 def creator_plot() -> None:
     """Generate basic income plot (bar chart + EMA + trend)."""
     from zhihu_cli.creator_tools.plot_zhihu_incomes import plot_analysis
@@ -3248,7 +3253,7 @@ def creator_plot() -> None:
     success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'income_analysis.png'))}")
 
 
-@tools_creator.command("advanced")
+@tools_creator_income.command("advanced")
 def creator_advanced() -> None:
     """Generate advanced analysis plot (Bollinger + MACD)."""
     from zhihu_cli.creator_tools.plot_zhihu_incomes_advanced import plot_advanced_analysis
@@ -3257,7 +3262,7 @@ def creator_advanced() -> None:
     success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'income_advanced_analysis.png'))}")
 
 
-@tools_creator.command("derivative")
+@tools_creator_income.command("derivative")
 def creator_derivative() -> None:
     """Generate derivative analysis plot (velocity, acceleration, jerk)."""
     from zhihu_cli.creator_tools.derivative_analysis import plot_derivative_analysis
@@ -3266,7 +3271,7 @@ def creator_derivative() -> None:
     success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'derivative_analysis.png'))}")
 
 
-@tools_creator.command("weekday")
+@tools_creator_income.command("weekday")
 def creator_weekday() -> None:
     """Generate weekday income distribution plot."""
     from zhihu_cli.creator_tools.weekday_income_analysis import plot_weekday_analysis
@@ -3301,7 +3306,7 @@ def creator_score() -> None:
     run_task()
 
 
-@tools_creator.command("income")
+@tools_creator_income.command("income")
 @click.option("--start-date", default=None, help="Start date (YYYY-MM-DD), default: 30 days ago")
 @click.option("--end-date", default=None, help="End date (YYYY-MM-DD), default: today")
 @click.option("--order-field", default="content_publish_at", help="Sort field (default: content_publish_at)")
