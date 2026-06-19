@@ -3062,7 +3062,86 @@ for _ext_mod in discover_extensions():
 
 @main.group()
 def tools() -> None:
-    """Analysis tools — creator analytics and NLP text analysis."""
+    """Analysis tools — creator analytics, NLP text analysis, and periodic looping."""
+
+
+def _parse_period(period: str) -> int:
+    """Parse a period string like '60', '5m', '1h', '2d' into seconds."""
+    import re
+
+    period = period.strip().lower()
+    m = re.match(r"^(\d+)([smhd]?)$", period)
+    if not m:
+        raise click.BadParameter(
+            f"Invalid period {period!r}. Use an integer (seconds) or suffix s/m/h/d, e.g. '60', '5m', '1h', '2d'."
+        )
+    value = int(m.group(1))
+    unit = m.group(2) or "s"
+    multipliers: dict[str, int] = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return value * multipliers[unit]
+
+
+@tools.command("loop")
+@click.argument("command", type=str)
+@click.argument("period", type=str)
+@click.argument("target_jsonl_file", type=click.Path())
+@click.option("--once", is_flag=True, default=False, help="Run once and exit (no looping).")
+def tools_loop(command: str, period: str, target_jsonl_file: str, once: bool) -> None:
+    """Run a zhihu subcommand periodically, appending compact JSON to a JSONL file.
+
+    COMMAND   – zhihu subcommand to run (e.g. "browse hot", "stats <url>").
+
+    PERIOD    – interval between runs: an integer (seconds) or with suffix
+                s / m / h / d, e.g. "60", "5m", "1h", "2d".  Max unit is day.
+
+    TARGET_JSONL_FILE – path to the output JSONL file (one compact JSON
+                object per line).
+    """
+    import subprocess
+    import time
+
+    period_seconds = _parse_period(period)
+    cmd_parts = ["zhihu"] + command.split() + ["--json"]
+
+    heading(f"Loop: zhihu {command} --json  →  {target_jsonl_file}")
+    info(f"Period: {period} ({period_seconds}s)")
+
+    while True:
+        try:
+            result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            error("Command timed out (300 s)")
+        except FileNotFoundError:
+            error("'zhihu' not found on PATH — is the CLI installed?")
+            raise SystemExit(1)
+        else:
+            if result.returncode != 0:
+                error(f"Command exited with code {result.returncode}")
+                if result.stderr:
+                    error(result.stderr.strip())
+            elif not result.stdout.strip():
+                warning("Command produced no output")
+            else:
+                try:
+                    data = json.loads(result.stdout)
+                except json.JSONDecodeError:
+                    error("Command output is not valid JSON — skipping")
+                else:
+                    ts = time.time()
+                    if isinstance(data, dict):
+                        data["time"] = ts
+                    else:
+                        data = {"time": ts, "data": data}
+                    compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                    Path(target_jsonl_file).parent.mkdir(parents=True, exist_ok=True)
+                    with open(target_jsonl_file, "a", encoding="utf-8") as fh:
+                        fh.write(compact + "\n")
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+                    success(f"[{ts_str}] Appended to {target_jsonl_file}")
+
+        if once:
+            break
+        time.sleep(period_seconds)
 
 
 @tools.group("creator")
