@@ -3147,7 +3147,8 @@ def _parse_period(period: str) -> int:
 @click.argument("period", type=str)
 @click.argument("target_jsonl_file", type=click.Path())
 @click.option("--once", is_flag=True, default=False, help="Run once and exit (no looping).")
-def tools_loop(command: str, period: str, target_jsonl_file: str, once: bool) -> None:
+@click.option("--override", is_flag=True, default=False, help="Override existing file instead of appending.")
+def tools_loop(command: str, period: str, target_jsonl_file: str, once: bool, override: bool) -> None:
     """Run a zhihu subcommand periodically, appending compact JSON to a JSONL file.
 
     COMMAND   – zhihu subcommand to run (e.g. "browse hot", "stats <url>").
@@ -3195,10 +3196,11 @@ def tools_loop(command: str, period: str, target_jsonl_file: str, once: bool) ->
                         data = {"time": ts, "data": data}
                     compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
                     Path(target_jsonl_file).parent.mkdir(parents=True, exist_ok=True)
-                    with open(target_jsonl_file, "a", encoding="utf-8") as fh:
+                    with open(target_jsonl_file, "a" if not override else "w", encoding="utf-8") as fh:
                         fh.write(compact + "\n")
                     ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
-                    success(f"[{ts_str}] Appended to {target_jsonl_file}")
+                    action = "Appended" if not override else "Written"
+                    success(f"[{ts_str}] {action} to {target_jsonl_file}")
 
         if once:
             break
