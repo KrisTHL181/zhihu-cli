@@ -2180,7 +2180,7 @@ def thank_remove(answer_id: str) -> None:
 
 @interact.group("follow")
 def interact_follow() -> None:
-    """Follow or unfollow users and questions."""
+    """Follow users and questions."""
 
 
 @interact_follow.command("user")
@@ -2197,14 +2197,19 @@ def follow_question_cmd(question_id: str) -> None:
     echo(follow_question(question_id))
 
 
-@interact_follow.command("unfollow-user")
+@interact.group("unfollow")
+def interact_unfollow() -> None:
+    """Unfollow users and questions."""
+
+
+@interact_unfollow.command("user")
 @click.argument("user_id")
 def unfollow_user(user_id: str) -> None:
     """Unfollow a user."""
     echo(unfollow(user_id))
 
 
-@interact_follow.command("unfollow-question")
+@interact_unfollow.command("question")
 @click.argument("question_id")
 def unfollow_question_cmd(question_id: str) -> None:
     """Unfollow a question."""
