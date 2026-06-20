@@ -103,7 +103,7 @@ def fetch_member_answers(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's answers list."""
-    url = f"{MEMBER_API.format(token=url_token)}/answers?offset=0&limit={limit}&sort_by=created"
+    url = f"{MEMBER_API.format(token=url_token)}/answers?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}&sort_by=created"
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_answer_list):
         items.append(item)
@@ -140,7 +140,7 @@ def fetch_member_articles(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's articles list."""
-    url = f"{MEMBER_API.format(token=url_token)}/articles?offset=0&limit={limit}&sort_by=created"
+    url = f"{MEMBER_API.format(token=url_token)}/articles?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}&sort_by=created"
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_article_list):
         items.append(item)
@@ -183,7 +183,7 @@ def fetch_member_pins(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's pins (想法) list."""
-    url = f"{MEMBER_API.format(token=url_token)}/pins?offset=0&limit={limit}&sort_by=created"
+    url = f"{MEMBER_API.format(token=url_token)}/pins?include=data%5B%2A%5D.excerpt%2Ccontent&offset=0&limit={limit}&sort_by=created"
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_pin_list):
         items.append(item)
@@ -223,7 +223,7 @@ def fetch_member_questions(
 
     Returns an empty list if the endpoint is unavailable.
     """
-    url = f"{MEMBER_API.format(token=url_token)}/questions?offset=0&limit={limit}"
+    url = f"{MEMBER_API.format(token=url_token)}/questions?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}"
     items: list[dict[str, Any]] = []
     try:
         for item in stream_handler(url, _parse_question_list):
