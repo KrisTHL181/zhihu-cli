@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import numpy as np
 import pandas as pd
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -179,10 +180,32 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
 
     # ================================================================
     # Figure 1: Combined — Daily (7-day MA) + Cumulative (dual y-axis)
-    # Style: mirrors follower_detail plot — daily on left, cumulative on right
+    #   + stacked raw daily area at the base (mimics follower_detail
+    #   Figure 1: daily post_follow / cancel_follow bars sit at the
+    #   bottom with MA + cumulative overlaid; here, 7 stacked metrics
+    #   replace the bars since there are too many for side-by-side).
     # ================================================================
     fig1, ax1 = plt.subplots(figsize=(18, 10))
     ax1_twin = ax1.twinx()
+
+    # ── stacked raw daily data (drawn first → sits behind lines) ──────
+    # Raw per-day counts are natural numbers → meaningful to stack.
+    # Drawn on the right (linear) axis so the silhouette reflects total
+    # daily volume without distorting the log-scale PV/Show axis.
+    y_bottom = np.zeros(len(agg))
+    for key in METRIC_KEYS:
+        y_top = y_bottom + agg[key].values
+        ax1_twin.fill_between(
+            agg["date"],
+            y_bottom,
+            y_top,
+            color=METRIC_COLORS[key],
+            alpha=0.45,
+            linewidth=0.3,
+            edgecolor="face",
+            label=f"{METRIC_LABELS[key]} (raw, Σ={totals[key]:,})",
+        )
+        y_bottom = y_top
 
     # --- left axis (log): PV, Show — daily MA + cumulative -----------
     for key in LOG_METRICS:
