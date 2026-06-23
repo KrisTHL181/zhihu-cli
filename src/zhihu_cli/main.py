@@ -3432,9 +3432,8 @@ def nlp_count(folder: str, no_code: bool, output_json: bool) -> None:
     from zhihu_cli.nlp_tools.count_answer_words import count_words
 
     word_counts = []
-    for filename in os.listdir(folder):
-        if filename.endswith(".md"):
-            word_counts.append(count_words(os.path.join(folder, filename), no_code=no_code))
+    for filepath in Path(folder).rglob("*.md"):
+        word_counts.append(count_words(str(filepath), no_code=no_code))
 
     if not word_counts:
         if output_json:

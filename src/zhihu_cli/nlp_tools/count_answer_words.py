@@ -1,5 +1,4 @@
 import argparse
-import os
 import re
 from pathlib import Path
 
@@ -38,9 +37,8 @@ def main() -> None:
 
     word_counts = []
 
-    for filename in os.listdir(args.folder):
-        if filename.endswith(".md"):
-            word_counts.append(count_words(os.path.join(args.folder, filename), no_code=args.no_code))
+    for filepath in Path(args.folder).rglob("*.md"):
+        word_counts.append(count_words(str(filepath), no_code=args.no_code))
 
     if not word_counts:
         print("No markdown files found.")
@@ -57,10 +55,9 @@ def main() -> None:
     print(f"Max: {max(word_counts)}")
 
     file_counts = {}
-    for filename in os.listdir(args.folder):
-        if filename.endswith(".md"):
-            count = count_words(os.path.join(args.folder, filename), no_code=args.no_code)
-            file_counts[filename] = count
+    for filepath in Path(args.folder).rglob("*.md"):
+        count = count_words(str(filepath), no_code=args.no_code)
+        file_counts[filepath.name] = count
 
     sorted_files = sorted(file_counts.items(), key=lambda item: item[1], reverse=True)
 
