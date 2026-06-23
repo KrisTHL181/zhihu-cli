@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
 
 DATA_DIR = Path.home() / ".zhihu-cli"
 METRICS_DIR = DATA_DIR / "exports" / "content_metrics"
@@ -156,9 +157,10 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     except Exception:
         pass
 
-    # ── compute 7-day moving averages for smoother lines ────────────
+    # ── compute smoothed trend lines (MA or EMA per config) ─────────
+    trend_label = smoothing_label(7)
     for col in METRIC_KEYS:
-        agg[f"{col}_ma7"] = agg[col].rolling(7, center=True).mean()
+        agg[f"{col}_trend"] = compute_smoothed(agg[col], window=7)
 
     # ── compute cumulative series for each metric ───────────────────
     cum_cols = {}
@@ -207,19 +209,19 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
         )
         y_bottom = y_top
 
-    # --- left axis (log): PV, Show — daily MA + cumulative -----------
+    # --- left axis (log): PV, Show — daily trend + cumulative -----------
     for key in LOG_METRICS:
         color = METRIC_COLORS[key]
         cum_color = _lighten_color(color)
         # daily MA (solid, thinner, with fill)
         ax1.plot(
             agg["date"],
-            agg[f"{key}_ma7"],
+            agg[f"{key}_trend"],
             linewidth=1.8,
             color=color,
-            label=f"{METRIC_LABELS[key]} (daily MA, Σ={totals[key]:,})",
+            label=f"{METRIC_LABELS[key]} (daily {trend_label}, Σ={totals[key]:,})",
         )
-        ax1.fill_between(agg["date"], agg[f"{key}_ma7"], alpha=0.08, color=color)
+        ax1.fill_between(agg["date"], agg[f"{key}_trend"], alpha=0.08, color=color)
         # cumulative (dashed, lighter shade — same hue, visually paired)
         ax1.plot(
             agg["date"],
@@ -235,19 +237,19 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     ax1.set_ylabel("PV / Show (log scale)", fontsize=11, color="#1a237e")
     ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
 
-    # --- right axis (linear): engagement — daily MA + cumulative -----
+    # --- right axis (linear): engagement — daily trend + cumulative -----
     for key in LINEAR_METRICS:
         color = METRIC_COLORS[key]
         cum_color = _lighten_color(color)
         # daily MA (solid, thinner, with fill)
         ax1_twin.plot(
             agg["date"],
-            agg[f"{key}_ma7"],
+            agg[f"{key}_trend"],
             linewidth=1.5,
             color=color,
-            label=f"{METRIC_LABELS[key]} (daily MA, Σ={totals[key]:,})",
+            label=f"{METRIC_LABELS[key]} (daily {trend_label}, Σ={totals[key]:,})",
         )
-        ax1_twin.fill_between(agg["date"], agg[f"{key}_ma7"], alpha=0.05, color=color)
+        ax1_twin.fill_between(agg["date"], agg[f"{key}_trend"], alpha=0.05, color=color)
         # cumulative (dashed, lighter shade — same hue, visually paired)
         ax1_twin.plot(
             agg["date"],
@@ -276,7 +278,7 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
 
     # --- title (follower-plot style) ----------------------------------
     ax1.set_title(
-        f"Content Metrics — Daily (7-day MA) & Cumulative\n"
+        f"Content Metrics — Daily ({trend_label}) & Cumulative\n"
         f"Period: {date_range}  |  Files: {file_count or content_count}  |  "
         f"Records: {total_records:,}",
         fontsize=13,
@@ -298,18 +300,18 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     agg["show_val"] = agg["show"]
     # engagement rate = engagement / Show as percentage
     agg["eng_rate"] = agg["eng_total"] / agg["show_val"].replace(0, pd.NA) * 100
-    agg["eng_rate_ma7"] = agg["eng_rate"].rolling(7, center=True).mean()
+    agg["eng_rate_trend"] = compute_smoothed(agg["eng_rate"], window=7)
 
     fig2, ax2 = plt.subplots(figsize=(16, 6))
 
     ax2.plot(
         agg["date"],
-        agg["eng_rate_ma7"],
+        agg["eng_rate_trend"],
         color="#ff9800",
         linewidth=2,
-        label="Engagement Rate (7-day MA)",
+        label=f"Engagement Rate ({trend_label})",
     )
-    ax2.fill_between(agg["date"], agg["eng_rate_ma7"], alpha=0.08, color="#ff9800")
+    ax2.fill_between(agg["date"], agg["eng_rate_trend"], alpha=0.08, color="#ff9800")
 
     avg_rate = agg["eng_rate"].mean()
     ax2.axhline(

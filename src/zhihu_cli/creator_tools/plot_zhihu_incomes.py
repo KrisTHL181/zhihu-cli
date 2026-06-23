@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
+
 DATA_DIR = Path.home() / ".zhihu-cli"
 INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
 OUTPUT_FILE = DATA_DIR / "plots" / "income_analysis.png"
@@ -21,8 +23,9 @@ def plot_analysis() -> None:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
 
-        # Calculate EMA (7-day window)
-        df["ema7"] = df["income_yuan"].ewm(span=7, adjust=False).mean()
+        # Calculate smoothed trend (7-day window, MA or EMA per config)
+        df["trend7"] = compute_smoothed(df["income_yuan"], window=7)
+        trend_label = smoothing_label(7)
 
         # Compute linear fit
         x_idx = np.arange(len(df))
@@ -35,8 +38,8 @@ def plot_analysis() -> None:
         # 1. Raw income (faded, as background)
         plt.bar(df["date"], df["income_yuan"], color="#0084ff", alpha=0.2, label="Daily Actual")
 
-        # 2. EMA(7) curve (reflects recent weekly momentum)
-        plt.plot(df["date"], df["ema7"], color="#ff9800", linewidth=2.5, label="EMA (7-Day Momentum)")
+        # 2. Smoothed trend curve
+        plt.plot(df["date"], df["trend7"], color="#ff9800", linewidth=2.5, label=trend_label)
 
         # 3. Linear trend line (long-term performance)
         plt.plot(
@@ -49,16 +52,19 @@ def plot_analysis() -> None:
         )
 
         # Chart decoration
-        plt.title(f"Zhihu Income Advanced Analysis (Total: {data['summary']['total_income_yuan']} CNY)", fontsize=16)
+        plt.title(
+            f"Zhihu Income Analysis (Total: {data['summary']['total_income_yuan']} CNY)  [{trend_label}]",
+            fontsize=16,
+        )
         plt.ylabel("Income (CNY / Yuan)", fontsize=12)
         plt.legend(loc="upper left")
         plt.grid(True, linestyle=":", alpha=0.4)
 
-        # Annotate latest EMA status
-        latest_ema = df["ema7"].iloc[-1]
+        # Annotate latest trend value
+        latest_trend = df["trend7"].iloc[-1]
         plt.annotate(
-            f"Current Momentum: {latest_ema:.2f} CNY",
-            xy=(df["date"].iloc[-1], latest_ema),
+            f"{trend_label}: {latest_trend:.2f} CNY",
+            xy=(df["date"].iloc[-1], latest_trend),
             xytext=(20, 20),
             textcoords="offset points",
             arrowprops=dict(arrowstyle="->", color="black"),

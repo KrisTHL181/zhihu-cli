@@ -224,6 +224,19 @@ class CacheManager:
         config["default_start_date"] = date_str
         self._atomic_write(self.config_file, json.dumps(config, indent=2))
 
+    def get_smoothing(self) -> str:
+        """Return the configured smoothing method — ``"ema"`` (default) or ``"ma"``."""
+        config = self.get_config()
+        return config.get("smoothing", "ema")
+
+    def set_smoothing(self, method: str) -> None:
+        """Set the smoothing method to ``"ma"`` or ``"ema"``."""
+        if method not in ("ma", "ema"):
+            raise ValueError(f"Invalid smoothing method: {method!r}. Use 'ma' or 'ema'.")
+        config = self.get_config()
+        config["smoothing"] = method
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
+
     # ── question cache ──────────────────────────────────────────────────
 
     @make_thread_safe

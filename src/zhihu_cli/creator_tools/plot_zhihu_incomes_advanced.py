@@ -4,6 +4,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
+
 DATA_DIR = Path.home() / ".zhihu-cli"
 INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
 OUTPUT_FILE = DATA_DIR / "plots" / "income_advanced_analysis.png"
@@ -21,29 +23,31 @@ def plot_advanced_analysis() -> None:
         df = df.sort_values("date")
 
         # --- Technical indicators ---
-        # EMA cluster
-        df["ema7"] = df["income_yuan"].ewm(span=7, adjust=False).mean()
-        df["ema21"] = df["income_yuan"].ewm(span=21, adjust=False).mean()
-        df["ema28"] = df["income_yuan"].ewm(span=28, adjust=False).mean()
+        # Trend lines — configurable MA or EMA
+        df["trend7"] = compute_smoothed(df["income_yuan"], window=7)
+        df["trend21"] = compute_smoothed(df["income_yuan"], window=21)
+        df["trend28"] = compute_smoothed(df["income_yuan"], window=28)
 
-        # Bollinger Bands (based on 20-day MA)
+        # Bollinger Bands (canonical: 20-day SMA)
         df["ma20"] = df["income_yuan"].rolling(window=20).mean()
         df["std20"] = df["income_yuan"].rolling(window=20).std()
         df["upper"] = df["ma20"] + (df["std20"] * 2)
         df["lower"] = df["ma20"] - (df["std20"] * 2)
 
-        # MACD calculation (standard params: 12, 26, 9)
+        # MACD calculation (canonical: EMA 12, 26, 9)
         exp1 = df["income_yuan"].ewm(span=12, adjust=False).mean()
         exp2 = df["income_yuan"].ewm(span=26, adjust=False).mean()
         df["macd"] = exp1 - exp2
         df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
         df["hist"] = df["macd"] - df["signal"]
 
+        trend_method = smoothing_label()  # e.g. "MA" or "EMA"
+
         # --- Start plotting ---
         # Create two subplots, height ratio 3:1
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 12), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
 
-        # [Main chart: EMA + Bollinger Bands]
+        # [Main chart: Trend lines + Bollinger Bands]
         # Raw data
         ax1.bar(df["date"], df["income_yuan"], color="#0084ff", alpha=0.15, label="Daily Actual")
 
@@ -52,13 +56,15 @@ def plot_advanced_analysis() -> None:
         ax1.plot(df["date"], df["upper"], color="gray", linestyle="--", alpha=0.3, linewidth=0.8)
         ax1.plot(df["date"], df["lower"], color="gray", linestyle="--", alpha=0.3, linewidth=0.8)
 
-        # Draw EMA cluster
-        ax1.plot(df["date"], df["ema7"], color="#ff9800", linewidth=2, label="EMA 7 (Short)")
-        ax1.plot(df["date"], df["ema21"], color="#4caf50", linewidth=1.5, label="EMA 21 (Medium)")
-        ax1.plot(df["date"], df["ema28"], color="#9c27b0", linewidth=1.5, label="EMA 28 (Long)")
+        # Draw trend lines
+        ax1.plot(df["date"], df["trend7"], color="#ff9800", linewidth=2, label=f"{trend_method} 7 (Short)")
+        ax1.plot(df["date"], df["trend21"], color="#4caf50", linewidth=1.5, label=f"{trend_method} 21 (Medium)")
+        ax1.plot(df["date"], df["trend28"], color="#9c27b0", linewidth=1.5, label=f"{trend_method} 28 (Long)")
 
         ax1.set_title(
-            f"Zhihu Income Advanced Analysis (Total: {data['summary']['total_income_yuan']} CNY)", fontsize=18
+            f"Zhihu Income Advanced Analysis (Total: {data['summary']['total_income_yuan']} CNY)  "
+            f"[Trend: {trend_method}]",
+            fontsize=18,
         )
         ax1.set_ylabel("Income (CNY)", fontsize=12)
         ax1.legend(loc="upper left", ncol=2)

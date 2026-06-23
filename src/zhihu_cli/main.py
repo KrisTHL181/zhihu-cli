@@ -524,6 +524,49 @@ def config_sd_clear() -> None:
     success("Default start date reset to: 2026-01-16")
 
 
+# ── config smoothing ───────────────────────────────────────────────────────
+
+
+@config.group("smoothing")
+def config_smoothing() -> None:
+    """Manage the default smoothing method for charts (MA or EMA).
+
+    MA  = Simple Moving Average  — each day in the window counts equally.
+    EMA = Exponential Moving Average — recent days carry more weight.
+
+    Affects income trend lines, content-metrics MA lines, and follower-detail
+    MA lines.  Bollinger Bands and MACD always use their canonical definitions
+    (SMA for Bollinger, EMA for MACD) regardless of this setting.
+    """
+
+
+@config_smoothing.command("set")
+@click.argument("method", type=click.Choice(["ma", "ema"], case_sensitive=False))
+def config_smoothing_set(method: str) -> None:
+    """Set the chart smoothing method.
+
+    \033[2mExamples:\033[0m
+      zhihu config smoothing set ema
+      zhihu config smoothing set ma
+    """
+    cache_manager.set_smoothing(method.lower())
+    success(f"Chart smoothing method set to: {method.upper()}")
+
+
+@config_smoothing.command("show")
+def config_smoothing_show() -> None:
+    """Show the currently configured smoothing method."""
+    method = cache_manager.get_smoothing()
+    echo(f"{f_label('Chart smoothing:')} {method.upper()}")
+
+
+@config_smoothing.command("clear")
+def config_smoothing_clear() -> None:
+    """Reset smoothing to the default (EMA)."""
+    cache_manager.set_smoothing("ema")
+    success("Chart smoothing method reset to: EMA")
+
+
 # ── config crank-llm ──────────────────────────────────────────────────────
 
 

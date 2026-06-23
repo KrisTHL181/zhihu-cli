@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import pandas as pd
 
+from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
+
 DATA_DIR = Path.home() / ".zhihu-cli"
 INPUT_FILE = DATA_DIR / "exports" / "follower_detail.json"
 OUTPUT_FILE = DATA_DIR / "plots" / "follower_detail.png"
@@ -44,9 +46,10 @@ def plot_follower_detail() -> None:
             )
 
         # ── compute derived series ──────────────────────────────────
-        df["post_follow_ma7"] = df["post_follow"].rolling(7, center=True).mean()
-        df["cancel_follow_ma7"] = df["cancel_follow"].rolling(7, center=True).mean()
-        df["pre_follow_ma7"] = df["pre_follow"].rolling(7, center=True).mean()
+        trend_label = smoothing_label(7)
+        df["post_follow_trend"] = compute_smoothed(df["post_follow"], window=7)
+        df["cancel_follow_trend"] = compute_smoothed(df["cancel_follow"], window=7)
+        df["pre_follow_trend"] = compute_smoothed(df["pre_follow"], window=7)
         df["cum_net"] = df["pre_follow"].cumsum()
 
         summary = data.get("summary", {})
@@ -68,7 +71,7 @@ def plot_follower_detail() -> None:
         ax1.bar(
             df["date"], -df["cancel_follow"], color="#f44336", alpha=0.7, width=0.8, label="Cancel Follow (unfollow)"
         )
-        ax1.plot(df["date"], df["pre_follow_ma7"], color="#2196f3", linewidth=2, label="Net (7-day MA)")
+        ax1.plot(df["date"], df["pre_follow_trend"], color="#2196f3", linewidth=2, label=f"Net ({trend_label})")
         ax1.axhline(y=0, color="#666", linewidth=0.8, linestyle="-")
 
         ax1.set_ylabel("Daily Count", fontsize=11, color="#333")
