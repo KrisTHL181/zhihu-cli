@@ -8,6 +8,7 @@ import jieba
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import yaml
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -77,6 +78,16 @@ def load_and_clean_data(source_dir: str) -> tuple[list[str], list[str]]:
                         parts = content.split("---", 2)
                         text = parts[-1] if len(parts) > 1 else parts[0]
 
+                        # Prefer title from YAML frontmatter, fall back to filename
+                        short_name = file.replace(".md", "")
+                        if len(parts) > 2:
+                            try:
+                                meta = yaml.safe_load(parts[1])
+                                if isinstance(meta, dict) and meta.get("title"):
+                                    short_name = meta["title"]
+                            except yaml.YAMLError:
+                                pass
+
                         # Clean: remove formulas, code blocks, HTML, special symbols
                         text = re.sub(r"\$\$.*?\$\$", "", text, flags=re.DOTALL)
                         text = re.sub(r"\$.*?\$", "", text)
@@ -90,7 +101,6 @@ def load_and_clean_data(source_dir: str) -> tuple[list[str], list[str]]:
 
                         if cleaned_text.strip():
                             documents.append(cleaned_text)
-                            short_name = file.replace(".md", "").split("_ Kris谭")[0]
                             file_names.append(short_name)
 
                 except Exception as e:

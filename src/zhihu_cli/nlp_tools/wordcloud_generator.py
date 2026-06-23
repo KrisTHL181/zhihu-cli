@@ -7,6 +7,7 @@ from pathlib import Path
 import jieba
 import jieba.analyse
 import matplotlib.pyplot as plt
+import yaml
 from wordcloud import WordCloud
 
 from zhihu_cli.nlp_tools import FONT_PATH, STOP_WORDS
@@ -16,7 +17,10 @@ OUTPUT_FILE: str = str(DATA_DIR / "plots" / "zhihu_wordcloud.png")
 
 
 def extract_text_from_md(file_path: str, skip_metadata: bool = False) -> str:
-    """Extract JSON metadata and body text from a Markdown file."""
+    """Extract metadata and body text from a Markdown file.
+
+    Compatible with YAML frontmatter (current) and legacy JSON-line format.
+    """
     try:
         with open(file_path, encoding="utf-8") as f:
             content = f.read()
@@ -24,19 +28,27 @@ def extract_text_from_md(file_path: str, skip_metadata: bool = False) -> str:
             if not skip_metadata:
                 return content
 
-            parts = content.split("---", 1)
+            parts = content.split("---", 2)
             text_to_analyze = ""
 
-            if len(parts) >= 1:
+            # Try to extract metadata from frontmatter (YAML or legacy JSON)
+            if len(parts) >= 2:
+                frontmatter = parts[1] if parts[0].strip() == "" else parts[0]
                 try:
-                    meta = json.loads(parts[0])
-                    text_to_analyze += meta.get("question_name", "") + " "
-                    text_to_analyze += meta.get("question_detail", "") + " "
-                except json.JSONDecodeError:
-                    pass
+                    meta = yaml.safe_load(frontmatter)
+                    if isinstance(meta, dict):
+                        text_to_analyze += meta.get("question_name", "") + " "
+                        text_to_analyze += meta.get("question_detail", "") + " "
+                except yaml.YAMLError:
+                    try:
+                        meta = json.loads(parts[0])
+                        text_to_analyze += meta.get("question_name", "") + " "
+                        text_to_analyze += meta.get("question_detail", "") + " "
+                    except json.JSONDecodeError:
+                        pass
 
-            if len(parts) > 1:
-                text_to_analyze += parts[1]
+            # Body is always the last segment
+            text_to_analyze += parts[-1]
 
             return text_to_analyze
     except Exception as e:
