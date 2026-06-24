@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import html
 import mimetypes
@@ -384,11 +386,16 @@ class ContentDownloader:
         print("[Success] Headers configured and cached.")
         return True
 
-    def download_answers(self, urls: list[str], delay: float = 1.0) -> None:
-        """Download answer pages and convert to Markdown."""
+    def download_answers(self, urls: list[str], delay: float = 1.0) -> list[dict]:
+        """Download answer pages and convert to Markdown.
+
+        :returns: list of result dicts with keys ``url``, ``title``, ``author``,
+            ``filepath``, ``success``, and ``error``.
+        """
+        results: list[dict] = []
         if not self.headers:
             print("[Error] Load headers first")
-            return
+            return results
 
         for url in urls:
             try:
@@ -416,6 +423,17 @@ class ContentDownloader:
                 }
                 filepath = save_article(url, meta, answer_markdown, self.output_dir, with_media=self.with_media)
 
+                results.append(
+                    {
+                        "url": url,
+                        "title": question_title,
+                        "author": author,
+                        "filepath": filepath,
+                        "success": True,
+                        "error": None,
+                    }
+                )
+
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
                 print(f"  Question: {question_title}")
@@ -423,12 +441,34 @@ class ContentDownloader:
                 print(f"  Time: {created}")
 
             except TimeoutError:
+                results.append(
+                    {
+                        "url": url,
+                        "title": None,
+                        "author": None,
+                        "filepath": None,
+                        "success": False,
+                        "error": "Timeout",
+                    }
+                )
                 print(f"[Timeout] {url}")
                 continue
             except Exception as e:
+                results.append(
+                    {
+                        "url": url,
+                        "title": None,
+                        "author": None,
+                        "filepath": None,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
                 print(f"[Error] Failed to process {url}: {e}")
                 continue
             wait(delay)
+
+        return results
 
     def fetch_article(self, url: str) -> tuple[dict[str, str], str]:
         """Fetch and convert a single article. Returns (metadata, markdown_content)."""
@@ -468,16 +508,32 @@ class ContentDownloader:
             markdown_content = self.md_converter.convert(content_html, url)
             return metadata, markdown_content
 
-    def download_articles(self, urls: list[str], delay: float = 1.0) -> None:
-        """Download article pages and convert to Markdown."""
+    def download_articles(self, urls: list[str], delay: float = 1.0) -> list[dict]:
+        """Download article pages and convert to Markdown.
+
+        :returns: list of result dicts with keys ``url``, ``title``, ``author``,
+            ``filepath``, ``success``, and ``error``.
+        """
+        results: list[dict] = []
         if not self.headers:
             print("[Error] Load headers first")
-            return
+            return results
 
         for url in urls:
             try:
                 metadata, markdown_content = self.fetch_article(url)
                 filepath = save_article(url, metadata, markdown_content, self.output_dir, with_media=self.with_media)
+
+                results.append(
+                    {
+                        "url": url,
+                        "title": metadata["title"],
+                        "author": metadata["author"],
+                        "filepath": filepath,
+                        "success": True,
+                        "error": None,
+                    }
+                )
 
                 print(f"[Success] {url}")
                 print(f"  -> {filepath}")
@@ -486,9 +542,34 @@ class ContentDownloader:
                 print(f"  Time: {metadata['created']}")
 
             except TimeoutError:
+                results.append(
+                    {
+                        "url": url,
+                        "title": None,
+                        "author": None,
+                        "filepath": None,
+                        "success": False,
+                        "error": "Timeout",
+                    }
+                )
                 print(f"[Timeout] {url}")
                 continue
+            except Exception as e:
+                results.append(
+                    {
+                        "url": url,
+                        "title": None,
+                        "author": None,
+                        "filepath": None,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
+                print(f"[Error] Failed to process {url}: {e}")
+                continue
             wait(delay)
+
+        return results
 
     def download_pins(self, urls: list[str], delay: float = 1.0) -> None:
         """Download pin pages and convert to Markdown."""

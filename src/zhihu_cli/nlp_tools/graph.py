@@ -13,6 +13,7 @@ Uses NetworkX for graph construction and Plotly for rendering.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -580,6 +581,7 @@ def main(
     depth: int = 1,
     max_expand: int = 20,
     max_per_node: int = 50,
+    output_json: bool = False,
 ) -> None:
     """Build and visualize a Zhihu social network graph.
 
@@ -594,6 +596,7 @@ def main(
         depth: Graph depth (1 = ego-network, ≥2 = recursive expansion).
         max_expand: Max nodes to expand per hop level.
         max_per_node: Max followees per expanded node.
+        output_json: If ``True``, print JSON stats and exit.
     """
     from zhihu_cli.content.handlers.people import get_my_url_token
 
@@ -626,6 +629,48 @@ def main(
         return
 
     # Stats
+    if output_json:
+        central_nodes = [n for n, d in G.nodes(data=True) if d.get("is_central")]
+        central = central_nodes[0] if central_nodes else None
+        node_list = []
+        for n, d in G.nodes(data=True):
+            node_list.append(
+                {
+                    "id": n,
+                    "name": d.get("name", n),
+                    "degree": G.degree(n),
+                    "hop": d.get("hop", 0),
+                    "is_central": d.get("is_central", False),
+                    "is_mutual": d.get("is_mutual", False),
+                    "follower_count": d.get("follower_count", 0),
+                    "following_count": d.get("following_count", 0),
+                }
+            )
+        stats = {
+            "nodes": G.number_of_nodes(),
+            "edges": G.number_of_edges(),
+            "density": nx.density(G),
+            "top_nodes": sorted(
+                [{"id": n, "degree": d} for n, d in G.degree()],
+                key=lambda x: x["degree"],
+                reverse=True,
+            )[:20],
+            "node_list": node_list,
+        }
+        if central:
+            mutual_nodes = [n for n, d in G.nodes(data=True) if d.get("is_mutual")]
+            followee_only = [n for n in G.successors(central) if n not in mutual_nodes]
+            follower_only = [n for n in G.predecessors(central) if n not in mutual_nodes]
+            stats["central_user"] = {
+                "id": central,
+                "name": G.nodes[central].get("name", central),
+                "followees": len(followee_only) + len(mutual_nodes),
+                "followers": len(follower_only) + len(mutual_nodes),
+                "mutual": len(mutual_nodes),
+            }
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+        return
+
     print_graph_stats(G)
 
     # Visualize

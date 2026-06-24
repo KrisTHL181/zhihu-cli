@@ -16,6 +16,7 @@ from zhihu_cli.output import (
     f_num,
     f_path,
     info,
+    print_json,
     success,
 )
 
@@ -34,13 +35,19 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "all_assets_list.json"),
         help="Output JSON file",
     )
-    def scrape_creations(output: str) -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def scrape_creations(output: str, output_json: bool) -> None:
         """Fetch all user creation IDs (answers, articles, pins) -> JSON."""
         from zhihu_cli.creator_tools.parse_content_datas import generate_assets_file
 
         generate_assets_file(Path(output))
+        if output_json:
+            with open(output, encoding="utf-8") as f:
+                data = json.load(f)
+            print_json(data)
+            return
 
-    def _generic_list_scrape(api_description: str, output_file: str) -> None:
+    def _generic_list_scrape(api_description: str, output_file: str, output_json: bool = False) -> None:
         """Generic stdin-based list scraper. User pastes the API's cURL command."""
 
         if not cache_manager.load_headers():
@@ -76,6 +83,8 @@ def register_scrape(main_group: click.Group) -> None:
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(all_items, f, ensure_ascii=False, indent=2)
         success(f"Saved {f_num(len(all_items))} items to {f_path(output_file)}")
+        if output_json:
+            print_json(all_items)
 
     @scrape.command("activities")
     @click.option(
@@ -84,9 +93,10 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "zhihu_user_activities.json"),
         help="Output JSON file",
     )
-    def scrape_activities(output: str) -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def scrape_activities(output: str, output_json: bool) -> None:
         """Fetch user activity feed -> JSON. Requires pasting the activities API cURL."""
-        _generic_list_scrape("activities", output)
+        _generic_list_scrape("activities", output, output_json=output_json)
 
     @scrape.command("answers")
     @click.option(
@@ -95,9 +105,10 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "zhihu_answers.json"),
         help="Output JSON file",
     )
-    def scrape_answers_list(output: str) -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def scrape_answers_list(output: str, output_json: bool) -> None:
         """Fetch user's answer list -> JSON. Requires pasting the answers API cURL."""
-        _generic_list_scrape("answers list", output)
+        _generic_list_scrape("answers list", output, output_json=output_json)
 
     @scrape.command("articles")
     @click.option(
@@ -106,6 +117,7 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "zhihu_articles.json"),
         help="Output JSON file",
     )
-    def scrape_articles_list(output: str) -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def scrape_articles_list(output: str, output_json: bool) -> None:
         """Fetch user's article list -> JSON. Requires pasting the articles API cURL."""
-        _generic_list_scrape("articles list", output)
+        _generic_list_scrape("articles list", output, output_json=output_json)

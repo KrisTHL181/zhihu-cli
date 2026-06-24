@@ -19,7 +19,8 @@ def register_listen(main_group):
 
     @listen.command("notifications")
     @click.option("--incognito/--no-incognito", default=False, help="Connect incognito")
-    def listen_notifications(incognito: bool) -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output raw JSON")
+    def listen_notifications(incognito: bool, output_json: bool) -> None:
         """Listen to Zhihu notification badge events via MQTT."""
         from zhihu_cli.content.handlers.imchat import NOTIFICATION_TOPIC, ZhihuMessageListener
 
@@ -30,7 +31,7 @@ def register_listen(main_group):
         listener = ZhihuMessageListener(url_token, NOTIFICATION_TOPIC, incognito=incognito)
         echo("Listening for notifications — press Ctrl+C to stop.")
         try:
-            listener.start()
+            listener.start(output_json=output_json)
         except KeyboardInterrupt:
             echo("\nStopped.")
 

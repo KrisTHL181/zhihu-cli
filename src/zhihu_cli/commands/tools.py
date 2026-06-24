@@ -114,11 +114,21 @@ def register_tools(main_group):
         """Income analytics (收益分析)."""
 
     @tools_creator_income.command("fetch")
-    def creator_income_fetch() -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def creator_income_fetch(output_json: bool) -> None:
         """Fetch incremental income data from Zhihu creator API."""
         from zhihu_cli.creator_tools.parse_zhihu_incomes import run_task
 
         run_task()
+        if output_json:
+            filepath = get_data_dir() / "exports" / "zhihu_income_report.json"
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                print_json({"error": "file not found", "path": str(filepath)})
+            else:
+                print_json(data)
+            return
 
     @tools_creator_income.command("monthly")
     @click.option(
@@ -172,11 +182,22 @@ def register_tools(main_group):
 
     @tools_creator.command("metrics")
     @click.option("--aggr", is_flag=True, help="Use aggregated endpoint (single datapoint per content)")
-    def creator_metrics(aggr: bool) -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def creator_metrics(aggr: bool, output_json: bool) -> None:
         """Fetch per-content daily metrics from Zhihu API."""
         from zhihu_cli.creator_tools.parse_content_datas import run_batch_daily_analysis
 
         run_batch_daily_analysis(use_aggr=aggr)
+        if output_json:
+            metrics_dir = get_data_dir() / "exports" / "content_metrics"
+            all_data = []
+            for fp in sorted(metrics_dir.glob("*.json")):
+                try:
+                    all_data.append(json.loads(fp.read_text(encoding="utf-8")))
+                except FileNotFoundError:
+                    continue
+            print_json(all_data)
+            return
 
     @tools_creator.command("growth")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -187,11 +208,21 @@ def register_tools(main_group):
         show_growth_level(json_output=output_json)
 
     @tools_creator.command("score")
-    def creator_score() -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def creator_score(output_json: bool) -> None:
         """Fetch incremental creator score detail (创作分明细) from Zhihu API."""
         from zhihu_cli.creator_tools.parse_score_detail import run_task
 
         run_task()
+        if output_json:
+            filepath = get_data_dir() / "exports" / "creator_score_detail.json"
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                print_json({"error": "file not found", "path": str(filepath)})
+            else:
+                print_json(data)
+            return
 
     @tools_creator.command("plot")
     @click.option("--no-pv", is_flag=True, default=False, help="Exclude PV (page view) metric from the plot")
@@ -231,7 +262,8 @@ def register_tools(main_group):
         """Follower analytics (关注者分析)."""
 
     @tools_creator_follower.command("fetch")
-    def creator_follower_fetch() -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def creator_follower_fetch(output_json: bool) -> None:
         """Fetch follower detail data from Zhihu API (from configured start-date to today)."""
         from datetime import date, datetime
 
@@ -241,13 +273,32 @@ def register_tools(main_group):
         start = datetime.strptime(start_str, "%Y-%m-%d").date()
         days = (date.today() - start).days
         run_task(days=days)
+        if output_json:
+            filepath = get_data_dir() / "exports" / "follower_detail.json"
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                print_json({"error": "file not found", "path": str(filepath)})
+            else:
+                print_json(data)
+            return
 
     @tools_creator_follower.command("analysis")
-    def creator_follower_analysis() -> None:
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def creator_follower_analysis(output_json: bool) -> None:
         """Fetch follower profile/demographics (关注者画像) from Zhihu API."""
         from zhihu_cli.creator_tools.parse_follower_profile import run_task
 
         run_task()
+        if output_json:
+            filepath = get_data_dir() / "exports" / "follower_profile.json"
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                print_json({"error": "file not found", "path": str(filepath)})
+            else:
+                print_json(data)
+            return
 
     @tools_creator_follower.command("plot")
     def creator_follower_plot() -> None:
@@ -391,6 +442,7 @@ def register_tools(main_group):
     @click.option("--depth", type=int, default=1, help="Graph depth: 1=ego-network, ≥2=recursively expand (default: 1)")
     @click.option("--max-expand", type=int, default=20, help="Max nodes to expand per hop level (default: 20)")
     @click.option("--max-per-node", type=int, default=50, help="Max followees fetched per expanded node (default: 50)")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def nlp_graph(
         url_token: str | None,
         max_followees: int,
@@ -401,6 +453,7 @@ def register_tools(main_group):
         depth: int,
         max_expand: int,
         max_per_node: int,
+        output_json: bool,
     ) -> None:
         """Social graph visualization of following/follower relationships."""
         from zhihu_cli.nlp_tools.graph import main as graph_main
@@ -415,4 +468,5 @@ def register_tools(main_group):
             depth=depth,
             max_expand=max_expand,
             max_per_node=max_per_node,
+            output_json=output_json,
         )

@@ -226,8 +226,9 @@ def download_video(url: str, output_dir: str, output_json: bool, no_download_vid
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests (seconds)")
 @click.option("--no-cache-headers", is_flag=True, help="Force re-paste of cURL")
 @click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 def download_batch_answers(
-    input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool
+    input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool, output_json: bool
 ) -> None:
     """Batch download all answers listed in an assets JSON file."""
     if not os.path.exists(input_file):
@@ -246,7 +247,10 @@ def download_batch_answers(
     dl = ContentDownloader(output_dir=output_dir, with_media=with_media)
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
-    dl.download_answers(urls, delay=delay)
+    results = dl.download_answers(urls, delay=delay)
+    if output_json:
+        print_json(results)
+        return
 
 
 @download.command("batch-articles")
@@ -266,8 +270,9 @@ def download_batch_answers(
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests (seconds)")
 @click.option("--no-cache-headers", is_flag=True, help="Force re-paste of cURL")
 @click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 def download_batch_articles(
-    input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool
+    input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool, output_json: bool
 ) -> None:
     """Batch download all articles listed in an assets JSON file."""
     if not os.path.exists(input_file):
@@ -286,7 +291,10 @@ def download_batch_articles(
     dl = ContentDownloader(output_dir=output_dir, with_media=with_media)
     if not dl.load_headers_from_curl(quick_mode=not no_cache_headers):
         raise SystemExit(1)
-    dl.download_articles(urls, delay=delay)
+    results = dl.download_articles(urls, delay=delay)
+    if output_json:
+        print_json(results)
+        return
 
 
 @download.command("user")
@@ -307,6 +315,7 @@ def download_batch_articles(
     help="Content types to download (default: all)",
 )
 @click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 def download_user(
     user: str,
     output_dir: str | None,
@@ -314,6 +323,7 @@ def download_user(
     max_items: int | None,
     content_types: str,
     with_media: bool,
+    output_json: bool,
 ) -> None:
     """Download all answers, articles, and pins from a Zhihu user."""
     url_token = _extract_url_token(user)
@@ -400,6 +410,12 @@ def download_user(
             except Exception as e:
                 error(f"  {item_index(i, len(pin_items))} Error: {e}")
             wait(delay)
+
+    if output_json:
+        print_json(
+            {"downloaded": downloaded, "base_dir": str(base_dir), "user_name": user_name, "url_token": url_token}
+        )
+        return
 
     section(f"Done! Downloaded from {f_name(user_name)}:")
     echo(f"  {f_label('Answers:')}  {f_num(downloaded['answers'])}")
