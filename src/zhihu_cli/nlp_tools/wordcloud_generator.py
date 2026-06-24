@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import yaml
 from wordcloud import WordCloud
 
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.nlp_tools import FONT_PATH, STOP_WORDS
 
 DATA_DIR = Path.home() / ".zhihu-cli"
@@ -122,7 +123,7 @@ def main(topk_words: int = 200, source_dir: str | None = None, only_print: bool 
     plt.imshow(wordcloud, interpolation="bilinear")
     plt.axis("off")
     Path(OUTPUT_FILE).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(OUTPUT_FILE, dpi=300)
+    plt.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi())
     plt.show()
     print(f"Word cloud saved to: {OUTPUT_FILE}")
 

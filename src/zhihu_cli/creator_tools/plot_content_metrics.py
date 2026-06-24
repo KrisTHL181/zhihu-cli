@@ -320,7 +320,7 @@ def _plot_daily_time_series(records: list[dict], active_metrics: list[str] | Non
     ax1.set_xlabel("Date", fontsize=11)
 
     fig1.tight_layout()
-    fig1.savefig(OUTPUT_FILE, dpi=300, bbox_inches="tight")
+    fig1.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
     print(f"Plot saved: {OUTPUT_FILE}")
 
     # ================================================================
@@ -369,7 +369,7 @@ def _plot_daily_time_series(records: list[dict], active_metrics: list[str] | Non
             ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}%"))
 
             fig2.tight_layout()
-            fig2.savefig(ENGAGEMENT_FILE, dpi=300, bbox_inches="tight")
+            fig2.savefig(ENGAGEMENT_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
             print(f"Plot saved: {ENGAGEMENT_FILE}")
     else:
         print("Engagement-rate chart skipped (--no-show excluded the Show metric needed for the denominator).")
@@ -466,7 +466,7 @@ def _plot_aggr_summary(aggr_files: list[dict], active_metrics: list[str] | None 
     ax1.tick_params(axis="x", rotation=30)
 
     fig1.tight_layout()
-    fig1.savefig(OUTPUT_FILE, dpi=300, bbox_inches="tight")
+    fig1.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
     print(f"Plot saved: {OUTPUT_FILE}")
 
     # ================================================================
@@ -510,7 +510,7 @@ def _plot_aggr_summary(aggr_files: list[dict], active_metrics: list[str] | None 
             ax2.grid(True, axis="y", linestyle=":", alpha=0.35)
 
             fig2.tight_layout()
-            fig2.savefig(DAILY_FILE, dpi=300, bbox_inches="tight")
+            fig2.savefig(DAILY_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
             print(f"Plot saved: {DAILY_FILE}")
 
     plt.show()

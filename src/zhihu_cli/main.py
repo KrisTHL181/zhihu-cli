@@ -567,6 +567,45 @@ def config_smoothing_clear() -> None:
     success("Chart smoothing method reset to: EMA")
 
 
+# ── config plot-dpi ───────────────────────────────────────────────────────
+
+
+@config.group("plot-dpi")
+def config_plot_dpi() -> None:
+    """Manage the DPI (resolution) for saved plot images.
+
+    Higher DPI = sharper images but larger file sizes.
+    Default is 300.  Valid range: 72–1200.
+    """
+
+
+@config_plot_dpi.command("set")
+@click.argument("dpi", type=int)
+def config_plot_dpi_set(dpi: int) -> None:
+    """Set the DPI for saved plots.
+
+    \033[2mExamples:\033[0m
+      zhihu config plot-dpi set 150
+      zhihu config plot-dpi set 600
+    """
+    cache_manager.set_plot_dpi(dpi)
+    success(f"Plot DPI set to: {dpi}")
+
+
+@config_plot_dpi.command("show")
+def config_plot_dpi_show() -> None:
+    """Show the currently configured plot DPI."""
+    dpi = cache_manager.get_plot_dpi()
+    echo(f"{f_label('Plot DPI:')} {dpi}")
+
+
+@config_plot_dpi.command("clear")
+def config_plot_dpi_clear() -> None:
+    """Reset plot DPI to the default (300)."""
+    cache_manager.set_plot_dpi(300)
+    success("Plot DPI reset to: 300")
+
+
 # ── config crank-llm ──────────────────────────────────────────────────────
 
 

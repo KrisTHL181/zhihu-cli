@@ -237,6 +237,19 @@ class CacheManager:
         config["smoothing"] = method
         self._atomic_write(self.config_file, json.dumps(config, indent=2))
 
+    def get_plot_dpi(self) -> int:
+        """Return the configured plot DPI (default 300)."""
+        config = self.get_config()
+        return int(config.get("plot_dpi", 300))
+
+    def set_plot_dpi(self, dpi: int) -> None:
+        """Set the DPI for saved plot images."""
+        if dpi < 72 or dpi > 1200:
+            raise ValueError(f"DPI must be between 72 and 1200, got {dpi}")
+        config = self.get_config()
+        config["plot_dpi"] = dpi
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
+
     # ── question cache ──────────────────────────────────────────────────
 
     @make_thread_safe

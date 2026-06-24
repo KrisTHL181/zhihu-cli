@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy.signal import savgol_filter
 
+from zhihu_cli.content.handlers.cache_manager import cache_manager
+
 DATA_DIR = Path.home() / ".zhihu-cli"
 INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
 OUTPUT_FILE = DATA_DIR / "plots" / "derivative_analysis.png"
@@ -64,7 +66,7 @@ def plot_derivative_analysis() -> None:
 
         plt.xlabel("Date")
         plt.tight_layout()
-        plt.savefig(OUTPUT_FILE, dpi=300)
+        plt.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi())
         plt.show()
 
     except Exception as e:

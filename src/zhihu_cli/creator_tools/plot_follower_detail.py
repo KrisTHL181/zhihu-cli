@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import pandas as pd
 
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
 
 DATA_DIR = Path.home() / ".zhihu-cli"
@@ -108,7 +109,7 @@ def plot_follower_detail() -> None:
         ax1.grid(True, linestyle=":", alpha=0.35)
 
         fig1.tight_layout()
-        fig1.savefig(OUTPUT_FILE, dpi=300, bbox_inches="tight")
+        fig1.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
         print(f"Plot saved: {OUTPUT_FILE}")
 
         # ================================================================
@@ -132,7 +133,7 @@ def plot_follower_detail() -> None:
         ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}%"))
 
         fig2.tight_layout()
-        fig2.savefig(RATIO_FILE, dpi=300, bbox_inches="tight")
+        fig2.savefig(RATIO_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
         print(f"Plot saved: {RATIO_FILE}")
 
         # show both figures sequentially

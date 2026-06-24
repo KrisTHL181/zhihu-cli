@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
 
 DATA_DIR = Path.home() / ".zhihu-cli"
@@ -71,7 +72,7 @@ def plot_analysis() -> None:
         )
 
         plt.tight_layout()
-        plt.savefig(OUTPUT_FILE, dpi=500, bbox_inches="tight")
+        plt.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
         plt.show()
 
     except Exception as e:

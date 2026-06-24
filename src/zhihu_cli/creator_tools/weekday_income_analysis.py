@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from zhihu_cli.content.handlers.cache_manager import cache_manager
+
 DATA_DIR = Path.home() / ".zhihu-cli"
 INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
 OUTPUT_FILE = DATA_DIR / "plots" / "weekday_income_analysis.png"
@@ -57,7 +59,7 @@ def plot_weekday_analysis() -> None:
         print(f"\nInsight: Your most profitable day on average is {best_day}.")
 
         plt.tight_layout()
-        plt.savefig(OUTPUT_FILE, dpi=500, bbox_inches="tight")
+        plt.savefig(OUTPUT_FILE, dpi=cache_manager.get_plot_dpi(), bbox_inches="tight")
         print("\nBox plot saved as: weekday_income_analysis.png")
         plt.show()
 
