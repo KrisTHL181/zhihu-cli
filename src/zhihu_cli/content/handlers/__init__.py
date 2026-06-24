@@ -33,6 +33,7 @@ def set_user_agent(ua: str | None) -> None:
 ZHIHU_ARTICLE_PATTERN = r"https?://zhuanlan\.zhihu\.com/p/(\d+)"
 ZHIHU_QUESTION_PATTERN = r"https?://(?:www\.)?zhihu\.com/question/(\d+)"
 ZHIHU_QUESTION_WITH_ANSWER_PATTERN = r"https?://(?:www\.)?zhihu\.com/question/(\d+)(?:/answer/(\d+))?"
+ZHIHU_ANSWER_SHORT_PATTERN = r"https?://(?:www\.)?zhihu\.com/answer/(\d+)"
 ZHIHU_PIN_PATTERN = r"https?://(?:www\.)?zhihu\.com/pin/([^/?#]+)"
 ZHIHU_ZVIDEO_PATTERN = r"https?://(?:www\.)?zhihu\.com/zvideo/(\d+)"
 
@@ -49,6 +50,13 @@ def get_type_and_id(url: str) -> tuple[str | None, str | None]:
     match = re.search(ZHIHU_QUESTION_WITH_ANSWER_PATTERN, url)
     if match and match.group(2):
         return ("answers", f"{match.group(1)}/{match.group(2)}")
+
+    match = re.search(ZHIHU_ANSWER_SHORT_PATTERN, url)
+    if match:
+        # Short answer URL (e.g. https://www.zhihu.com/answer/123456) —
+        # no question ID available; downstream callers use _resolve_answer_id()
+        # which handles the bare answer ID just fine.
+        return ("answers", match.group(1))
 
     match = re.search(ZHIHU_QUESTION_PATTERN, url)
     if match:
