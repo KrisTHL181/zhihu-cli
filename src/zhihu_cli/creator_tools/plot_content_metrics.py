@@ -66,8 +66,22 @@ def _is_daily_list(data: object) -> bool:
     return isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and "date" in data[0]
 
 
-def plot_content_metrics() -> None:
-    """Generate a combined daily+cumulative chart from all content_metrics JSON files."""
+def plot_content_metrics(no_pv: bool = False, no_show: bool = False) -> None:
+    """Generate a combined daily+cumulative chart from all content_metrics JSON files.
+
+    Args:
+        no_pv: If True, exclude the PV metric from the plot.
+        no_show: If True, exclude the Show metric from the plot.
+    """
+    # ── build active metric list ─────────────────────────────────────
+    active_metrics = [k for k in METRIC_KEYS if not (k == "pv" and no_pv) and not (k == "show" and no_show)]
+    if not active_metrics:
+        print("Error: all metrics excluded — nothing to plot.")
+        return
+    excluded = [k for k in METRIC_KEYS if k not in active_metrics]
+    if excluded:
+        print(f"Excluded metrics: {', '.join(excluded)}")
+
     try:
         OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -117,9 +131,9 @@ def plot_content_metrics() -> None:
 
         # ── determine primary data source ────────────────────────────
         if daily_records:
-            _plot_daily_time_series(daily_records, file_count=len(daily_source_files))
+            _plot_daily_time_series(daily_records, active_metrics=active_metrics, file_count=len(daily_source_files))
         elif aggr_files:
-            _plot_aggr_summary(aggr_files)
+            _plot_aggr_summary(aggr_files, active_metrics=active_metrics)
         else:
             print("No plottable data found.")
             return
@@ -131,8 +145,17 @@ def plot_content_metrics() -> None:
         traceback.print_exc()
 
 
-def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
-    """Aggregate daily records by date, then plot combined daily + cumulative chart."""
+def _plot_daily_time_series(records: list[dict], active_metrics: list[str] | None = None, file_count: int = 0) -> None:
+    """Aggregate daily records by date, then plot combined daily + cumulative chart.
+
+    Args:
+        records: Flat list of daily metric dicts (each with a 'date' field).
+        active_metrics: Metric keys to include in the plot (default: all METRIC_KEYS).
+        file_count: Number of source files (for title display).
+    """
+    if active_metrics is None:
+        active_metrics = list(METRIC_KEYS)
+
     df = pd.DataFrame(records)
     df["date"] = pd.to_datetime(df["date"])
 
@@ -170,15 +193,15 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
         cum_cols[col] = cname
 
     # ── summary stats ───────────────────────────────────────────────
-    totals = {col: int(agg[col].sum()) for col in METRIC_KEYS}
-    final_cum = {col: int(agg[cum_cols[col]].iloc[-1]) for col in METRIC_KEYS}
+    totals = {col: int(agg[col].sum()) for col in active_metrics}
+    final_cum = {col: int(agg[cum_cols[col]].iloc[-1]) for col in active_metrics}
     date_range = f"{agg['date'].min().strftime('%Y-%m-%d')} -> {agg['date'].max().strftime('%Y-%m-%d')}"
     total_records = len(records)
     content_count = df["type"].nunique() if "type" in df.columns else "?"
 
     # ── metric groupings for dual-scale plotting ───────────────────
-    LOG_METRICS = ["pv", "show"]
-    LINEAR_METRICS = ["upvote", "like", "collect", "comment", "share"]
+    LOG_METRICS = [m for m in active_metrics if m in ("pv", "show")]
+    LINEAR_METRICS = [m for m in active_metrics if m not in ("pv", "show")]
 
     # ================================================================
     # Figure 1: Combined — Daily (7-day MA) + Cumulative (dual y-axis)
@@ -195,7 +218,7 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     # Drawn on the right (linear) axis so the silhouette reflects total
     # daily volume without distorting the log-scale PV/Show axis.
     y_bottom = np.zeros(len(agg))
-    for key in METRIC_KEYS:
+    for key in active_metrics:
         y_top = y_bottom + agg[key].values
         ax1_twin.fill_between(
             agg["date"],
@@ -210,58 +233,67 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
         y_bottom = y_top
 
     # --- left axis (log): PV, Show — daily trend + cumulative -----------
-    for key in LOG_METRICS:
-        color = METRIC_COLORS[key]
-        cum_color = _lighten_color(color)
-        # daily MA (solid, thinner, with fill)
-        ax1.plot(
-            agg["date"],
-            agg[f"{key}_trend"],
-            linewidth=1.8,
-            color=color,
-            label=f"{METRIC_LABELS[key]} (daily {trend_label}, Σ={totals[key]:,})",
-        )
-        ax1.fill_between(agg["date"], agg[f"{key}_trend"], alpha=0.08, color=color)
-        # cumulative (dashed, lighter shade — same hue, visually paired)
-        ax1.plot(
-            agg["date"],
-            agg[cum_cols[key]],
-            linewidth=2.5,
-            color=cum_color,
-            linestyle="--",
-            label=f"Cum. {METRIC_LABELS[key]} (Σ={final_cum[key]:,})",
-        )
-        ax1.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.04, color=cum_color)
+    if LOG_METRICS:
+        for key in LOG_METRICS:
+            color = METRIC_COLORS[key]
+            cum_color = _lighten_color(color)
+            # daily MA (solid, thinner, with fill)
+            ax1.plot(
+                agg["date"],
+                agg[f"{key}_trend"],
+                linewidth=1.8,
+                color=color,
+                label=f"{METRIC_LABELS[key]} (daily {trend_label}, Σ={totals[key]:,})",
+            )
+            ax1.fill_between(agg["date"], agg[f"{key}_trend"], alpha=0.08, color=color)
+            # cumulative (dashed, lighter shade — same hue, visually paired)
+            ax1.plot(
+                agg["date"],
+                agg[cum_cols[key]],
+                linewidth=2.5,
+                color=cum_color,
+                linestyle="--",
+                label=f"Cum. {METRIC_LABELS[key]} (Σ={final_cum[key]:,})",
+            )
+            ax1.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.04, color=cum_color)
 
-    ax1.set_yscale("log")
-    ax1.set_ylabel("PV / Show (log scale)", fontsize=11, color="#1a237e")
+        ax1.set_yscale("log")
+        ax1.set_ylabel("PV / Show (log scale)", fontsize=11, color="#1a237e")
+    else:
+        # No log-scale metrics — hide the left axis spine but keep ticks
+        # (must stay visible so that legend + grid + xlabel render correctly).
+        ax1.yaxis.set_visible(False)
+        ax1.spines["left"].set_visible(False)
+
     ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
 
     # --- right axis (linear): engagement — daily trend + cumulative -----
-    for key in LINEAR_METRICS:
-        color = METRIC_COLORS[key]
-        cum_color = _lighten_color(color)
-        # daily MA (solid, thinner, with fill)
-        ax1_twin.plot(
-            agg["date"],
-            agg[f"{key}_trend"],
-            linewidth=1.5,
-            color=color,
-            label=f"{METRIC_LABELS[key]} (daily {trend_label}, Σ={totals[key]:,})",
-        )
-        ax1_twin.fill_between(agg["date"], agg[f"{key}_trend"], alpha=0.05, color=color)
-        # cumulative (dashed, lighter shade — same hue, visually paired)
-        ax1_twin.plot(
-            agg["date"],
-            agg[cum_cols[key]],
-            linewidth=2.0,
-            color=cum_color,
-            linestyle="--",
-            label=f"Cum. {METRIC_LABELS[key]} (Σ={final_cum[key]:,})",
-        )
-        ax1_twin.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.03, color=cum_color)
+    if LINEAR_METRICS:
+        for key in LINEAR_METRICS:
+            color = METRIC_COLORS[key]
+            cum_color = _lighten_color(color)
+            # daily MA (solid, thinner, with fill)
+            ax1_twin.plot(
+                agg["date"],
+                agg[f"{key}_trend"],
+                linewidth=1.5,
+                color=color,
+                label=f"{METRIC_LABELS[key]} (daily {trend_label}, Σ={totals[key]:,})",
+            )
+            ax1_twin.fill_between(agg["date"], agg[f"{key}_trend"], alpha=0.05, color=color)
+            # cumulative (dashed, lighter shade — same hue, visually paired)
+            ax1_twin.plot(
+                agg["date"],
+                agg[cum_cols[key]],
+                linewidth=2.0,
+                color=cum_color,
+                linestyle="--",
+                label=f"Cum. {METRIC_LABELS[key]} (Σ={final_cum[key]:,})",
+            )
+            ax1_twin.fill_between(agg["date"], agg[cum_cols[key]], alpha=0.03, color=cum_color)
 
-    ax1_twin.set_ylabel("Engagement (linear scale)", fontsize=11, color="#333")
+        ax1_twin.set_ylabel("Engagement (linear scale)", fontsize=11, color="#333")
+
     ax1_twin.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
 
     # --- merged legend (2 columns, like follower plot) ---------------
@@ -295,57 +327,69 @@ def _plot_daily_time_series(records: list[dict], file_count: int = 0) -> None:
     # Figure 2: Engagement Rate — total engagement per Show over time
     # Mirrors the follower_detail "Active Follow Ratio" supplementary chart
     # ================================================================
-    # total daily engagement = sum of all 5 engagement metrics
-    agg["eng_total"] = agg[LINEAR_METRICS].sum(axis=1)
-    agg["show_val"] = agg["show"]
-    # engagement rate = engagement / Show as percentage
-    agg["eng_rate"] = agg["eng_total"] / agg["show_val"].replace(0, pd.NA) * 100
-    agg["eng_rate_trend"] = compute_smoothed(agg["eng_rate"], window=7)
+    if "show" in active_metrics:
+        # total daily engagement = sum of all engagement metrics (non-pv, non-show)
+        eng_metrics = [m for m in active_metrics if m not in ("pv", "show")]
+        if eng_metrics:
+            agg["eng_total"] = agg[eng_metrics].sum(axis=1)
+            agg["show_val"] = agg["show"]
+            # engagement rate = engagement / Show as percentage
+            agg["eng_rate"] = agg["eng_total"] / agg["show_val"].replace(0, pd.NA) * 100
+            agg["eng_rate_trend"] = compute_smoothed(agg["eng_rate"], window=7)
 
-    fig2, ax2 = plt.subplots(figsize=(16, 6))
+            fig2, ax2 = plt.subplots(figsize=(16, 6))
 
-    ax2.plot(
-        agg["date"],
-        agg["eng_rate_trend"],
-        color="#ff9800",
-        linewidth=2,
-        label=f"Engagement Rate ({trend_label})",
-    )
-    ax2.fill_between(agg["date"], agg["eng_rate_trend"], alpha=0.08, color="#ff9800")
+            ax2.plot(
+                agg["date"],
+                agg["eng_rate_trend"],
+                color="#ff9800",
+                linewidth=2,
+                label=f"Engagement Rate ({trend_label})",
+            )
+            ax2.fill_between(agg["date"], agg["eng_rate_trend"], alpha=0.08, color="#ff9800")
 
-    avg_rate = agg["eng_rate"].mean()
-    ax2.axhline(
-        y=avg_rate,
-        color="#e91e63",
-        linewidth=1,
-        linestyle="--",
-        label=f"Mean ({avg_rate:.1f}%)",
-    )
+            avg_rate = agg["eng_rate"].mean()
+            ax2.axhline(
+                y=avg_rate,
+                color="#e91e63",
+                linewidth=1,
+                linestyle="--",
+                label=f"Mean ({avg_rate:.1f}%)",
+            )
 
-    ax2.set_ylabel("Rate (%)", fontsize=11)
-    ax2.set_xlabel("Date", fontsize=11)
-    ax2.set_title(
-        "Content Metrics — Engagement Rate  (Σ engagement / Show)",
-        fontsize=14,
-        fontweight="bold",
-    )
-    ax2.legend(loc="upper left", fontsize=9)
-    ax2.grid(True, linestyle=":", alpha=0.35)
-    ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}%"))
+            ax2.set_ylabel("Rate (%)", fontsize=11)
+            ax2.set_xlabel("Date", fontsize=11)
+            ax2.set_title(
+                "Content Metrics — Engagement Rate  (Σ engagement / Show)",
+                fontsize=14,
+                fontweight="bold",
+            )
+            ax2.legend(loc="upper left", fontsize=9)
+            ax2.grid(True, linestyle=":", alpha=0.35)
+            ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.1f}%"))
 
-    fig2.tight_layout()
-    fig2.savefig(ENGAGEMENT_FILE, dpi=300, bbox_inches="tight")
-    print(f"Plot saved: {ENGAGEMENT_FILE}")
+            fig2.tight_layout()
+            fig2.savefig(ENGAGEMENT_FILE, dpi=300, bbox_inches="tight")
+            print(f"Plot saved: {ENGAGEMENT_FILE}")
+    else:
+        print("Engagement-rate chart skipped (--no-show excluded the Show metric needed for the denominator).")
 
     plt.show()
 
 
-def _plot_aggr_summary(aggr_files: list[dict]) -> None:
+def _plot_aggr_summary(aggr_files: list[dict], active_metrics: list[str] | None = None) -> None:
     """Plot summary view when data was fetched with --aggr.
 
     Each file has a 'totals' dict — aggregate across all files by content type
     and show a grouped bar chart. Also try to extract yesterday/today per-day data.
+
+    Args:
+        aggr_files: List of dicts parsed from --aggr JSON files.
+        active_metrics: Metric keys to include in the plot (default: all METRIC_KEYS).
     """
+    if active_metrics is None:
+        active_metrics = list(METRIC_KEYS)
+
     print("\n⚠️  Data was fetched with --aggr (aggregated totals, no daily time-series).")
     print("   For time-series plotting, re-fetch without --aggr:")
     print("     zhihu tools creator metrics          (no --aggr flag)")
@@ -368,7 +412,7 @@ def _plot_aggr_summary(aggr_files: list[dict]) -> None:
                     break
 
         row = {"type": ftype}
-        for key in METRIC_KEYS:
+        for key in active_metrics:
             row[key] = int(totals.get(key, 0) or 0)
         rows.append(row)
 
@@ -377,7 +421,7 @@ def _plot_aggr_summary(aggr_files: list[dict]) -> None:
             day = af.get(tag)
             if day and isinstance(day, dict) and day.get("date"):
                 drow = {"date": day["date"], "type": ftype}
-                for key in METRIC_KEYS:
+                for key in active_metrics:
                     drow[key] = int(day.get(key, 0) or 0)
                 rlist.append(drow)
 
@@ -389,17 +433,17 @@ def _plot_aggr_summary(aggr_files: list[dict]) -> None:
     fig1, ax1 = plt.subplots(figsize=(16, 8))
 
     # aggregate totals across all files per metric
-    metric_totals = {key: int(df_totals[key].sum()) for key in METRIC_KEYS}
+    metric_totals = {key: int(df_totals[key].sum()) for key in active_metrics}
     bars = ax1.bar(
-        list(METRIC_LABELS.values()),
-        [metric_totals[k] for k in METRIC_KEYS],
-        color=[METRIC_COLORS[k] for k in METRIC_KEYS],
+        [METRIC_LABELS[k] for k in active_metrics],
+        [metric_totals[k] for k in active_metrics],
+        color=[METRIC_COLORS[k] for k in active_metrics],
         alpha=0.85,
         width=0.6,
     )
 
     # annotate bars with values
-    for bar_obj, key in zip(bars, METRIC_KEYS):
+    for bar_obj, key in zip(bars, active_metrics):
         height = bar_obj.get_height()
         ax1.text(
             bar_obj.get_x() + bar_obj.get_width() / 2.0,
@@ -432,9 +476,9 @@ def _plot_aggr_summary(aggr_files: list[dict]) -> None:
         all_daily = yesterday_rows + today_rows
         if all_daily:
             df_daily = pd.DataFrame(all_daily)
-            for col in METRIC_KEYS:
+            for col in active_metrics:
                 df_daily[col] = pd.to_numeric(df_daily[col], errors="coerce").fillna(0).astype(int)
-            agg_daily = df_daily.groupby("date")[METRIC_KEYS].sum().reset_index()
+            agg_daily = df_daily.groupby("date")[active_metrics].sum().reset_index()
             agg_daily = agg_daily.sort_values("date")
 
             DAILY_FILE = DATA_DIR / "plots" / "content_metrics_daily.png"
@@ -442,8 +486,8 @@ def _plot_aggr_summary(aggr_files: list[dict]) -> None:
 
             x = range(len(agg_daily))
             width = 0.12
-            for i, key in enumerate(METRIC_KEYS):
-                offset = (i - len(METRIC_KEYS) / 2 + 0.5) * width
+            for i, key in enumerate(active_metrics):
+                offset = (i - len(active_metrics) / 2 + 0.5) * width
                 ax2.bar(
                     [xi + offset for xi in x],
                     agg_daily[key],

@@ -3350,11 +3350,13 @@ def creator_score() -> None:
 
 
 @tools_creator.command("plot")
-def creator_metrics_plot() -> None:
+@click.option("--no-pv", is_flag=True, default=False, help="Exclude PV (page view) metric from the plot")
+@click.option("--no-show", is_flag=True, default=False, help="Exclude Show metric from the plot")
+def creator_metrics_plot(no_pv: bool, no_show: bool) -> None:
     """Plot content metrics charts from content_metrics/*.json data."""
     from zhihu_cli.creator_tools.plot_content_metrics import plot_content_metrics
 
-    plot_content_metrics()
+    plot_content_metrics(no_pv=no_pv, no_show=no_show)
 
 
 @tools_creator_income.command("income")
