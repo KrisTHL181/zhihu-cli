@@ -1,5 +1,9 @@
 """Agora (众裁) command group — review reported comments and vote."""
 
+from __future__ import annotations
+
+import os
+
 import click
 
 from zhihu_cli.content.handlers import fmt_time
@@ -15,6 +19,7 @@ from zhihu_cli.content.handlers.agora import (
 from zhihu_cli.output import (
     blank,
     echo,
+    error,
     f_bold,
     f_dim,
     f_green,
@@ -29,6 +34,7 @@ from zhihu_cli.output import (
     item_index,
     print_json,
     section,
+    success,
     warning,
 )
 
@@ -269,6 +275,356 @@ def register_agora(main_group):
         if result["blind_test_wrong"]:
             warning("盲测错误 (blind test wrong)")
             echo(f"  {f_label('今日盲测错误:')} {f_num(result['blind_test_today_wrong_count'])}")
+
+    @agora.command("ai")
+    @click.argument("discussion_id", required=False)
+    @click.option(
+        "--model",
+        default=None,
+        help="LLM model override (default: from cached config).",
+    )
+    @click.option(
+        "--api-base",
+        default=None,
+        help="LLM API endpoint override.",
+    )
+    @click.option(
+        "--api-key",
+        default=None,
+        help="LLM API key override.",
+    )
+    @click.option(
+        "--json",
+        "output_json",
+        is_flag=True,
+        default=False,
+        help="Output one JSON object per vote as JSON lines.",
+    )
+    def agora_ai(
+        discussion_id: str | None,
+        model: str | None,
+        api_base: str | None,
+        api_key: str | None,
+        output_json: bool,
+    ) -> None:
+        """Use AI to automatically vote on agora discussions (AI 自动投票).
+
+        With DISCUSSION_ID, votes on that specific discussion once.
+
+        Without DISCUSSION_ID, continuously fetches the next pending
+        discussion, lets the LLM decide the vote, casts it, and repeats
+        until all pending discussions are exhausted.
+
+        Requires LLM config via ``zhihu config crank-llm set`` or the
+        ``LLM_API_BASE`` / ``LLM_API_KEY`` / ``LLM_MODEL`` env vars.
+
+        \b
+        Examples:
+          zhihu agora ai                    # auto-vote all pending
+          zhihu agora ai <discussion_id>     # vote on a specific one
+          zhihu agora ai --json             # JSON-lines output for piping
+        """
+        # Pre-load LLM config once (fail fast if not configured)
+        _preflight = _call_llm_for_vote(
+            {
+                "comment": {"content": "test"},
+                "report_reason": "",
+                "report_note": "",
+                "origin_title": "",
+                "origin_url": "",
+            },
+            api_base=api_base,
+            api_key=api_key,
+            model=model,
+            dry_run=True,
+        )
+        if _preflight is None:
+            raise SystemExit(1)
+
+        if discussion_id:
+            # ── single-discussion mode ──────────────────────────────────
+            _ai_vote_one(discussion_id, model, api_base, api_key, output_json)
+        else:
+            # ── loop-until-exhausted mode ───────────────────────────────
+            voted_count = 0
+            seen_ids: set[str] = set()
+            while True:
+                try:
+                    data = fetch_court_page()
+                except ValueError as e:
+                    raise click.ClickException(str(e))
+
+                disc = data.get("current_discussion")
+                if not disc:
+                    if voted_count == 0:
+                        info("No pending discussions.")
+                    else:
+                        success(f"All done — {voted_count} discussion(s) voted.")
+                    return
+
+                disc_id = disc.get("id", data.get("discussion_id", ""))
+                if not disc_id:
+                    info("Could not resolve discussion ID, stopping.")
+                    return
+
+                # Safety: break if we've seen this ID before (prevents infinite loop)
+                if disc_id in seen_ids:
+                    info(f"Revisiting {disc_id} — stopping to avoid loop.")
+                    return
+                seen_ids.add(disc_id)
+
+                # Skip if already voted
+                if disc.get("my_vote", ""):
+                    info(f"Already voted on {disc_id}, skipping.")
+                    continue
+
+                _ai_vote_one_disc(disc, disc_id, model, api_base, api_key, output_json)
+                voted_count += 1
+
+
+# ── AI voting helpers ────────────────────────────────────────────────────────
+
+AGORA_VOTE_SYSTEM_PROMPT = """\
+你是一个知乎众裁官（社区审核员）。你的任务是阅读被举报的评论，并根据知乎社区规范判断应该如何处理。
+
+## 投票选项
+
+- **affirmative**（赞同删除）：评论违反了社区规范，应当被删除。包括但不限于：人身攻击、辱骂、色情低俗、垃圾广告、恶意骚扰、不实信息等。
+- **abstain**（弃权）：无法判断或不确定是否违规。
+- **dissenting**（反对删除）：评论没有违规，属于正常讨论范畴，不应当被删除。
+
+## 输出规则
+
+你必须**只输出**以下三个单词之一：`affirmative`、`abstain` 或 `dissenting`。
+不要输出任何解释、分析、标点符号或额外的文字。你的整个回复必须且仅包含这三个单词中的一个。"""
+
+
+def _build_agora_vote_prompt(discussion: dict) -> str:
+    """Build the user prompt for LLM voting from a discussion dict.
+
+    :param discussion: Parsed discussion dict.
+    :returns: Prompt string.
+    """
+    comment = discussion.get("comment", {})
+    comment_content = comment.get("content", "(no content)")
+
+    report_reason = discussion.get("report_reason", "")
+    report_note = discussion.get("report_note", "")
+
+    origin_title = discussion.get("origin_title", "")
+    origin_url = discussion.get("origin_url", "")
+
+    parts = ["## 被举报的评论\n"]
+    parts.append(f"{comment_content}\n")
+
+    parts.append("## 举报理由\n")
+    parts.append(f"{report_reason}\n")
+    if report_note:
+        parts.append(f"补充说明：{report_note}\n")
+
+    if origin_title:
+        parts.append(f"## 评论所在的内容\n{origin_title}\n")
+    if origin_url:
+        parts.append(f"链接：{origin_url}\n")
+
+    parts.append("请根据以上信息判断该评论是否违规，并只输出投票标签。")
+    return "\n".join(parts)
+
+
+def _resolve_llm_config(
+    *,
+    api_base: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> tuple[str, str, str] | None:
+    """Resolve LLM config from args, env, and cached file.
+
+    :returns: ``(api_base, api_key, model)`` or ``None`` if api_key is missing.
+    """
+    try:
+        from zhihu_cli.extensions.crank.archiver import load_llm_config
+    except ImportError:
+        error("Cannot import LLM config loader (crank extension not available).")
+        return None
+
+    cached = load_llm_config()
+
+    _api_base = api_base or os.environ.get("LLM_API_BASE") or cached.get("api_base", "https://api.openai.com/v1")
+    _api_key = api_key or os.environ.get("LLM_API_KEY") or cached.get("api_key", "")
+    _model = model or os.environ.get("LLM_MODEL") or cached.get("model", "gpt-4o-mini")
+
+    if not _api_key:
+        error(
+            "LLM API key not configured. Set it via:\n"
+            "  zhihu config crank-llm set --api-base <URL> --api-key <KEY> --model <NAME>\n"
+            "Or set the LLM_API_KEY environment variable."
+        )
+        return None
+
+    return _api_base, _api_key, _model
+
+
+def _call_llm_for_vote(
+    discussion: dict,
+    *,
+    api_base: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    dry_run: bool = False,
+) -> str | None:
+    """Send discussion content to LLM and get a vote recommendation.
+
+    :param discussion: Parsed discussion dict.
+    :param api_base: Optional API endpoint override.
+    :param api_key: Optional API key override.
+    :param model: Optional model name override.
+    :param dry_run: If True, only validate config without calling the LLM.
+    :returns: Vote label (affirmative/abstain/dissenting) or None on failure.
+    """
+    resolved = _resolve_llm_config(api_base=api_base, api_key=api_key, model=model)
+    if resolved is None:
+        return None
+
+    _api_base, _api_key, _model = resolved
+
+    if dry_run:
+        # Config is valid — signal success without an actual LLM call.
+        return "affirmative"  # any non-None value works
+
+    prompt = _build_agora_vote_prompt(discussion)
+
+    try:
+        from openai import OpenAI  # type: ignore[import-untyped]
+    except ImportError:
+        error("The 'openai' package is required for AI voting. Install with: pip install openai")
+        return None
+
+    client = OpenAI(base_url=_api_base, api_key=_api_key)
+
+    try:
+        response = client.chat.completions.create(
+            model=_model,
+            messages=[
+                {"role": "system", "content": AGORA_VOTE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=16,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        raw = response.choices[0].message.content
+        if not raw:
+            error("LLM returned empty response.")
+            return None
+        vote = raw.strip().lower()
+        for v in VALID_VOTES:
+            if v in vote:
+                return v
+        error(f"LLM returned unrecognized vote: {vote!r}")
+        return None
+    except Exception as e:
+        error(f"LLM call failed: {e}")
+        return None
+
+
+def _ai_vote_one(
+    discussion_id: str,
+    model: str | None,
+    api_base: str | None,
+    api_key: str | None,
+    output_json: bool,
+) -> None:
+    """Fetch a specific discussion, call the LLM, and cast the vote.
+
+    :param discussion_id: The agora discussion ID.
+    """
+    try:
+        data = fetch_court_page(discussion_id=discussion_id)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    disc = data.get("current_discussion")
+    if not disc:
+        info(f"No discussion data found for ID: {discussion_id}")
+        return
+
+    disc_id = disc.get("id", discussion_id)
+    _ai_vote_one_disc(disc, disc_id, model, api_base, api_key, output_json)
+
+
+def _ai_vote_one_disc(
+    disc: dict,
+    disc_id: str,
+    model: str | None,
+    api_base: str | None,
+    api_key: str | None,
+    output_json: bool,
+) -> None:
+    """Call the LLM on *disc* and cast the vote.
+
+    :param disc: Parsed discussion dict.
+    :param disc_id: Discussion ID string.
+    """
+    comment = disc.get("comment", {})
+    content = comment.get("content", "(no content)")
+    report_reason = disc.get("report_reason", "")
+    origin_title = disc.get("origin_title", "")
+
+    # Display context
+    if not output_json:
+        section(f"AI 投票 — {disc_id}")
+        echo(f"  {f_label('举报理由:')} {click.style(report_reason, fg='red', bold=True)}")
+        echo(f"  {f_label('评论内容:')} {content[:200]}")
+        if origin_title:
+            echo(f"  {f_label('所在内容:')} {f_bold(origin_title)}")
+        echo(f"  {f_dim('正在调用 AI 分析...')}")
+
+    vote = _call_llm_for_vote(
+        disc,
+        api_base=api_base,
+        api_key=api_key,
+        model=model,
+    )
+
+    if not vote:
+        error("AI voting failed — skipping this discussion.")
+        return
+
+    label = VOTE_LABELS.get(vote, vote)
+
+    # Cast the vote
+    try:
+        vote_result = vote_discussion(disc_id, vote)
+    except ValueError as e:
+        raise click.BadParameter(str(e))
+
+    result = {
+        "discussion_id": disc_id,
+        "report_reason": report_reason,
+        "comment_content": content,
+        "origin_title": origin_title,
+        "ai_vote": vote,
+        "ai_vote_label": VOTE_LABELS.get(vote, vote),
+        "affirmative_count": vote_result["affirmative_count"],
+        "dissenting_count": vote_result["dissenting_count"],
+        "blind_test_wrong": vote_result["blind_test_wrong"],
+        "blind_test_today_wrong_count": vote_result["blind_test_today_wrong_count"],
+    }
+
+    if output_json:
+        print_json(result)
+        return
+
+    blank()
+    success(f"已投票: {label}")
+    echo(f"  {f_label('赞同 (affirmative):')} {f_num(vote_result['affirmative_count'])}")
+    echo(f"  {f_label('反对 (dissenting):')}  {f_num(vote_result['dissenting_count'])}")
+    if vote_result["blind_test_wrong"]:
+        warning(f"盲测错误 (blind test wrong) — 今日: {f_num(vote_result['blind_test_today_wrong_count'])}")
+    blank()
+
+
+# ── original helper ──────────────────────────────────────────────────────────
 
 
 def _print_agora_comment(comment: dict, reported_user: str) -> None:
