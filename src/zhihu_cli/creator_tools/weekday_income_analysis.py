@@ -37,7 +37,9 @@ def plot_weekday_analysis() -> None:
             y="income_yuan",
             data=df,
             order=days_order,
+            hue="day_of_week",
             palette="Blues",
+            legend=False,
             showmeans=True,
             meanprops={"marker": "o", "markerfacecolor": "white", "markeredgecolor": "black", "markersize": "8"},
         )
