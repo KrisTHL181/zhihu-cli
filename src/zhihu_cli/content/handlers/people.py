@@ -103,7 +103,12 @@ def fetch_member_answers(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's answers list."""
-    url = f"{MEMBER_API.format(token=url_token)}/answers?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}&sort_by=created"
+    url = (
+        f"{MEMBER_API.format(token=url_token)}/answers"
+        f"?include=data%5B%2A%5D.excerpt%2Cdata%5B%2A%5D.voteup_count"
+        f"%2Cdata%5B%2A%5D.comment_count%2Cdata%5B%2A%5D.is_copyable"
+        f"&offset=0&limit={limit}&sort_by=created"
+    )
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_answer_list):
         items.append(item)
@@ -140,7 +145,12 @@ def fetch_member_articles(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's articles list."""
-    url = f"{MEMBER_API.format(token=url_token)}/articles?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}&sort_by=created"
+    url = (
+        f"{MEMBER_API.format(token=url_token)}/articles"
+        f"?include=data%5B%2A%5D.excerpt%2Cdata%5B%2A%5D.voteup_count"
+        f"%2Cdata%5B%2A%5D.comment_count"
+        f"&offset=0&limit={limit}&sort_by=created"
+    )
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_article_list):
         items.append(item)
@@ -183,7 +193,12 @@ def fetch_member_pins(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's pins (想法) list."""
-    url = f"{MEMBER_API.format(token=url_token)}/pins?include=data%5B%2A%5D.excerpt%2Ccontent&offset=0&limit={limit}&sort_by=created"
+    url = (
+        f"{MEMBER_API.format(token=url_token)}/pins"
+        f"?include=data%5B%2A%5D.excerpt%2Cdata%5B%2A%5D.content"
+        f"%2Cdata%5B%2A%5D.voteup_count%2Cdata%5B%2A%5D.comment_count"
+        f"&offset=0&limit={limit}&sort_by=created"
+    )
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_pin_list):
         items.append(item)
@@ -232,6 +247,28 @@ def fetch_member_questions(
                 break
     except Exception:
         pass
+    return items
+
+
+# ── activity feed ──────────────────────────────────────────────────────────
+
+
+def _parse_activity_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    yield from data.get("data", [])
+
+
+def fetch_member_activities(
+    url_token: str,
+    limit: int = 20,
+    max_items: int | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch a member's activity feed (raw API items)."""
+    url = f"{MEMBER_API.format(token=url_token)}/activities?limit={limit}&after_id=0&desktop=True"
+    items: list[dict[str, Any]] = []
+    for item in stream_handler(url, _parse_activity_list):
+        items.append(item)
+        if max_items is not None and len(items) >= max_items:
+            break
     return items
 
 

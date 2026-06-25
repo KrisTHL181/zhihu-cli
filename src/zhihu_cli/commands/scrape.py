@@ -2,23 +2,38 @@
 
 import json
 import re
-import sys
 from pathlib import Path
 
 import click
 
 from zhihu_cli.content.handlers import get_data_dir
-from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.waterfall import stream_handler
-from zhihu_cli.output import (
-    echo,
-    error,
-    f_num,
-    f_path,
-    info,
-    print_json,
-    success,
+from zhihu_cli.content.handlers.people import (
+    fetch_member_activities,
+    fetch_member_answers,
+    fetch_member_articles,
+    get_my_url_token,
 )
+from zhihu_cli.output import f_name, f_num, f_path, info, print_json, success
+
+
+def _extract_url_token(token_or_url: str) -> str:
+    """Extract a Zhihu url_token from a full profile URL or return as-is."""
+    m = re.search(r"zhihu\.com/people/([^/?]+)", token_or_url)
+    if m:
+        return m.group(1)
+    return token_or_url.rstrip("/").split("/")[-1]
+
+
+def _resolve_url_token(url_token: str | None) -> str:
+    """Resolve url_token: use provided value or auto-detect from /api/v4/me."""
+    if url_token:
+        return _extract_url_token(url_token)
+    token = get_my_url_token()
+    if not token:
+        raise click.UsageError(
+            "Cannot detect your url_token. Provide one as an argument, or authenticate first: zhihu auth login"
+        )
+    return token
 
 
 def register_scrape(main_group: click.Group) -> None:
@@ -47,77 +62,101 @@ def register_scrape(main_group: click.Group) -> None:
             print_json(data)
             return
 
-    def _generic_list_scrape(api_description: str, output_file: str, output_json: bool = False) -> None:
-        """Generic stdin-based list scraper. User pastes the API's cURL command."""
-
-        if not cache_manager.load_headers():
-            error("No cached headers. Run 'zhihu auth paste' first.")
-            raise SystemExit(1)
-
-        echo(f"Paste the cURL command for the {api_description} API (Ctrl+D to finish):")
-        try:
-            curl_text = sys.stdin.read()
-        except EOFError:
-            curl_text = ""
-
-        if not curl_text.strip():
-            error("No input.")
-            raise SystemExit(1)
-
-        url_match = re.search(r"curl\s+'([^']+)'", curl_text)
-        if not url_match:
-            error("Could not parse URL from cURL.")
-            raise SystemExit(1)
-
-        initial_url = url_match.group(1).replace("http://", "https://")
-
-        def parse_items(data: dict) -> list[dict]:
-            return data.get("data", [])
-
-        all_items: list[dict] = []
-        for item in stream_handler(initial_url, parse_items):
-            all_items.append(item)
-            if len(all_items) % 20 == 0:
-                info(f"Collected {len(all_items)} items...")
-
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(all_items, f, ensure_ascii=False, indent=2)
-        success(f"Saved {f_num(len(all_items))} items to {f_path(output_file)}")
-        if output_json:
-            print_json(all_items)
-
     @scrape.command("activities")
+    @click.argument("url_token", required=False, default=None)
     @click.option(
         "--output",
         "-o",
         default=str(get_data_dir() / "exports" / "zhihu_user_activities.json"),
         help="Output JSON file",
     )
+    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20)")
+    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def scrape_activities(output: str, output_json: bool) -> None:
-        """Fetch user activity feed -> JSON. Requires pasting the activities API cURL."""
-        _generic_list_scrape("activities", output, output_json=output_json)
+    def scrape_activities(
+        url_token: str | None,
+        output: str,
+        limit: int,
+        max_items: int | None,
+        output_json: bool,
+    ) -> None:
+        """Fetch a user's activity feed -> JSON.
+
+        URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL.
+        Defaults to the authenticated user.
+        """
+        token = _resolve_url_token(url_token)
+        info(f"Fetching activities for {f_name(token)}...")
+        items = fetch_member_activities(token, limit=limit, max_items=max_items)
+
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        success(f"Saved {f_num(len(items))} activities to {f_path(output)}")
+        if output_json:
+            print_json(items)
 
     @scrape.command("answers")
+    @click.argument("url_token", required=False, default=None)
     @click.option(
         "--output",
         "-o",
         default=str(get_data_dir() / "exports" / "zhihu_answers.json"),
         help="Output JSON file",
     )
+    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20)")
+    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def scrape_answers_list(output: str, output_json: bool) -> None:
-        """Fetch user's answer list -> JSON. Requires pasting the answers API cURL."""
-        _generic_list_scrape("answers list", output, output_json=output_json)
+    def scrape_answers_list(
+        url_token: str | None,
+        output: str,
+        limit: int,
+        max_items: int | None,
+        output_json: bool,
+    ) -> None:
+        """Fetch a user's answer list -> JSON.
+
+        URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL.
+        Defaults to the authenticated user.
+        """
+        token = _resolve_url_token(url_token)
+        info(f"Fetching answers for {f_name(token)}...")
+        items = fetch_member_answers(token, limit=limit, max_items=max_items)
+
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        success(f"Saved {f_num(len(items))} answers to {f_path(output)}")
+        if output_json:
+            print_json(items)
 
     @scrape.command("articles")
+    @click.argument("url_token", required=False, default=None)
     @click.option(
         "--output",
         "-o",
         default=str(get_data_dir() / "exports" / "zhihu_articles.json"),
         help="Output JSON file",
     )
+    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20)")
+    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def scrape_articles_list(output: str, output_json: bool) -> None:
-        """Fetch user's article list -> JSON. Requires pasting the articles API cURL."""
-        _generic_list_scrape("articles list", output, output_json=output_json)
+    def scrape_articles_list(
+        url_token: str | None,
+        output: str,
+        limit: int,
+        max_items: int | None,
+        output_json: bool,
+    ) -> None:
+        """Fetch a user's article list -> JSON.
+
+        URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL.
+        Defaults to the authenticated user.
+        """
+        token = _resolve_url_token(url_token)
+        info(f"Fetching articles for {f_name(token)}...")
+        items = fetch_member_articles(token, limit=limit, max_items=max_items)
+
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        success(f"Saved {f_num(len(items))} articles to {f_path(output)}")
+        if output_json:
+            print_json(items)
