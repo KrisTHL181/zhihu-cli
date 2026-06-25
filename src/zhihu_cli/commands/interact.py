@@ -12,6 +12,8 @@ from zhihu_cli.content.handlers.collection import (
     create_collection,
     delete_collection,
     delete_to_collection,
+    get_collection_meta,
+    list_collection_contents,
     list_collections,
 )
 from zhihu_cli.content.handlers.comments import comment_item, delete_comment
@@ -45,6 +47,7 @@ from zhihu_cli.output import (
     item_index,
     print_json,
     success,
+    summary,
 )
 
 
@@ -333,6 +336,91 @@ def register_interact(main_group) -> None:
     def collect_delete(collection_id: str) -> None:
         """Delete a collection."""
         echo(delete_collection(collection_id))
+
+    @interact_collect.command("view")
+    @click.argument("collection_id_or_url")
+    @click.option("--limit", type=int, default=20, help="Items per page")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
+    def collect_view(
+        collection_id_or_url: str, limit: int, max_items: int | None, output_json: bool, output: str
+    ) -> None:
+        """View contents of a collection by ID or URL.
+
+        \b
+        Examples:
+          zhihu interact collect view 921015490
+          zhihu interact collect view https://www.zhihu.com/collection/921015490
+          zhihu interact collect view 921015490 --max 10 --json
+        """
+        # Resolve ID from URL or use as-is
+        item_type, item_id = get_type_and_id(collection_id_or_url)
+        if item_type == "collections":
+            collection_id = item_id
+        else:
+            collection_id = collection_id_or_url.strip()
+
+        meta = get_collection_meta(collection_id)
+        items = list_collection_contents(collection_id, limit=limit, max_items=max_items)
+
+        if output_json:
+            result = {"meta": meta, "items": items}
+            print_json(result)
+            if output:
+                with open(output, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+                success(f"Saved {len(items)} items to {output}")
+            return
+
+        # ── Terminal display ──────────────────────────────────────────────
+
+        title = meta.get("title", "") or "(untitled)"
+        creator = meta.get("creator", {})
+        creator_name = creator.get("name", "") or "unknown"
+        description = meta.get("description", "")
+        item_count = meta.get("item_count", 0)
+        follower_count = meta.get("follower_count", 0)
+
+        heading(f"Collection: {title}")
+        echo(f"  {f_label('by')} {f_name(creator_name)}")
+        if description:
+            echo(f"  {f_dim(description)}")
+        echo(f"  {f_label('items:')} {f_num(item_count)}  {f_label('followers:')} {f_num(follower_count)}")
+        echo()
+
+        if not items:
+            info("No items in this collection.")
+            return
+
+        for i, item in enumerate(items, 1):
+            ttype = item.get("type", "?")
+            item_title = item.get("title", "") or item.get("excerpt", "")[:80] or "(no title)"
+            author_name = item.get("author_name", "")
+            url = item.get("url", "")
+            upvotes = item.get("voteup_count", 0)
+            comments = item.get("comment_count", 0)
+            except_str = item.get("excerpt", "")
+            collect_time = item.get("collect_time", "")
+
+            echo(f"  {item_index(i, len(items))} {f_tag(ttype)} {f_bold(item_title[:100])}")
+            meta_line = f"{f_label('by')} {f_name(author_name)}" if author_name else ""
+            meta_line += f"  {f_label('↑')} {f_num(upvotes)}  {f_label('💬')} {f_num(comments)}"
+            if collect_time:
+                meta_line += f"  {f_meta(collect_time)}"
+            echo(f"    {meta_line}")
+            if except_str and except_str != item_title:
+                echo(f"    {f_dim(except_str[:150])}")
+            echo(f"    {f_url(url)}")
+
+        echo()
+        summary(f"{len(items)} items")
+
+        if output:
+            result = {"meta": meta, "items": items}
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            success(f"Saved {len(items)} items to {output}")
 
     @interact_collect.command("list")
     @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")

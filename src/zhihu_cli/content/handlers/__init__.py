@@ -36,6 +36,7 @@ ZHIHU_QUESTION_WITH_ANSWER_PATTERN = r"https?://(?:www\.)?zhihu\.com/question/(\
 ZHIHU_ANSWER_SHORT_PATTERN = r"https?://(?:www\.)?zhihu\.com/answer/(\d+)"
 ZHIHU_PIN_PATTERN = r"https?://(?:www\.)?zhihu\.com/pin/([^/?#]+)"
 ZHIHU_ZVIDEO_PATTERN = r"https?://(?:www\.)?zhihu\.com/zvideo/(\d+)"
+ZHIHU_COLLECTION_PATTERN = r"https?://(?:www\.)?zhihu\.com/collection/(\d+)"
 
 
 def get_type_and_id(url: str) -> tuple[str | None, str | None]:
@@ -69,6 +70,10 @@ def get_type_and_id(url: str) -> tuple[str | None, str | None]:
     match = re.search(ZHIHU_ZVIDEO_PATTERN, url)
     if match:
         return ("zvideos", match.group(1))
+
+    match = re.search(ZHIHU_COLLECTION_PATTERN, url)
+    if match:
+        return ("collections", match.group(1))
 
     return (None, None)
 
