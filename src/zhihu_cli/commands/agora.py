@@ -37,6 +37,7 @@ from zhihu_cli.output import (
     success,
     warning,
 )
+from zhihu_cli.prompts import AGORA_VOTE_SYSTEM_PROMPT
 
 
 def register_agora(main_group):
@@ -383,20 +384,6 @@ def register_agora(main_group):
 
 
 # ── AI voting helpers ────────────────────────────────────────────────────────
-
-AGORA_VOTE_SYSTEM_PROMPT = """\
-你是一个知乎众裁官（社区审核员）。你的任务是阅读被举报的评论，并根据知乎社区规范判断应该如何处理。
-
-## 投票选项
-
-- **affirmative**（赞同删除）：评论违反了社区规范，应当被删除。包括但不限于：人身攻击、辱骂、色情低俗、垃圾广告、恶意骚扰、不实信息等。
-- **abstain**（弃权）：无法判断或不确定是否违规。
-- **dissenting**（反对删除）：评论没有违规，属于正常讨论范畴，不应当被删除。
-
-## 输出规则
-
-你必须**只输出**以下三个单词之一：`affirmative`、`abstain` 或 `dissenting`。
-不要输出任何解释、分析、标点符号或额外的文字。你的整个回复必须且仅包含这三个单词中的一个。"""
 
 
 def _build_agora_vote_prompt(discussion: dict) -> str:

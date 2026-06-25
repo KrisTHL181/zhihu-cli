@@ -27,6 +27,7 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.universal_converter import convert_items
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.prompts import COMMIT_MESSAGE_SYSTEM_PROMPT, SERIES_NAMING_SYSTEM_PROMPT
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 
@@ -181,7 +182,7 @@ def call_llm_for_name(
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位资深的科学文献策展人，专门为民间科学家的连载论文命名。你总是直接输出命名结果，不附加任何解释。",
+                    "content": SERIES_NAMING_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -358,7 +359,7 @@ def call_llm_for_commit_message(
             messages=[
                 {
                     "role": "system",
-                    "content": "你是烈火殿策展人，专门为民科论文收藏撰写 git commit message。你总是直接输出 commit message，不附加任何解释。",
+                    "content": COMMIT_MESSAGE_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": prompt},
             ],
