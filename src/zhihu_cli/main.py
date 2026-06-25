@@ -8,6 +8,7 @@ from zhihu_cli.commands.browse import register_browse
 from zhihu_cli.commands.chat import register_chat
 from zhihu_cli.commands.config import register_config
 from zhihu_cli.commands.convert import register_convert
+from zhihu_cli.commands.daemon import register_daemon
 from zhihu_cli.commands.download import register_download
 from zhihu_cli.commands.interact import register_interact
 from zhihu_cli.commands.listen import register_listen
@@ -38,6 +39,7 @@ register_browse(main)
 register_chat(main)
 register_config(main)
 register_convert(main)
+register_daemon(main)
 register_download(main)
 register_interact(main)
 register_listen(main)

@@ -1,248 +1,184 @@
-import hashlib
-import json
-import re
+"""HTTP session management — lightweight entry point.
+
+This module provides a lazy :data:`session` singleton.  On first access
+it attempts to connect to the background daemon (→ lightweight
+:class:`~zhihu_cli.daemon.proxy.DaemonProxySession`, no curl_cffi needed).
+If the daemon is unavailable it falls back to importing the heavy
+:mod:`_session_core` module and building a direct :class:`ZhihuSession`.
+
+All heavy imports (curl_cffi, lxml) are deferred to :mod:`_session_core`,
+which is loaded *only* when a direct session is built or when calling
+``fetch_page_html`` / ``get_page_state``.
+"""
+
+from __future__ import annotations
+
 from typing import Any
-from urllib.parse import urlparse
 
-from curl_cffi import CurlHttpVersion
-from curl_cffi import requests as _requests
-from lxml import html as lxml_html
-
-from zhihu_cli.content.handlers import get_user_agent
+# ── lightweight (stdlib-only) imports ──────────────────────────────────────
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.captcha import detect_captcha, handle_captcha
 
-ZSE93 = "101_3_3.0"
+# ── lazy re-exports ────────────────────────────────────────────────────────
+#
+# Module-level ``from requests import <name>`` triggers ``__getattr__``,
+# so names that are frequently imported at module level are defined as
+# real *wrapper* functions below — the heavy import only fires when the
+# function is *called*, not when it is *imported*.
+#
+# Rarely-imported names (ZhihuSession, get_browser, …) stay in
+# _LAZY_EXPORTS and resolve via __getattr__.
 
+_LAZY_EXPORTS: dict[str, str] = {
+    "ZSE93": "_session_core",
+    "get_browser": "_session_core",
+    "ZhihuSession": "_session_core",
+    "CurlHttpVersion": "_session_core",
+    "_resolve_user_agent": "_session_core",
+    "_build_direct_session": "_session_core",
+    "_is_captcha_endpoint": "_session_core",
+    "_print_captcha_warning": "_session_core",
+}
 
-def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
-    """Detect browser family from a User-Agent string for curl_cffi TLS impersonation.
-
-    Matching order is deliberate:
-    1. Edge first — its UA also contains ``Chrome/``.
-    2. Chrome Android — distinguish phone (``Mobile``) vs tablet.
-    3. Chrome desktop — ``Chrome/`` without ``Mobile``.
-    4. Firefox — ``Firefox/`` + ``Gecko/``.
-    5. iOS Safari — ``iPhone/iPad/iPod`` + ``Safari/``.
-    6. Desktop Safari — ``Safari/`` + ``Version/``, no ``Mobile``, no ``Chrome/``.
-
-    Tor Browser is intentionally **not** detected — it forges a generic Firefox
-    UA on all platforms and actively hides its fingerprint.
-    """
-    if not ua:
-        return "chrome"
-
-    # Edge — contains the Edg/ marker (newer Chromium-based Edge).
-    if re.search(r"Edg/", ua):
-        return "edge"
-
-    # Chrome on Android — Linux + Android + Chrome/.
-    if "Android" in ua and re.search(r"Chrome/", ua):
-        return "chrome_android"
-
-    # Chrome desktop — Chrome/ without Edg/, Android, or Mobile.
-    if re.search(r"Chrome/", ua) and "Mobile" not in ua:
-        return "chrome"
-
-    # Firefox — Firefox/ + Gecko/.
-    if re.search(r"Firefox/", ua) and re.search(r"Gecko/", ua):
-        return "firefox"
-
-    # iOS Safari — iPhone/iPad/iPod device token + Safari/.
-    if re.search(r"(?:iPhone|iPad|iPod)", ua) and re.search(r"Safari/", ua):
-        return "safari_ios"
-
-    # Desktop Safari — Safari/ + Version/, no Mobile, no Chrome/.
-    if re.search(r"Safari/", ua) and re.search(r"Version/", ua) and "Mobile" not in ua:
-        return "safari"
-
-    return "chrome"
+# ── module-level __getattr__ ───────────────────────────────────────────────
 
 
-class ZhihuSession(_requests.Session):
-    """Session that auto-injects x-zse-93 / x-zse-96 signing headers.
+def __getattr__(name: str) -> Any:
+    # ── lazy session singleton ──────────────────────────────────────
+    if name in ("session", "requests"):
+        return _get_session()
+    if name == "headers":
+        _get_session()  # ensure headers is populated
+        return _headers
 
-    Equivalent to zhihu++'s ``signFetchRequest()``: builds a canonical
-    source string from the ZSE version, request path, ``d_c0`` cookie, and
-    JSON body (when present), hashes it with MD5, then encrypts the hash
-    via the ZSEv4 block cipher.
+    # ── lazy re-exports from _session_core ──────────────────────────
+    if name in _LAZY_EXPORTS:
+        mod_name = _LAZY_EXPORTS[name]
+        import importlib
 
-    Set ``captcha_handler`` to "auto" (interactive), "prompt" (ask first),
-    or "ignore" (skip handling) to control risk-control handling.
-    """
+        mod = importlib.import_module(f"zhihu_cli.content.handlers.{mod_name}")
+        return getattr(mod, name)
 
-    CAPTCHA_HANDLER_MODES = ("auto", "prompt", "ignore")
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._zse_cipher = None  # lazy init to avoid import-time side effects
-        self.captcha_handler: str = "auto"  # "auto", "prompt", or "ignore"
-
-    @property
-    def zse_cipher(self):
-        if self._zse_cipher is None:
-            from zhihu_cli.content.utils.zse import ZSECipher
-
-            self._zse_cipher = ZSECipher()
-        return self._zse_cipher
-
-    def _get_dc0(self) -> str:
-        cookie_header = self.headers.get("Cookie", "")
-        if isinstance(cookie_header, str):
-            for part in cookie_header.split("; "):
-                if part.startswith("d_c0="):
-                    return part[5:]
-        # curl_cffi Cookies may yield strings (names) when iterated
-        try:
-            return str(self.cookies.get("d_c0", ""))
-        except Exception:
-            pass
-        return ""
-
-    def _build_sign_source(self, method: str, url: str, kwargs: dict) -> str | None:
-        parsed = urlparse(url)
-        hostname = parsed.hostname or ""
-
-        if not (hostname == "zhihu.com" or hostname.endswith(".zhihu.com")):
-            return None
-
-        path_and_query = parsed.path
-        if parsed.query:
-            path_and_query += "?" + parsed.query
-
-        dc0 = self._get_dc0()
-
-        body = None
-        if "json" in kwargs and kwargs["json"] is not None:
-            body = json.dumps(kwargs["json"], separators=(",", ":"), ensure_ascii=False)
-        elif "data" in kwargs:
-            data = kwargs["data"]
-            if isinstance(data, str):
-                try:
-                    json.loads(data)
-                    body = data
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    pass
-
-        parts = [ZSE93, path_and_query, dc0]
-        if body is not None:
-            parts.append(body)
-        return "+".join(parts)
-
-    def request(self, method, url, **kwargs):
-        sign_source = self._build_sign_source(method, url, kwargs)
-        if sign_source is not None:
-            md5_hash = hashlib.md5(sign_source.encode()).hexdigest()
-            signature = self.zse_cipher.encrypt(md5_hash)
-
-            zse_headers = {
-                "x-zse-93": ZSE93,
-                "x-zse-96": "2.0_" + signature,
-                "x-requested-with": "fetch",
-            }
-            user_headers = kwargs.get("headers", {})
-            zse_headers.update(user_headers)
-            kwargs["headers"] = zse_headers
-
-        resp = super().request(method, url, **kwargs)
-
-        # Post-response captcha / risk-control handling
-        if self.captcha_handler != "ignore":
-            captcha_error = detect_captcha(resp)
-            if captcha_error is not None:
-                # Avoid re-entrant handling for captcha-related endpoints
-                parsed = urlparse(url)
-                path = parsed.path
-                if not _is_captcha_endpoint(path):
-                    mode = self.captcha_handler
-                    if mode == "auto":
-                        result = handle_captcha(self, captcha_error)
-                        if result == "resolved":
-                            # Retry the original request once after verification
-                            resp = super().request(method, url, **kwargs)
-                        # For "skipped" or "cancelled", return the original
-                        # 403 response so the caller can handle it appropriately.
-                    elif mode == "prompt":
-                        _print_captcha_warning(captcha_error)
-
-        return resp
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _resolve_user_agent(headers: dict[str, str]) -> str:
-    """Return the effective User-Agent: configured override > profile UA > empty."""
-    configured = get_user_agent()
-    if configured:
-        return configured
-    return headers.get("User-Agent", "")
-
-
-def _build_session() -> ZhihuSession:
-    """Create a ZhihuSession with the configured or profile User-Agent."""
-    hdrs = cache_manager.load_headers()
-    ua = _resolve_user_agent(hdrs)
-    sess = ZhihuSession(
-        impersonate=get_browser(ua),
-        http_version=CurlHttpVersion.V3,
-    )
-    sess.headers.update(hdrs)
-    if ua:
-        sess.headers["User-Agent"] = ua
-    return sess
-
-
-headers: dict[str, str] = {}
-session = requests = _build_session()
-
-
-def reload_session() -> None:
-    """Reload the global session with headers from the active profile."""
-    global headers, session, requests
-    sess = _build_session()
-    headers = dict(sess.headers)
-    session = requests = sess
+# ── real wrapper functions (import is cheap, call triggers heavy load) ────
+#
+# These are defined as actual module-level functions so that ``from
+# requests import fetch_page_html`` does NOT trigger __getattr__ →
+# _session_core import.  The heavy import happens inside the function
+# body on first call.
 
 
 def fetch_page_html(url: str) -> str:
+    """Fetch a Zhihu page as HTML (uses the global session)."""
     url = url.replace("http://", "https://")
-    return session.get(url).text
+    return _get_session().get(url).text
 
 
 def get_page_state(html_text: str, key: str = "entities") -> dict[str, Any]:
-    doc = lxml_html.fromstring(html_text)
+    """Extract ``js-initialData`` from a Zhihu SSR page."""
+    from zhihu_cli.content.handlers._session_core import get_page_state as _impl
 
-    script_tag = doc.find(".//script[@id='js-initialData']")
-    if script_tag is None or not script_tag.text:
-        raise ValueError("Could not find 'js-initialData' script tag")
-
-    initial_data = json.loads(script_tag.text)
-    return initial_data["initialState"][key]
+    return _impl(html_text, key)
 
 
-# ── captcha helpers ────────────────────────────────────────────────────────
+# ── lazy session state ─────────────────────────────────────────────────────
+
+_session: Any = None
+_headers: dict[str, str] = {}
 
 
-def _is_captcha_endpoint(path: str) -> bool:
-    """Return True if the path belongs to a captcha-related endpoint.
+def _get_session() -> Any:
+    """Return the singleton session, creating it on first call."""
+    global _session, _headers
+    if _session is not None:
+        return _session
 
-    These endpoints should NOT trigger captcha handling themselves,
-    to avoid infinite recursion.
+    _session = _build_session()
+    if _session is not None:
+        try:
+            _headers = dict(_session.headers)
+        except Exception:
+            pass
+    return _session
+
+
+def _build_session() -> Any:
+    """Try daemon proxy first; fall back to direct :class:`ZhihuSession`.
+
+    The daemon path is extremely fast (~1 ms) because it only uses stdlib
+    (socket, json).  The direct path triggers a full import of
+    :mod:`_session_core` (curl_cffi + lxml, ~200 ms).
     """
-    captcha_paths = (
-        "/api/v4/anticrawl/new_captcha_appeal",
-        "/antispam/",
-        "/account/unhuman",
-        "/account/risk_control",
-        "/api/v3/oauth/captcha",
-    )
-    return path.startswith(captcha_paths)
+    # ── check daemon config ──────────────────────────────────────────
+    try:
+        config = cache_manager.get_config()
+        daemon_enabled = config.get("daemon", {}).get("enabled", True)
+    except Exception:
+        daemon_enabled = True
+
+    if daemon_enabled:
+        proxy: Any = None
+        try:
+            from zhihu_cli.daemon.proxy import DaemonProxySession
+
+            proxy = DaemonProxySession()
+            proxy._test_connection()
+
+            # Mirror current profile headers
+            hdrs = cache_manager.load_headers()
+            proxy.headers = dict(hdrs)
+            if hdrs.get("User-Agent"):
+                proxy.headers["User-Agent"] = hdrs["User-Agent"]
+
+            # Ensure daemon session matches active profile
+            proxy._send_reload()
+
+            return proxy
+        except Exception:
+            # Close socket if we connected but a later step failed
+            if proxy is not None:
+                try:
+                    proxy.close()
+                except Exception:
+                    pass
+            # Fall through to direct session
+
+    # ── direct session (lazy heavy import) ───────────────────────────
+    from zhihu_cli.content.handlers._session_core import _build_direct_session
+
+    return _build_direct_session()
 
 
-def _print_captcha_warning(captcha_error: dict) -> None:
-    """Print a brief warning that captcha was triggered (non-blocking)."""
-    redirect = captcha_error.get("redirect", "")
-    print()
-    print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)")
-    if redirect:
-        print(f"  Verify at: {redirect}")
-    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.")
-    print()
+def reload_session() -> None:
+    """Reload the global session with headers from the active profile.
+
+    When proxying through the daemon, sends a reload message so the
+    daemon rebuilds its session from the new profileʼs headers.  For a
+    direct session, rebuilds the session in-process.
+    """
+    global _session, _headers
+
+    try:
+        from zhihu_cli.daemon.proxy import DaemonProxySession
+    except ImportError:
+        DaemonProxySession = None  # type: ignore[assignment]
+
+    if DaemonProxySession is not None and isinstance(_session, DaemonProxySession):
+        # Update local headers mirror
+        hdrs = cache_manager.load_headers()
+        _headers = dict(hdrs)
+        _session.headers = dict(hdrs)
+        if hdrs.get("User-Agent"):
+            _session.headers["User-Agent"] = hdrs["User-Agent"]
+
+        _session._send_reload()
+        _session._send_config("captcha_handler", _session.captcha_handler)
+    else:
+        # Direct reload: rebuild the session
+        sess = _build_session()
+        _session = sess
+        try:
+            _headers = dict(sess.headers)
+        except Exception:
+            pass
