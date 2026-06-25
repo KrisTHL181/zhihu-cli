@@ -162,9 +162,9 @@ def register_config(main_group):
         cache_manager.set_plot_dpi(300)
         success("Plot DPI reset to: 300")
 
-    # ── config crank-llm ──────────────────────────────────────────────────────
+    # ── config llm ──────────────────────────────────────────────────────
 
-    @config.group("crank-llm")
+    @config.group("llm")
     def config_crank_llm() -> None:
         """Manage the cached LLM configuration for the crank extension."""
 
@@ -176,7 +176,7 @@ def register_config(main_group):
         """Cache LLM credentials for the crank archiver.
 
         \033[2mExample:\033[0m
-          zhihu config crank-llm set --api-base https://api.openai.com/v1 --api-key sk-xxx --model gpt-4
+          zhihu config llm set --api-base https://api.openai.com/v1 --api-key sk-xxx --model gpt-4
         """
         try:
             from zhihu_cli.extensions.crank.archiver import save_llm_config

@@ -316,7 +316,7 @@ def register_agora(main_group):
         discussion, lets the LLM decide the vote, casts it, and repeats
         until all pending discussions are exhausted.
 
-        Requires LLM config via ``zhihu config crank-llm set`` or the
+        Requires LLM config via ``zhihu config llm set`` or the
         ``LLM_API_BASE`` / ``LLM_API_KEY`` / ``LLM_MODEL`` env vars.
 
         \b
@@ -443,7 +443,7 @@ def _resolve_llm_config(
     if not _api_key:
         error(
             "LLM API key not configured. Set it via:\n"
-            "  zhihu config crank-llm set --api-base <URL> --api-key <KEY> --model <NAME>\n"
+            "  zhihu config llm set --api-base <URL> --api-key <KEY> --model <NAME>\n"
             "Or set the LLM_API_KEY environment variable."
         )
         return None
