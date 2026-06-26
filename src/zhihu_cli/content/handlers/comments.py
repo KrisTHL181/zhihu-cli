@@ -6,7 +6,7 @@ from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils import markdown2html
 from zhihu_cli.content.utils.html2markdown import converter
-from zhihu_cli.output import divider, echo, f_green, f_meta, f_name, f_num, item_index
+from zhihu_cli.output import divider, echo, f_dim, f_green, f_meta, f_name, f_num, item_index
 
 COMMENT_API: dict[str, str] = {
     "answers": "https://www.zhihu.com/api/v4/comment_v5/answers/{item_id}/comment",
@@ -125,6 +125,7 @@ def print_comments(item_type: str, item_id: str) -> None:
         header = (
             f"\n{item_index(comment_id)} "
             f"{f_name(comment['author'])} "
+            f"{f_meta('| ID:')} {f_dim(comment['id'])} "
             f"{f_meta('| Likes:')} {f_num(comment['like_count'])} "
             f"{f_meta('| Dislikes:')} {f_num(comment['dislike_count'])} "
             f"{f_meta('| Created:')} {f_meta(fmt_time(comment['created_time']))}"
@@ -137,6 +138,7 @@ def print_comments(item_type: str, item_id: str) -> None:
             for child in comment["child_comments"]:
                 child_header = (
                     f"    - {f_name(child['author'])} "
+                    f"{f_meta('| ID:')} {f_dim(child['id'])} "
                     f"{f_meta('| Likes:')} {f_num(child['like_count'])} "
                     f"{f_meta('| Dislikes:')} {f_num(child['dislike_count'])} "
                     f"{f_meta('| Created:')} {f_meta(fmt_time(child['created_time']))}"
@@ -147,15 +149,41 @@ def print_comments(item_type: str, item_id: str) -> None:
         comment_id += 1
 
 
-def comment_item(item_type: str, item_id: str, content: str) -> dict[str, Any]:
+def comment_item(item_type: str, item_id: str, content: str, reply_comment_id: str | None = None) -> dict[str, Any]:
+    """Post a root comment or reply to an existing comment on an item.
+
+    :param item_type: One of ``"answers"``, ``"articles"``, ``"pins"``, ``"questions"``.
+    :param item_id: The resource ID.
+    :param content: Comment body (markdown, auto-converted to HTML).
+    :param reply_comment_id: When set, this becomes a reply to the specified
+        comment rather than a root comment.
+    :returns: API response dict.
+    :raises ValueError: If *item_type* is unsupported.
+    """
     segment = _URL_SEGMENT.get(item_type, item_type)
     if segment not in COMMENT_API:
         raise ValueError(f"Invalid item_type: '{item_type}'. Supported types are: {list(COMMENT_API.keys())}")
 
     api = COMMENT_API[segment].replace("{item_id}", item_id)
-    content = f"{markdown2html.markdown2html(content, scene='answer')}"
+    content_html = markdown2html.markdown2html(content, scene="answer")
 
-    resp = session.post(api, json={"content": content})
+    if reply_comment_id:
+        payload: dict[str, Any] = {
+            "comment_id": "",
+            "content": content_html,
+            "extra_params": "",
+            "has_img": False,
+            "reply_comment_id": reply_comment_id,
+            "score": 0,
+            "selected_settings": [],
+            "segment": None,
+            "sticker_type": None,
+            "unfriendly_check": "strict",
+        }
+    else:
+        payload = {"content": content_html}
+
+    resp = session.post(api, json=payload)
     return resp.json()
 
 

@@ -291,6 +291,27 @@ def register_interact(main_group) -> None:
         resp = comment_item(item_type, item_id, content)
         echo(resp)
 
+    @interact_comment.command("reply")
+    @click.argument("url")
+    @click.argument("comment_id")
+    @click.argument("content")
+    def comment_reply(url: str, comment_id: str, content: str) -> None:
+        """Reply to an existing comment on an item.
+
+        URL identifies the item (answer/article/pin/question) the comment
+        belongs to.  COMMENT_ID is the target comment to reply to.
+
+        \b
+        Examples:
+          zhihu interact comment reply https://www.zhihu.com/question/123/answer/456 11515861130 "同意！"
+          zhihu interact comment reply https://zhuanlan.zhihu.com/p/123456 11515861130 "好文"
+        """
+        item_type, item_id = _parse_item_url(url)
+        if item_type == "answers":
+            item_id = _resolve_answer_id(item_id)
+        resp = comment_item(item_type, item_id, content, reply_comment_id=comment_id)
+        echo(resp)
+
     @interact_comment.command("delete")
     @click.argument("comment_id")
     def comment_delete(comment_id: str) -> None:
