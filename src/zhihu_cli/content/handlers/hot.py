@@ -11,6 +11,14 @@ def _parse_hot_item(item: dict[str, Any]) -> dict[str, Any]:
     target = item.get("target", {})
     url = target.get("url", "")
     url = url.replace("api.zhihu.com", "www.zhihu.com").replace("/questions/", "/question/")
+
+    # Zhihu hot list anonymizes question authors (id=0, name="用户").
+    # Treat the anonymized placeholder the same as absent — don't show it.
+    raw_author = target.get("author", {})
+    author_name = raw_author.get("name", "")
+    if author_name == "用户" and str(raw_author.get("id", "")) == "0":
+        author_name = ""
+
     return {
         "feed_id": item.get("id", ""),
         "card_id": item.get("card_id", ""),
@@ -19,7 +27,7 @@ def _parse_hot_item(item: dict[str, Any]) -> dict[str, Any]:
         "target_type": target.get("type", ""),
         "target_id": str(target.get("id", "")),
         "url": url,
-        "author": target.get("author", {}).get("name", ""),
+        "author": author_name,
         "heat": item.get("detail_text", ""),
         "trend": item.get("trend", 0),
         "debut": item.get("debut", False),
