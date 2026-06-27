@@ -6,7 +6,7 @@ from pathlib import Path
 
 import click
 
-from zhihu_cli.commands._helpers import _save_markdown
+from zhihu_cli.commands._helpers import _extract_url_token, _save_markdown
 from zhihu_cli.content.download_contents import (
     ContentDownloader,
     download_media_files,
@@ -50,16 +50,6 @@ from zhihu_cli.output import (
     success,
     warning,
 )
-
-
-def _extract_url_token(token_or_url: str) -> str:
-    """Extract a Zhihu url_token from a full profile URL or return as-is."""
-    import re
-
-    m = re.search(r"zhihu\.com/people/([^/?]+)", token_or_url)
-    if m:
-        return m.group(1)
-    return token_or_url.rstrip("/").split("/")[-1]
 
 
 @click.group()

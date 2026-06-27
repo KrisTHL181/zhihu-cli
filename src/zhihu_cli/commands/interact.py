@@ -4,7 +4,13 @@ import json
 
 import click
 
-from zhihu_cli.commands._helpers import _parse_item_url, _resolve_answer_id
+from zhihu_cli.commands._helpers import (
+    _display_following_items,
+    _parse_item_url,
+    _resolve_answer_id,
+    _resolve_url_token,
+    _save_json_output,
+)
 from zhihu_cli.content.handlers import get_type_and_id
 from zhihu_cli.content.handlers.collection import (
     add_to_collection,
@@ -17,7 +23,7 @@ from zhihu_cli.content.handlers.collection import (
     list_collections,
 )
 from zhihu_cli.content.handlers.comments import comment_item, delete_comment
-from zhihu_cli.content.handlers.people import block, follow, get_my_url_token, unblock, unfollow
+from zhihu_cli.content.handlers.people import block, follow, unblock, unfollow
 from zhihu_cli.content.handlers.question import (
     downvote_answer,
     downvote_question,
@@ -35,7 +41,6 @@ from zhihu_cli.output import (
     error,
     f_bold,
     f_dim,
-    f_green,
     f_label,
     f_meta,
     f_name,
@@ -69,100 +74,6 @@ def register_interact(main_group) -> None:
         if result != (None, None):
             return result
         return (None, url_or_id)
-
-    def _extract_url_token(token_or_url: str) -> str:
-        """Extract a Zhihu url_token from a full profile URL or return as-is."""
-        import re
-
-        m = re.search(r"zhihu\.com/people/([^/?]+)", token_or_url)
-        if m:
-            return m.group(1)
-        return token_or_url.rstrip("/").split("/")[-1]
-
-    def _resolve_following_token(url_token: str | None) -> str:
-        """Resolve the url_token: use provided value or auto-detect from /api/v4/me."""
-        if url_token:
-            return _extract_url_token(url_token)
-        token = get_my_url_token()
-        if not token:
-            raise click.UsageError(
-                "Cannot detect your url_token. Please authenticate first (zhihu auth login) "
-                "or provide --url-token explicitly."
-            )
-        return token
-
-    def _display_following_items(items: list[dict], totals: int | None = None) -> None:
-        """Display a list of following items in terminal mode."""
-        for i, item in enumerate(items, 1):
-            ttype = item.get("type", "?")
-
-            if ttype == "user":
-                name = item.get("name", "")
-                headline = item.get("headline", "")
-                is_followed = item.get("is_followed", False)
-                is_following = item.get("is_following", False)
-                mutual = f" {f_green('[互关]')}" if (is_followed and is_following) else ""
-                f_cnt = item.get("follower_count", 0)
-                a_cnt = item.get("answer_count", 0)
-                art_cnt = item.get("articles_count", 0)
-                stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('answers:')} {f_num(a_cnt)}  {f_label('articles:')} {f_num(art_cnt)}"
-                echo(f"  {item_index(i)} {f_bold(name)}{mutual}")
-                if headline:
-                    echo(f"    {f_dim(headline[:120])}")
-                echo(f"    {f_dim(stats)}")
-                echo(f"    {f_url(item.get('url', ''))}")
-
-            elif ttype == "topic":
-                name = item.get("name", "")
-                intro = item.get("introduction", "") or item.get("excerpt", "")
-                f_cnt = item.get("followers_count", 0)
-                q_cnt = item.get("questions_count", 0)
-                stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('questions:')} {f_num(q_cnt)}"
-                echo(f"  {item_index(i)} {f_bold(name)} {f_tag('topic')}")
-                if intro:
-                    echo(f"    {f_dim(intro[:120])}")
-                echo(f"    {f_dim(stats)}")
-                echo(f"    {f_url(item.get('url', ''))}")
-
-            elif ttype == "question":
-                title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
-                a_cnt = item.get("answer_count", 0)
-                f_cnt = item.get("follower_count", 0)
-                ctime = item.get("created_time", "")
-                stats = f"{f_label('answers:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}  {f_label('created:')} {f_meta(ctime)}"
-                echo(f"  {item_index(i)} {f_bold(title[:120])}")
-                echo(f"    {f_dim(stats)}")
-                echo(f"    {f_url(item.get('url', ''))}")
-
-            elif ttype == "column":
-                title = item.get("title", "") or "(no title)"
-                desc = item.get("description", "") or item.get("excerpt", "")
-                creator = item.get("creator", "")
-                f_cnt = item.get("followers_count", 0)
-                art_cnt = item.get("articles_count", 0)
-                stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('articles:')} {f_num(art_cnt)}"
-                echo(f"  {item_index(i)} {f_bold(title)} {f_tag('column')}")
-                if creator:
-                    echo(f"    {f_name(creator)}")
-                if desc:
-                    echo(f"    {f_dim(desc[:120])}")
-                echo(f"    {f_dim(stats)}")
-                echo(f"    {f_url(item.get('url', ''))}")
-
-            elif ttype == "collection":
-                title = item.get("title", "") or "(no title)"
-                desc = item.get("description", "")
-                creator_name = item.get("creator_name", "")
-                a_cnt = item.get("answer_count", 0)
-                f_cnt = item.get("follower_count", 0)
-                stats = f"{f_label('items:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}"
-                echo(f"  {item_index(i)} {f_bold(title)} {f_tag('collection')}")
-                if creator_name:
-                    echo(f"    {f_label('by')} {f_name(creator_name)}")
-                if desc:
-                    echo(f"    {f_dim(desc[:120])}")
-                echo(f"    {f_dim(stats)}")
-                echo(f"    {f_url(item.get('url', ''))}")
 
     # ── vote ────────────────────────────────────────────────────────────────
 
@@ -390,10 +301,7 @@ def register_interact(main_group) -> None:
         if output_json:
             result = {"meta": meta, "items": items}
             print_json(result)
-            if output:
-                with open(output, "w", encoding="utf-8") as f:
-                    json.dump(result, f, ensure_ascii=False, indent=2)
-                success(f"Saved {len(items)} items to {output}")
+            _save_json_output(result, output, "items")
             return
 
         # ── Terminal display ──────────────────────────────────────────────
@@ -439,11 +347,7 @@ def register_interact(main_group) -> None:
         echo()
         summary(f"{len(items)} items")
 
-        if output:
-            result = {"meta": meta, "items": items}
-            with open(output, "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
-            success(f"Saved {len(items)} items to {output}")
+        _save_json_output({"meta": meta, "items": items}, output, "items")
 
     @interact_collect.command("list")
     @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
@@ -454,17 +358,14 @@ def register_interact(main_group) -> None:
     def collect_list(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
         """List your collections."""
         set_json_mode(output_json)
-        token = _resolve_following_token(url_token)
+        token = _resolve_url_token(url_token)
         info(f"Fetching collections for {token}...")
 
         items = list_collections(token, limit=limit, max_items=max_items)
 
         if output_json:
             print_json(items)
-            if output:
-                with open(output, "w", encoding="utf-8") as f:
-                    json.dump(items, f, ensure_ascii=False, indent=2)
-                success(f"Saved {len(items)} items to {output}")
+            _save_json_output(items, output, "collections")
             return
 
         if not items:
@@ -473,10 +374,7 @@ def register_interact(main_group) -> None:
 
         _display_following_items(items)
 
-        if output:
-            with open(output, "w", encoding="utf-8") as f:
-                json.dump(items, f, ensure_ascii=False, indent=2)
-            success(f"Saved {len(items)} items to {output}")
+        _save_json_output(items, output, "collections")
 
     # ── report ──────────────────────────────────────────────────────────────
 

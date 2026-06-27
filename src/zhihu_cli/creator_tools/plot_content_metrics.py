@@ -138,7 +138,7 @@ def plot_content_metrics(no_pv: bool = False, no_show: bool = False) -> None:
             print("No plottable data found.")
             return
 
-    except Exception as e:
+    except (ValueError, OSError, KeyError) as e:
         print(f"Error generating plot: {e}")
         import traceback
 

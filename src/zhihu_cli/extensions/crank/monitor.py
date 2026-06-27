@@ -62,7 +62,7 @@ def parse_frontmatter_field(filepath: Path, field: str) -> str | None:
     """
     try:
         text = filepath.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, UnicodeDecodeError, UnicodeError):
         return None
     if not text.startswith("---"):
         return None

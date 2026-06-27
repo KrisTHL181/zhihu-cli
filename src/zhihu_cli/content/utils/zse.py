@@ -608,8 +608,8 @@ def main() -> None:
         # Try to decrypt first
         decrypted = cipher.decrypt(input_text)
         print(f"decrypted: {decrypted}")
-    except Exception:
-        # If decryption fails, encrypt
+    except (ValueError, KeyError):
+        # If decryption fails (plaintext input), encrypt instead
         encrypted = cipher.encrypt(input_text)
         print(encrypted)
 

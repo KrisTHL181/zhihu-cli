@@ -1,39 +1,18 @@
 """Scrape command group — batch scrape user content lists to JSON files."""
 
 import json
-import re
 from pathlib import Path
 
 import click
 
+from zhihu_cli.commands._helpers import _resolve_url_token
 from zhihu_cli.content.handlers import get_data_dir
 from zhihu_cli.content.handlers.people import (
     fetch_member_activities,
     fetch_member_answers,
     fetch_member_articles,
-    get_my_url_token,
 )
 from zhihu_cli.output import f_name, f_num, f_path, info, print_json, set_json_mode, success
-
-
-def _extract_url_token(token_or_url: str) -> str:
-    """Extract a Zhihu url_token from a full profile URL or return as-is."""
-    m = re.search(r"zhihu\.com/people/([^/?]+)", token_or_url)
-    if m:
-        return m.group(1)
-    return token_or_url.rstrip("/").split("/")[-1]
-
-
-def _resolve_url_token(url_token: str | None) -> str:
-    """Resolve url_token: use provided value or auto-detect from /api/v4/me."""
-    if url_token:
-        return _extract_url_token(url_token)
-    token = get_my_url_token()
-    if not token:
-        raise click.UsageError(
-            "Cannot detect your url_token. Provide one as an argument, or authenticate first: zhihu auth login"
-        )
-    return token
 
 
 def register_scrape(main_group: click.Group) -> None:

@@ -27,16 +27,6 @@ __all__ = [
     "error",
     "warning",
     "blank",
-    "title_text",
-    "name_text",
-    "url_text",
-    "meta_text",
-    "num_text",
-    "tag_text",
-    "label_text",
-    "path_text",
-    "dim_text",
-    "bold_text",
     "item_index",
     "kv",
     "stat",
@@ -49,8 +39,6 @@ __all__ = [
     "arrow",
     "print_json",
     "print_table",
-    "print_panel",
-    "print_markdown",
     "f_title",
     "f_name",
     "f_url",
@@ -68,8 +56,6 @@ __all__ = [
 ]
 from rich import box
 from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
 from rich.table import Table
 
 # ── console singleton ───────────────────────────────────────────────────────
@@ -129,56 +115,7 @@ def blank() -> None:
 
 
 # ── Style-only helpers (return styled string) ───────────────────────────────
-
-
-def title_text(text: str) -> str:
-    """Style a primary title."""
-    return click.style(text, fg="cyan", bold=True)
-
-
-def name_text(text: str) -> str:
-    """Style a person's name (green)."""
-    return click.style(text, fg="green", bold=True)
-
-
-def url_text(text: str) -> str:
-    """Style a URL (blue, dim)."""
-    return click.style(text, fg="blue", dim=True)
-
-
-def meta_text(text: str) -> str:
-    """Style metadata / secondary info (dim)."""
-    return click.style(str(text), dim=True)
-
-
-def num_text(n: Any) -> str:
-    """Style a numeric value (magenta)."""
-    return click.style(str(n), fg="magenta")
-
-
-def tag_text(text: str) -> str:
-    """Style a short type tag e.g. [article]."""
-    return click.style(f"[{text}]", fg="yellow")
-
-
-def label_text(text: str) -> str:
-    """Style a field label / key (bold)."""
-    return click.style(text, bold=True)
-
-
-def path_text(text: str) -> str:
-    """Style a file path (cyan)."""
-    return click.style(text, fg="cyan")
-
-
-def dim_text(text: str) -> str:
-    """Dimmed text."""
-    return click.style(str(text), dim=True)
-
-
-def bold_text(text: str) -> str:
-    """Bold text."""
-    return click.style(str(text), bold=True)
+# Prefer the f_-prefixed equivalents (f_title, f_name, f_url, etc.)
 
 
 # ── Compound output helpers ─────────────────────────────────────────────────
@@ -193,12 +130,12 @@ def item_index(i: int, total: int | None = None) -> str:
 
 def kv(key: str, value: Any, indent: int = 2) -> None:
     """Print ``key: value`` on one line."""
-    click.echo(f"{' ' * indent}{label_text(key)} {value}", err=_json_mode)
+    click.echo(f"{' ' * indent}{f_label(key)} {value}", err=_json_mode)
 
 
 def stat(label: str, value: Any, indent: int = 2) -> None:
     """Print a statistic with a dimmed label."""
-    click.echo(f"{' ' * indent}{dim_text(label + ':')} {value}", err=_json_mode)
+    click.echo(f"{' ' * indent}{f_dim(label + ':')} {value}", err=_json_mode)
 
 
 def divider(char: str = "─", length: int | None = None) -> None:
@@ -265,17 +202,6 @@ def print_table(
     for row in rows:
         table.add_row(*[str(c) for c in row])
     (_console_err if _json_mode else _console).print(table)
-
-
-def print_panel(content: Any, title: str = "", **kwargs: Any) -> None:
-    """Render content in a bordered panel."""
-    panel = Panel(content, title=title, border_style="cyan", **kwargs)
-    (_console_err if _json_mode else _console).print(panel)
-
-
-def print_markdown(content: str) -> None:
-    """Render a Markdown string via Rich."""
-    (_console_err if _json_mode else _console).print(Markdown(content))
 
 
 # ── inline format helpers (for use in f-strings) ────────────────────────────

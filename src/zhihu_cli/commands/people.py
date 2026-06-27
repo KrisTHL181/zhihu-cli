@@ -1,9 +1,8 @@
 """People command group — look up user profiles and content."""
 
-import re
-
 import click
 
+from zhihu_cli.commands._helpers import _extract_url_token
 from zhihu_cli.content.handlers.people import (
     fetch_member_answers,
     fetch_member_articles,
@@ -20,27 +19,17 @@ from zhihu_cli.output import (
     f_green,
     f_label,
     f_meta,
-    f_name,
     f_num,
     f_tag,
     f_url,
     heading,
     info,
-    item_index,
     print_json,
     set_json_mode,
     stat,
 )
 
 # ── helpers ──
-
-
-def _extract_url_token(token_or_url: str) -> str:
-    """Extract a Zhihu url_token from a full profile URL or return as-is."""
-    m = re.search(r"zhihu\.com/people/([^/?]+)", token_or_url)
-    if m:
-        return m.group(1)
-    return token_or_url.rstrip("/").split("/")[-1]
 
 
 def _print_stat(label: str, value: int) -> None:
@@ -164,86 +153,6 @@ def _list_content_section(
         for item in items:
             _print_content_item(item, show_type=show_type)
     return items
-
-
-def _display_following_items(items: list[dict], totals: int | None = None) -> None:
-    """Display a list of following items in terminal mode."""
-    for i, item in enumerate(items, 1):
-        ttype = item.get("type", "?")
-
-        if ttype == "user":
-            name = item.get("name", "")
-            headline = item.get("headline", "")
-            is_followed = item.get("is_followed", False)
-            is_following = item.get("is_following", False)
-            mutual = f" {f_green('[互关]')}" if (is_followed and is_following) else ""
-            f_cnt = item.get("follower_count", 0)
-            a_cnt = item.get("answer_count", 0)
-            art_cnt = item.get("articles_count", 0)
-            stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('answers:')} {f_num(a_cnt)}  {f_label('articles:')} {f_num(art_cnt)}"
-            echo(f"  {item_index(i)} {f_bold(name)}{mutual}")
-            if headline:
-                echo(f"    {f_dim(headline[:120])}")
-            echo(f"    {f_dim(stats)}")
-            echo(f"    {f_url(item.get('url', ''))}")
-
-        elif ttype == "topic":
-            name = item.get("name", "")
-            intro = item.get("introduction", "") or item.get("excerpt", "")
-            f_cnt = item.get("followers_count", 0)
-            q_cnt = item.get("questions_count", 0)
-            stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('questions:')} {f_num(q_cnt)}"
-            echo(f"  {item_index(i)} {f_bold(name)} {f_tag('topic')}")
-            if intro:
-                echo(f"    {f_dim(intro[:120])}")
-            echo(f"    {f_dim(stats)}")
-            echo(f"    {f_url(item.get('url', ''))}")
-
-        elif ttype == "question":
-            title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
-            a_cnt = item.get("answer_count", 0)
-            f_cnt = item.get("follower_count", 0)
-            ctime = item.get("created_time", "")
-            stats = f"{f_label('answers:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}  {f_label('created:')} {f_meta(ctime)}"
-            echo(f"  {item_index(i)} {f_bold(title[:120])}")
-            echo(f"    {f_dim(stats)}")
-            echo(f"    {f_url(item.get('url', ''))}")
-
-        elif ttype == "column":
-            title = item.get("title", "") or "(no title)"
-            desc = item.get("description", "") or item.get("excerpt", "")
-            creator = item.get("creator", "")
-            f_cnt = item.get("followers_count", 0)
-            art_cnt = item.get("articles_count", 0)
-            stats = f"{f_label('followers:')} {f_num(f_cnt)}  {f_label('articles:')} {f_num(art_cnt)}"
-            echo(f"  {item_index(i)} {f_bold(title)} {f_tag('column')}")
-            if creator:
-                echo(f"    {f_name(creator)}")
-            if desc:
-                echo(f"    {f_dim(desc[:120])}")
-            echo(f"    {f_dim(stats)}")
-            echo(f"    {f_url(item.get('url', ''))}")
-
-        elif ttype == "collection":
-            title = item.get("title", "") or "(no title)"
-            desc = item.get("description", "")
-            creator_name = item.get("creator_name", "")
-            a_cnt = item.get("answer_count", 0)
-            f_cnt = item.get("follower_count", 0)
-            stats = f"{f_label('items:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}"
-            echo(f"  {item_index(i)} {f_bold(title)} {f_tag('collection')}")
-            if creator_name:
-                echo(f"    {f_label('by')} {f_name(creator_name)}")
-            if desc:
-                echo(f"    {f_dim(desc[:120])}")
-            echo(f"    {f_dim(stats)}")
-            echo(f"    {f_url(item.get('url', ''))}")
-
-        blank()
-
-    if items:
-        total_str = f"/{totals}" if totals else ""
-        echo(f"  {f_dim(f'── {len(items)}{total_str} items')}")
 
 
 # ── register ──
