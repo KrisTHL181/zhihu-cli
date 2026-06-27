@@ -1,5 +1,7 @@
 """Tools command group — creator analytics, NLP text analysis, and periodic looping."""
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess
@@ -40,6 +42,43 @@ def register_tools(main_group):
         multipliers: dict[str, int] = {"s": 1, "m": 60, "h": 3600, "d": 86400}
         return value * multipliers[unit]
 
+    def _process_loop_result(result: subprocess.CompletedProcess, target_jsonl_file: str, override: bool) -> None:
+        """Parse command stdout as JSON, annotate with a timestamp, and write to the JSONL file.
+
+        :param result: Completed subprocess result with stdout/stderr.
+        :param target_jsonl_file: Path to the output JSONL file.
+        :param override: If True, overwrite the file instead of appending.
+        """
+        if result.returncode != 0:
+            error(f"Command exited with code {result.returncode}")
+            if result.stderr:
+                error(result.stderr.strip())
+            return
+
+        stdout = result.stdout.strip()
+        if not stdout:
+            warning("Command produced no output")
+            return
+
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError:
+            error("Command output is not valid JSON — skipping")
+            return
+
+        ts = time.time()
+        if isinstance(data, dict):
+            data["time"] = ts
+        else:
+            data = {"time": ts, "data": data}
+        compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        Path(target_jsonl_file).parent.mkdir(parents=True, exist_ok=True)
+        with open(target_jsonl_file, "a" if not override else "w", encoding="utf-8") as fh:
+            fh.write(compact + "\n")
+        ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+        action = "Appended" if not override else "Written"
+        success(f"[{ts_str}] {action} to {target_jsonl_file}")
+
     @main_group.group()
     def tools() -> None:
         """Analysis tools — creator analytics, NLP text analysis, and periodic looping."""
@@ -76,30 +115,7 @@ def register_tools(main_group):
                 error("'zhihu' not found on PATH — is the CLI installed?")
                 raise SystemExit(1)
             else:
-                if result.returncode != 0:
-                    error(f"Command exited with code {result.returncode}")
-                    if result.stderr:
-                        error(result.stderr.strip())
-                elif not result.stdout.strip():
-                    warning("Command produced no output")
-                else:
-                    try:
-                        data = json.loads(result.stdout)
-                    except json.JSONDecodeError:
-                        error("Command output is not valid JSON — skipping")
-                    else:
-                        ts = time.time()
-                        if isinstance(data, dict):
-                            data["time"] = ts
-                        else:
-                            data = {"time": ts, "data": data}
-                        compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-                        Path(target_jsonl_file).parent.mkdir(parents=True, exist_ok=True)
-                        with open(target_jsonl_file, "a" if not override else "w", encoding="utf-8") as fh:
-                            fh.write(compact + "\n")
-                        ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
-                        action = "Appended" if not override else "Written"
-                        success(f"[{ts_str}] {action} to {target_jsonl_file}")
+                _process_loop_result(result, target_jsonl_file, override)
 
             if once:
                 break

@@ -581,6 +581,100 @@ class ContentDownloader:
 
         return results
 
+    def _process_pin_part(self, part: dict, url: str) -> str | None:
+        """Process a single pin content part and return a markdown line.
+
+        Handles text, image, and video part types. Returns ``None`` when the
+        part cannot be converted (unsupported type, empty content, etc.).
+
+        :param part: A pin content part dictionary with a ``type`` key.
+        :param url: The pin URL (passed to the markdown converter).
+        :returns: A markdown string, or ``None``.
+        """
+        part_type = part.get("type")
+
+        if part_type == "text":
+            html_fragment = part.get("content", "")
+            if not html_fragment:
+                return None
+            md = self.md_converter.convert(html_fragment, url)
+            return md if md else None
+
+        if part_type == "image":
+            img_url = part.get("url", "")
+            if not img_url:
+                return None
+            alt = part.get("alt", "image")
+            return f"![{alt}]({img_url})"
+
+        if part_type == "video":
+            video_url = part.get("url", "")
+            if not video_url:
+                return None
+            return f"[video]({video_url})"
+
+        return None
+
+    def _process_single_pin(self, html_content: str, url: str) -> tuple[str, dict] | None:
+        """Process a single pin HTML page and return ``(filepath, metadata)``.
+
+        :param html_content: The raw HTML of the pin page.
+        :param url: The pin URL.
+        :returns: A tuple of ``(filepath, metadata_dict)`` on success, or ``None``
+            if the page contains no valid pin data.
+        """
+        try:
+            entities = get_page_state(html_content)
+        except ValueError as e:
+            _cli_print(f"[Error] {e} in {url}")
+            return None
+
+        pins = entities.get("pins", {})
+        if not pins:
+            _cli_print(f"[Error] No pin data found in {url}")
+            return None
+
+        pin_id = next(iter(pins.keys()))
+        pin = pins[pin_id]
+
+        users = entities.get("users", {})
+        author_id = pin.get("author")
+        author_name = "unknown"
+        if author_id and author_id in users:
+            author_name = users[author_id].get("name", "unknown")
+
+        created_ts = pin.get("created")
+        if created_ts:
+            created_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
+        else:
+            created_date = "unknown"
+
+        ip_info = pin.get("ipInfo", "")
+
+        content_parts = pin.get("content", [])
+        markdown_lines = []
+
+        for part in content_parts:
+            md = self._process_pin_part(part, url)
+            if md:
+                markdown_lines.append(md)
+
+        if not markdown_lines and pin.get("contentHtml"):
+            markdown_lines.append(self.md_converter.convert(pin["contentHtml"], url))
+
+        markdown_content = "\n\n".join(markdown_lines).strip()
+        if not markdown_content:
+            markdown_content = "(no content)"
+
+        meta = {
+            "author": author_name,
+            "created": created_date,
+            "ip": ip_info,
+            "pin_id": pin_id,
+        }
+        filepath = save_pin(url, meta, markdown_content, self.output_dir, with_media=self.with_media)
+        return filepath, meta
+
     def download_pins(self, urls: list[str], delay: float = 1.0) -> None:
         """Download pin pages and convert to Markdown."""
         if not self.headers:
@@ -590,82 +684,24 @@ class ContentDownloader:
         for url in urls:
             try:
                 html_content = fetch_page_html(url)
-
-                try:
-                    entities = get_page_state(html_content)
-                except ValueError as e:
-                    _cli_print(f"[Error] {e} in {url}")
-                    continue
-                pins = entities.get("pins", {})
-                if not pins:
-                    _cli_print(f"[Error] No pin data found in {url}")
-                    continue
-
-                pin_id = next(iter(pins.keys()))
-                pin = pins[pin_id]
-
-                users = entities.get("users", {})
-                author_id = pin.get("author")
-                author_name = "unknown"
-                if author_id and author_id in users:
-                    author_name = users[author_id].get("name", "unknown")
-
-                created_ts = pin.get("created")
-                if created_ts:
-                    created_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
-                else:
-                    created_date = "unknown"
-
-                ip_info = pin.get("ipInfo", "")
-
-                content_parts = pin.get("content", [])
-                markdown_lines = []
-
-                for part in content_parts:
-                    part_type = part.get("type")
-                    if part_type == "text":
-                        html_fragment = part.get("content", "")
-                        if html_fragment:
-                            md = self.md_converter.convert(html_fragment, url)
-                            if md:
-                                markdown_lines.append(md)
-                    elif part_type == "image":
-                        img_url = part.get("url", "")
-                        alt = part.get("alt", "image")
-                        if img_url:
-                            markdown_lines.append(f"![{alt}]({img_url})")
-                    elif part_type == "video":
-                        video_url = part.get("url", "")
-                        if video_url:
-                            markdown_lines.append(f"[video]({video_url})")
-
-                if not markdown_lines and pin.get("contentHtml"):
-                    markdown_lines.append(self.md_converter.convert(pin["contentHtml"], url))
-
-                markdown_content = "\n\n".join(markdown_lines).strip()
-                if not markdown_content:
-                    markdown_content = "(no content)"
-
-                meta = {
-                    "author": author_name,
-                    "created": created_date,
-                    "ip": ip_info,
-                    "pin_id": pin_id,
-                }
-                filepath = save_pin(url, meta, markdown_content, self.output_dir, with_media=self.with_media)
-
-                _cli_print(f"[Success] {url}")
-                _cli_print(f"  -> {filepath}")
-                _cli_print(f"  Author: {author_name}")
-                _cli_print(f"  Time: {created_date}")
-                _cli_print(f"  IP: {ip_info}")
-
+                result = self._process_single_pin(html_content, url)
             except TimeoutError:
                 _cli_print(f"[Timeout] {url}")
                 continue
             except Exception as e:
                 _cli_print(f"[Error] Failed to process {url}: {e}")
                 continue
+
+            if result is None:
+                continue
+
+            filepath, meta = result
+            _cli_print(f"[Success] {url}")
+            _cli_print(f"  -> {filepath}")
+            _cli_print(f"  Author: {meta['author']}")
+            _cli_print(f"  Time: {meta['created']}")
+            _cli_print(f"  IP: {meta['ip']}")
+
             wait(delay)
 
 

@@ -87,7 +87,7 @@ def _detect_risk_control(data: dict) -> str | None:
     return None
 
 
-def _handle_risk_control(session: curl_requests.Session, redirect_url: str) -> None:
+def _prompt_risk_control_verification(session: curl_requests.Session, redirect_url: str) -> None:
     """Prompt the user to complete browser verification, then refresh session cookies."""
     print()
     print("=" * 60)
@@ -126,6 +126,68 @@ def _is_login_success(scan_info: dict) -> bool:
     return False
 
 
+def _check_scan_result(scan_info: dict) -> str:
+    """Check a scan_info response and return a result code.
+
+    :param scan_info: The JSON response from the scan_info endpoint.
+    :returns: ``"success"`` if login is complete, ``"risk"`` if risk control
+        is triggered, or ``"waiting"`` otherwise.
+    """
+    if _detect_risk_control(scan_info):
+        return "risk"
+    if _is_login_success(scan_info):
+        return "success"
+    return "waiting"
+
+
+def _handle_risk_control(
+    session: curl_requests.Session,
+    risk_url: str,
+    risk_control_count: int,
+) -> tuple[str, str, float] | None:
+    """Handle a risk control challenge during QR polling.
+
+    Prompts the user to complete browser verification, then requests a fresh
+    QR code. Returns the updated token, link, and deadline for the new QR
+    code, or ``None`` if the QR code could not be refreshed.
+
+    :param session: The current requests session.
+    :param risk_url: URL for risk control verification.
+    :param risk_control_count: Number of risk control events so far
+        (1-indexed).
+    :returns: ``(token, link, deadline)`` if a fresh QR was obtained, or
+        ``None``.
+    :raises RuntimeError: If ``risk_control_count > 3``.
+    """
+    if risk_control_count > 3:
+        raise RuntimeError(
+            "Too many risk-control challenges. Zhihu is throttling this network. "
+            "Try again later or use 'zhihu auth paste' instead."
+        )
+
+    _prompt_risk_control_verification(session, risk_url)
+
+    # Re-request a fresh QR code after verification
+    resp = session.post(QRCODE_URL, json={}, headers=_login_headers(session, SIGNIN_REFERER))
+    if resp.status_code != 200:
+        return None
+
+    data = resp.json()
+    token = data.get("token") or data.get("qrcode_token")
+    link = data.get("link")
+    if not token or not link:
+        return None
+
+    _print_qr(link)
+
+    expires_at_raw = data.get("expires_at", 0)
+    if 0 < expires_at_raw < 10_000_000_000:
+        expires_at_raw *= 1000
+    deadline = (expires_at_raw / 1000.0) if expires_at_raw else (time.time() + 120)
+
+    return token, link, deadline
+
+
 def qr_login() -> dict[str, str]:
     """Execute QR code login flow. Returns headers dict suitable for cache_manager.save_headers()."""
 
@@ -153,7 +215,7 @@ def qr_login() -> dict[str, str]:
     # Check for risk control before QR code is issued
     risk_url = _detect_risk_control(data)
     if risk_url:
-        _handle_risk_control(session, risk_url)
+        _prompt_risk_control_verification(session, risk_url)
         resp = session.post(QRCODE_URL, json={}, headers=_login_headers(session, SIGNIN_REFERER))
         if resp.status_code != 200:
             raise RuntimeError(f"Failed to request QR code after verification: HTTP {resp.status_code}")
@@ -191,31 +253,20 @@ def qr_login() -> dict[str, str]:
 
             scan_info = resp.json() if resp.text else {}
 
-            risk_url = _detect_risk_control(scan_info)
-            if risk_url:
-                risk_control_count += 1
-                if risk_control_count <= 3:
-                    _handle_risk_control(session, risk_url)
-                    # Re-request a fresh QR code after verification
-                    resp = session.post(QRCODE_URL, json={}, headers=_login_headers(session, SIGNIN_REFERER))
-                    data = resp.json()
-                    token = data.get("token") or data.get("qrcode_token")
-                    link = data.get("link")
-                    if token and link:
-                        _print_qr(link)
-                        scanned_reported = False
-                        expires_at_raw = data.get("expires_at", 0)
-                        if 0 < expires_at_raw < 10_000_000_000:
-                            expires_at_raw *= 1000
-                        deadline = (expires_at_raw / 1000.0) if expires_at_raw else (time.time() + 120)
-                        print("Waiting for scan...")
-                    continue
-                else:
-                    raise RuntimeError(
-                        "Too many risk-control challenges. Zhihu is throttling this network. "
-                        "Try again later or use 'zhihu auth paste' instead."
-                    )
+            result = _check_scan_result(scan_info)
 
+            # Guard: risk control encountered
+            if result == "risk":
+                risk_control_count += 1
+                risk_url = _detect_risk_control(scan_info)
+                refreshed = _handle_risk_control(session, risk_url, risk_control_count)
+                if refreshed:
+                    token, link, deadline = refreshed
+                    scanned_reported = False
+                    print("Waiting for scan...")
+                continue
+
+            # Update z_c0 cookie from scan response
             zc0 = scan_info.get("zC0") or scan_info.get("z_c0")
             if zc0 and not _cookie_value(session, "z_c0"):
                 session.cookies.set("z_c0", zc0, domain=".zhihu.com")
@@ -224,7 +275,8 @@ def qr_login() -> dict[str, str]:
                 print("Scanned! Please confirm login in the Zhihu App...")
                 scanned_reported = True
 
-            if _is_login_success(scan_info):
+            # Guard: login complete
+            if result == "success":
                 if not _cookie_value(session, "z_c0"):
                     try:
                         session.get(ME_URL, headers=_login_headers(session, SIGNIN_URL, polling=True))

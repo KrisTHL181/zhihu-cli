@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import os
 import re
@@ -60,51 +62,79 @@ def find_best_k(X: Any, max_k: int = 20) -> None:
     plt.show()
 
 
+def _extract_document_text(content: str) -> str | None:
+    """Extract and clean text body from markdown content.
+
+    Strips YAML frontmatter, removes formulas/code blocks/HTML, tokenizes
+    with jieba, and filters stop words.  Returns ``None`` when the result
+    would be empty.
+
+    :param content: Raw markdown file content.
+    :returns: Space-joined tokenized text, or ``None``.
+    """
+    parts = content.split("---", 2)
+    text = parts[-1] if len(parts) > 1 else parts[0]
+
+    text = re.sub(r"\$\$.*?\$\$", "", text, flags=re.DOTALL)
+    text = re.sub(r"\$.*?\$", "", text)
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    text = re.sub(r"<.*?>", "", text)
+    text = "".join(re.findall(r"[一-龥a-zA-Z0-9]+", text))
+
+    words = jieba.cut(text)
+    cleaned = " ".join(w for w in words if len(w) > 1 and w not in stop_words)
+
+    return cleaned or None
+
+
+def _extract_document_title(content: str, filename: str) -> str:
+    """Extract title from YAML frontmatter, falling back to the filename.
+
+    :param content: Raw markdown file content.
+    :param filename: Filename (e.g. ``foo.md``).
+    :returns: The document title.
+    """
+    short_name = filename.replace(".md", "")
+    parts = content.split("---", 2)
+    if len(parts) > 2:
+        try:
+            meta = yaml.safe_load(parts[1])
+            if isinstance(meta, dict) and meta.get("title"):
+                short_name = meta["title"]
+        except yaml.YAMLError:
+            pass
+    return short_name
+
+
 def load_and_clean_data(source_dir: str) -> tuple[list[str], list[str]]:
-    documents = []
-    file_names = []
+    """Walk *source_dir* for ``.md`` files, extract and cluster-vectorize text.
+
+    :param source_dir: Directory to walk recursively.
+    :returns: A ``(documents, file_names)`` pair.
+    """
+    documents: list[str] = []
+    file_names: list[str] = []
 
     print(f"Reading MD files in {source_dir}...")
 
     for root, dirs, files in os.walk(source_dir):
         for file in files:
-            if file.endswith(".md"):
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, encoding="utf-8") as f:
-                        content = f.read()
+            if not file.endswith(".md"):
+                continue
 
-                        # Extract body (skip YAML header)
-                        parts = content.split("---", 2)
-                        text = parts[-1] if len(parts) > 1 else parts[0]
+            file_path = os.path.join(root, file)
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"Read failed {file}: {e}")
+                continue
 
-                        # Prefer title from YAML frontmatter, fall back to filename
-                        short_name = file.replace(".md", "")
-                        if len(parts) > 2:
-                            try:
-                                meta = yaml.safe_load(parts[1])
-                                if isinstance(meta, dict) and meta.get("title"):
-                                    short_name = meta["title"]
-                            except yaml.YAMLError:
-                                pass
-
-                        # Clean: remove formulas, code blocks, HTML, special symbols
-                        text = re.sub(r"\$\$.*?\$\$", "", text, flags=re.DOTALL)
-                        text = re.sub(r"\$.*?\$", "", text)
-                        text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-                        text = re.sub(r"<.*?>", "", text)
-                        text = "".join(re.findall(r"[一-龥a-zA-Z0-9]+", text))
-
-                        # Tokenize
-                        words = jieba.cut(text)
-                        cleaned_text = " ".join([w for w in words if len(w) > 1 and w not in stop_words])
-
-                        if cleaned_text.strip():
-                            documents.append(cleaned_text)
-                            file_names.append(short_name)
-
-                except Exception as e:
-                    print(f"Read failed {file}: {e}")
+            title = _extract_document_title(content, file)
+            cleaned = _extract_document_text(content)
+            if cleaned is not None:
+                documents.append(cleaned)
+                file_names.append(title)
 
     return documents, file_names
 

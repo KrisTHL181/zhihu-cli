@@ -1,5 +1,7 @@
 """Report (举报) functionality for Zhihu content."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from zhihu_cli.content.handlers.requests import session
@@ -16,30 +18,35 @@ def fetch_report_reasons(object_type: str = "answer") -> dict[str, Any]:
     return resp.json()
 
 
+def _iter_reasons(data: dict[str, Any]) -> Any:
+    """Yield flat reason dicts from the nested API response."""
+    for node in data.get("nodes", []):
+        # Standalone reason node (no category)
+        if node.get("type") == "reason":
+            yield {
+                "id": node["id"],
+                "text": node["text"],
+                "category": "",
+            }
+            continue
+
+        # Entry node with nested child reasons
+        if node.get("type") != "entry" or "entry" not in node:
+            continue
+        category = node.get("text", "")
+        for child in node["entry"].get("nodes", []):
+            if child.get("type") != "reason":
+                continue
+            yield {
+                "id": child["id"],
+                "text": child["text"],
+                "category": category,
+            }
+
+
 def flatten_reasons(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten the reason tree into a list of {id, text, category} dicts."""
-    reasons: list[dict[str, Any]] = []
-    for node in data.get("nodes", []):
-        category = node.get("text", "")
-        if node.get("type") == "entry" and "entry" in node:
-            for child in node["entry"].get("nodes", []):
-                if child.get("type") == "reason":
-                    reasons.append(
-                        {
-                            "id": child["id"],
-                            "text": child["text"],
-                            "category": category,
-                        }
-                    )
-        elif node.get("type") == "reason":
-            reasons.append(
-                {
-                    "id": node["id"],
-                    "text": node["text"],
-                    "category": "",
-                }
-            )
-    return reasons
+    return list(_iter_reasons(data))
 
 
 def submit_report(
