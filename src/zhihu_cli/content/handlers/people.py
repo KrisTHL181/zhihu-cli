@@ -53,8 +53,10 @@ def fetch_member_profile(url_token: str) -> dict[str, Any] | None:
     if user_data is None:
         return None
 
+    user_hash = user_data.get("id", "")
+
     return {
-        "id": user_data.get("id", ""),
+        "id": user_hash,
         "name": user_data.get("name", ""),
         "url_token": user_data.get("urlToken", url_token),
         "headline": user_data.get("headline", ""),

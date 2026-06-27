@@ -115,12 +115,24 @@ def _show_profile_rich(profile: dict) -> None:
         )
         console.print(panel)
         echo(f"  {f_label('Profile:')} {f_url(f'https://www.zhihu.com/people/{url_token}')}")
+        uid = profile.get("uid", "")
+        if uid:
+            echo(f"  {f_label('User ID:')} {f_num(uid)}")
+        user_hash = profile.get("id", "")
+        if user_hash:
+            echo(f"  {f_label('User Hash:')} {f_dim(user_hash)}")
         blank()
     except ImportError:
         echo(f"\n{f_bold(profile.get('name', 'Unknown'))}")
         if headline := profile.get("headline"):
             echo(f"  {f_dim(headline)}")
         echo(f"  {f_url(f'https://www.zhihu.com/people/{profile.get("url_token", "")}')}")
+        uid = profile.get("uid", "")
+        if uid:
+            echo(f"  {f_label('User ID:')} {f_num(uid)}")
+        user_hash = profile.get("id", "")
+        if user_hash:
+            echo(f"  {f_label('User Hash:')} {f_dim(user_hash)}")
         blank()
         _print_stat("Followers", profile.get("follower_count", 0))
         _print_stat("Following", profile.get("following_count", 0))
