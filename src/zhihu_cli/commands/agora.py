@@ -34,6 +34,7 @@ from zhihu_cli.output import (
     item_index,
     print_json,
     section,
+    set_json_mode,
     success,
     warning,
 )
@@ -325,6 +326,7 @@ def register_agora(main_group):
           zhihu agora ai <discussion_id>     # vote on a specific one
           zhihu agora ai --json             # JSON-lines output for piping
         """
+        set_json_mode(output_json)
         # Pre-load LLM config once (fail fast if not configured)
         _preflight = _call_llm_for_vote(
             {

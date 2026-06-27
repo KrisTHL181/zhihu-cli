@@ -123,7 +123,7 @@ def main() -> None:
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(unique_assets, f, ensure_ascii=False, indent=4)
 
-    print(f"Successfully wrote {len(unique_assets)} unique assets to {args.output}")
+    print(f"Successfully wrote {len(unique_assets)} unique assets to {args.output}", file=sys.stderr)
 
 
 if __name__ == "__main__":

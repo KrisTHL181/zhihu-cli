@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from typing import Any
 from urllib.parse import urlparse
 
@@ -247,9 +248,9 @@ def _is_captcha_endpoint(path: str) -> bool:
 def _print_captcha_warning(captcha_error: dict) -> None:
     """Print a brief warning that captcha was triggered (non-blocking)."""
     redirect = captcha_error.get("redirect", "")
-    print()
-    print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)")
+    print(file=sys.stderr)
+    print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)", file=sys.stderr)
     if redirect:
-        print(f"  Verify at: {redirect}")
-    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.")
-    print()
+        print(f"  Verify at: {redirect}", file=sys.stderr)
+    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
+    print(file=sys.stderr)

@@ -63,6 +63,8 @@ __all__ = [
     "f_label",
     "f_green",
     "f_cyan",
+    "set_json_mode",
+    "in_json_mode",
 ]
 from rich import box
 from rich.console import Console
@@ -73,23 +75,42 @@ from rich.table import Table
 # ── console singleton ───────────────────────────────────────────────────────
 
 _console = Console()
+_console_err = Console(stderr=True)
+
+_json_mode: bool = False
+
+
+def set_json_mode(enabled: bool) -> None:
+    """Enable/disable JSON output mode.
+
+    When enabled, all display functions route to stderr so stdout
+    contains only valid JSON.
+    """
+    global _json_mode
+    _json_mode = enabled
+
+
+def in_json_mode() -> bool:
+    """Return whether JSON output mode is active."""
+    return _json_mode
+
 
 # ── Simple styled echoes ────────────────────────────────────────────────────
 
 
 def echo(msg: Any = "") -> None:
     """Plain message (accepts any type, converted to string)."""
-    click.echo(str(msg))
+    click.echo(str(msg), err=_json_mode)
 
 
 def info(msg: Any = "") -> None:
     """Information / status message (dim)."""
-    click.secho(str(msg), dim=True)
+    click.secho(str(msg), dim=True, err=_json_mode)
 
 
 def success(msg: Any = "") -> None:
     """Success confirmation."""
-    click.secho(f"✓ {str(msg)}", fg="green", bold=True)
+    click.secho(f"✓ {str(msg)}", fg="green", bold=True, err=_json_mode)
 
 
 def error(msg: Any = "") -> None:
@@ -99,12 +120,12 @@ def error(msg: Any = "") -> None:
 
 def warning(msg: Any = "") -> None:
     """Warning message."""
-    click.secho(f"⚠ {str(msg)}", fg="yellow")
+    click.secho(f"⚠ {str(msg)}", fg="yellow", err=_json_mode)
 
 
 def blank() -> None:
     """Print a blank line."""
-    click.echo()
+    click.echo(err=_json_mode)
 
 
 # ── Style-only helpers (return styled string) ───────────────────────────────
@@ -172,45 +193,45 @@ def item_index(i: int, total: int | None = None) -> str:
 
 def kv(key: str, value: Any, indent: int = 2) -> None:
     """Print ``key: value`` on one line."""
-    click.echo(f"{' ' * indent}{label_text(key)} {value}")
+    click.echo(f"{' ' * indent}{label_text(key)} {value}", err=_json_mode)
 
 
 def stat(label: str, value: Any, indent: int = 2) -> None:
     """Print a statistic with a dimmed label."""
-    click.echo(f"{' ' * indent}{dim_text(label + ':')} {value}")
+    click.echo(f"{' ' * indent}{dim_text(label + ':')} {value}", err=_json_mode)
 
 
 def divider(char: str = "─", length: int | None = None) -> None:
     """Print a horizontal rule."""
     n = length if length else min(_console.width, 80)
-    click.secho(char * n, dim=True)
+    click.secho(char * n, dim=True, err=_json_mode)
 
 
 def section(title: str) -> None:
     """Print a section heading preceded by a blank line."""
     blank()
-    click.secho(title, fg="cyan", bold=True)
+    click.secho(title, fg="cyan", bold=True, err=_json_mode)
 
 
 def heading(title: str) -> None:
     """Print a heading with underline."""
-    click.secho(f"── {title} ──", fg="cyan", bold=True)
-    click.secho("─" * min(len(title) + 6, 80), dim=True)
+    click.secho(f"── {title} ──", fg="cyan", bold=True, err=_json_mode)
+    click.secho("─" * min(len(title) + 6, 80), dim=True, err=_json_mode)
 
 
 def file_saved(path: str) -> None:
     """Print a file-saved confirmation."""
-    click.secho(f"  → {path}", fg="green")
+    click.secho(f"  → {path}", fg="green", err=_json_mode)
 
 
 def empty_msg(msg: str = "Nothing found.") -> None:
     """Print an empty / no-results message."""
-    click.secho(f"(empty) {msg}", dim=True)
+    click.secho(f"(empty) {msg}", dim=True, err=_json_mode)
 
 
 def summary(text: str) -> None:
     """Print a bold summary line."""
-    click.secho(text, bold=True)
+    click.secho(text, bold=True, err=_json_mode)
 
 
 def arrow(text: str) -> str:
@@ -243,18 +264,18 @@ def print_table(
         table.add_column(col, style="cyan", header_style="bold cyan")
     for row in rows:
         table.add_row(*[str(c) for c in row])
-    _console.print(table)
+    (_console_err if _json_mode else _console).print(table)
 
 
 def print_panel(content: Any, title: str = "", **kwargs: Any) -> None:
     """Render content in a bordered panel."""
     panel = Panel(content, title=title, border_style="cyan", **kwargs)
-    _console.print(panel)
+    (_console_err if _json_mode else _console).print(panel)
 
 
 def print_markdown(content: str) -> None:
     """Render a Markdown string via Rich."""
-    _console.print(Markdown(content))
+    (_console_err if _json_mode else _console).print(Markdown(content))
 
 
 # ── inline format helpers (for use in f-strings) ────────────────────────────

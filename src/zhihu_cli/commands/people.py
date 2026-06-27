@@ -28,6 +28,7 @@ from zhihu_cli.output import (
     info,
     item_index,
     print_json,
+    set_json_mode,
     stat,
 )
 
@@ -265,6 +266,7 @@ def register_people(main_group):
         URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL
         (e.g. https://www.zhihu.com/people/zhangsan).
         """
+        set_json_mode(output_json)
         token = _extract_url_token(url_token)
 
         info(f"Fetching profile for {token}...")
@@ -301,6 +303,7 @@ def register_people(main_group):
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def people_answers(url_token: str, limit: int, output_json: bool) -> None:
         """List a user's answers."""
+        set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching answers for {token}...")
         items = fetch_member_answers(token, max_items=limit)
@@ -320,6 +323,7 @@ def register_people(main_group):
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def people_articles(url_token: str, limit: int, output_json: bool) -> None:
         """List a user's articles."""
+        set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching articles for {token}...")
         items = fetch_member_articles(token, max_items=limit)
@@ -339,6 +343,7 @@ def register_people(main_group):
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def people_pins(url_token: str, limit: int, output_json: bool) -> None:
         """List a user's pins (想法)."""
+        set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching pins for {token}...")
         items = fetch_member_pins(token, max_items=limit)
@@ -365,6 +370,7 @@ def register_people(main_group):
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def people_questions(url_token: str, limit: int, output_json: bool) -> None:
         """List questions asked by a user."""
+        set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching questions for {token}...")
         items = fetch_member_questions(token, max_items=limit)

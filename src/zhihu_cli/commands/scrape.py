@@ -13,7 +13,7 @@ from zhihu_cli.content.handlers.people import (
     fetch_member_articles,
     get_my_url_token,
 )
-from zhihu_cli.output import f_name, f_num, f_path, info, print_json, success
+from zhihu_cli.output import f_name, f_num, f_path, info, print_json, set_json_mode, success
 
 
 def _extract_url_token(token_or_url: str) -> str:
@@ -53,6 +53,7 @@ def register_scrape(main_group: click.Group) -> None:
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def scrape_creations(output: str, output_json: bool) -> None:
         """Fetch all user creation IDs (answers, articles, pins) -> JSON."""
+        set_json_mode(output_json)
         from zhihu_cli.creator_tools.parse_content_datas import generate_assets_file
 
         generate_assets_file(Path(output))
@@ -85,6 +86,7 @@ def register_scrape(main_group: click.Group) -> None:
         URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL.
         Defaults to the authenticated user.
         """
+        set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching activities for {f_name(token)}...")
         items = fetch_member_activities(token, limit=limit, max_items=max_items)
@@ -118,6 +120,7 @@ def register_scrape(main_group: click.Group) -> None:
         URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL.
         Defaults to the authenticated user.
         """
+        set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching answers for {f_name(token)}...")
         items = fetch_member_answers(token, limit=limit, max_items=max_items)
@@ -151,6 +154,7 @@ def register_scrape(main_group: click.Group) -> None:
         URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL.
         Defaults to the authenticated user.
         """
+        set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching articles for {f_name(token)}...")
         items = fetch_member_articles(token, limit=limit, max_items=max_items)

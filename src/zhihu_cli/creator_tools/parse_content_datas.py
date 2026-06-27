@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,16 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.wait import wait
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+_orig_print = print
+
+
+def _cli_print(*args: object, **kwargs: object) -> None:
+    """Print to stderr (avoids stdout pollution during --json mode)."""
+    _orig_print(*args, file=sys.stderr, **kwargs)
+
 
 DAILY_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/daily"
 AGGR_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/aggr"
@@ -41,7 +52,7 @@ def get_date(d: dict[str, Any]) -> str | None:
 def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
     """Scrape all user creations and save to output_path. Returns the asset list."""
     if not cache_manager.load_headers():
-        print("No cached headers found. Run: zhihu auth paste")
+        _cli_print("No cached headers found. Run: zhihu auth paste")
         return []
 
     initial_url = (
@@ -61,17 +72,17 @@ def generate_assets_file(output_path: Path) -> list[dict[str, str]]:
                     "created_time": item.get("data", {}).get("created_time", 0),
                 }
 
-    print("Scanning your Zhihu creations...")
+    _cli_print("Scanning your Zhihu creations...")
     all_assets: list[dict[str, str]] = []
     for i, item in enumerate(stream_handler(initial_url, parse_creations)):
         all_assets.append(item)
         if (i + 1) % 20 == 0:
-            print(f"  Collected {len(all_assets)} items...")
+            _cli_print(f"  Collected {len(all_assets)} items...")
 
     os.makedirs(output_path.parent, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_assets, f, ensure_ascii=False, indent=2)
-    print(f"Saved {len(all_assets)} assets → {output_path}")
+    _cli_print(f"Saved {len(all_assets)} assets → {output_path}")
     return all_assets
 
 
@@ -115,30 +126,30 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
     if assets_file.exists():
         with open(assets_file, encoding="utf-8") as f:
             answer_ids = json.load(f)
-        print(f"Loaded {len(answer_ids)} assets to analyze")
+        _cli_print(f"Loaded {len(answer_ids)} assets to analyze")
     else:
-        print("all_assets_list.json not found")
-        print("  This file is the asset inventory of your Zhihu creations.")
-        print()
+        _cli_print("all_assets_list.json not found")
+        _cli_print("  This file is the asset inventory of your Zhihu creations.")
+        _cli_print()
         try:
             choice = input("  Generate it now? [Y/n]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
-            print()
+            _cli_print()
             return
         if choice in ("", "y", "yes"):
-            print()
+            _cli_print()
             answer_ids = generate_assets_file(assets_file)
             if not answer_ids:
                 return
         else:
-            print()
-            print("  Run: zhihu scrape creations")
-            print("  Then: zhihu tools creator metrics")
+            _cli_print()
+            _cli_print("  Run: zhihu scrape creations")
+            _cli_print("  Then: zhihu tools creator metrics")
             return
 
     headers = cache_manager.load_headers()
     if not headers:
-        print("No cached headers found. Run: zhihu auth paste")
+        _cli_print("No cached headers found. Run: zhihu auth paste")
         return
     headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
 
@@ -146,7 +157,7 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
 
     success_count = 0
     for i, token in enumerate(answer_ids):
-        print(f"\n[Task {i + 1}/{len(answer_ids)}] Processing ID: {token} ...")
+        _cli_print(f"\n[Task {i + 1}/{len(answer_ids)}] Processing ID: {token} ...")
 
         created_ts = token.get("created_time", 0)
         start_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
@@ -254,21 +265,21 @@ def run_batch_daily_analysis(use_aggr: bool = False) -> None:
                 with open(output_file, "w", encoding="utf-8") as f:
                     json.dump(clean_data, f, indent=4)
 
-                print(f"  Saved: {output_file} ({entries_label} records)")
+                _cli_print(f"  Saved: {output_file} ({entries_label} records)")
                 success_count += 1
             else:
-                print(f"  Fetch failed (Code: {resp.status_code})")
+                _cli_print(f"  Fetch failed (Code: {resp.status_code})")
 
         except Exception as e:
-            print(f"  Exception: {e}")
+            _cli_print(f"  Exception: {e}")
 
         wait(1.2)
 
-    print("\n" + "=" * 40)
-    print("Batch harvest finished!")
-    print(f"Successful fetches: {success_count} / {len(answer_ids)}")
-    print(f"Data stored in: {metrics_dir}")
-    print("=" * 40)
+    _cli_print("\n" + "=" * 40)
+    _cli_print("Batch harvest finished!")
+    _cli_print(f"Successful fetches: {success_count} / {len(answer_ids)}")
+    _cli_print(f"Data stored in: {metrics_dir}")
+    _cli_print("=" * 40)
 
 
 if __name__ == "__main__":

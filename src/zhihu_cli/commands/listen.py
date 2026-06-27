@@ -6,6 +6,7 @@ from zhihu_cli.content.handlers.people import get_my_url_token
 from zhihu_cli.output import (
     echo,
     info,
+    set_json_mode,
 )
 
 
@@ -22,6 +23,7 @@ def register_listen(main_group):
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output raw JSON")
     def listen_notifications(incognito: bool, output_json: bool) -> None:
         """Listen to Zhihu notification badge events via MQTT."""
+        set_json_mode(output_json)
         from zhihu_cli.content.handlers.imchat import NOTIFICATION_TOPIC, ZhihuMessageListener
 
         url_token = get_my_url_token()
@@ -41,6 +43,7 @@ def register_listen(main_group):
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output raw JSON")
     def listen_messages(sender: str | None, incognito: bool, output_json: bool) -> None:
         """Listen to Zhihu private messages (IM) via MQTT."""
+        set_json_mode(output_json)
         from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener
 
         url_token = get_my_url_token()

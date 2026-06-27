@@ -38,6 +38,7 @@ from zhihu_cli.output import (
     info,
     item_index,
     print_json,
+    set_json_mode,
     success,
 )
 
@@ -239,6 +240,7 @@ def register_browse(main_group):
         feed_type: str, limit: int, max_items: int | None, markdown: bool, output_json: bool, output: str
     ) -> None:
         """Stream Zhihu recommend or follow feed."""
+        set_json_mode(output_json)
         fetch_fn = fetch_feed_with_markdown if markdown else fetch_feed
         items = fetch_fn(feed_type, limit, max_items)
 
@@ -276,6 +278,7 @@ def register_browse(main_group):
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     def browse_hot(limit: int, output_json: bool, output: str) -> None:
         """View the Zhihu real-time hot list."""
+        set_json_mode(output_json)
         items = fetch_hot_list(limit=50)
 
         if limit and len(items) > limit:
@@ -333,6 +336,7 @@ def register_browse(main_group):
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     def browse_notifications(limit: int, max_items: int | None, output_json: bool, output: str) -> None:
         """View your Zhihu notifications."""
+        set_json_mode(output_json)
         from zhihu_cli.content.handlers.notifications import fetch_notifications
 
         items = fetch_notifications(limit=limit, max_items=max_items)
@@ -381,6 +385,7 @@ def register_browse(main_group):
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     def browse_history(limit: int, max_items: int | None, output_json: bool, output: str) -> None:
         """View your Zhihu read history."""
+        set_json_mode(output_json)
         from zhihu_cli.content.handlers.read_history import fetch_read_history
 
         items = fetch_read_history(limit=limit, max_items=max_items)
@@ -444,6 +449,7 @@ def register_browse(main_group):
         URL_OR_ID can be a full answer URL, a composite question_id/answer_id,
         or a raw answer ID (url_token).
         """
+        set_json_mode(output_json)
         url_token = extract_url_token(url_or_id)
 
         meta, segments = fetch_yanxuan_segments(
@@ -515,6 +521,7 @@ def register_browse(main_group):
           zhihu browse upvoters https://www.zhihu.com/question/123/answer/456
           zhihu browse upvoters https://zhuanlan.zhihu.com/p/123456
         """
+        set_json_mode(output_json)
         item_type, item_id = _parse_item_url(url)
 
         if item_type not in ("answers", "articles"):
@@ -665,6 +672,7 @@ def register_browse(main_group):
         label: str,
     ) -> None:
         """Shared execution path for following sub-commands."""
+        set_json_mode(output_json)
         token = _resolve_following_token(url_token)
         info(f"Fetching {label} for {token}...")
         items = fetch_fn(token, limit=limit, max_items=max_items)

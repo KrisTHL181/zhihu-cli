@@ -46,6 +46,7 @@ from zhihu_cli.output import (
     info,
     item_index,
     print_json,
+    set_json_mode,
     success,
     summary,
 )
@@ -375,6 +376,7 @@ def register_interact(main_group) -> None:
           zhihu interact collect view https://www.zhihu.com/collection/921015490
           zhihu interact collect view 921015490 --max 10 --json
         """
+        set_json_mode(output_json)
         # Resolve ID from URL or use as-is
         item_type, item_id = get_type_and_id(collection_id_or_url)
         if item_type == "collections":
@@ -451,6 +453,7 @@ def register_interact(main_group) -> None:
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     def collect_list(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
         """List your collections."""
+        set_json_mode(output_json)
         token = _resolve_following_token(url_token)
         info(f"Fetching collections for {token}...")
 

@@ -17,6 +17,16 @@ from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state,
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 from zhihu_cli.content.utils.wait import wait
 
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+_orig_print = print
+
+
+def _cli_print(*args: object, **kwargs: object) -> None:
+    """Print to stderr (avoids stdout pollution during --json mode)."""
+    _orig_print(*args, file=sys.stderr, **kwargs)
+
+
 # ── media download helpers ──────────────────────────────────────────────────
 
 # Regex patterns for media references in markdown / html
@@ -363,27 +373,27 @@ class ContentDownloader:
             headers = cache_manager.load_headers()
             if headers:
                 self.headers = headers
-                print("[Success] Loaded cached headers")
+                _cli_print("[Success] Loaded cached headers")
                 return True
 
-        print("--- Paste cURL command for article page ---")
-        print("(Copy as cURL from browser DevTools)")
+        _cli_print("--- Paste cURL command for article page ---")
+        _cli_print("(Copy as cURL from browser DevTools)")
         curl_input = sys.stdin.read()
 
         if not curl_input.strip():
-            print("[Error] No valid cURL input")
+            _cli_print("[Error] No valid cURL input")
             return False
 
         url, headers = extract_config_from_curl(curl_input)
 
         if not headers:
-            print("[Error] Could not extract headers from cURL")
+            _cli_print("[Error] Could not extract headers from cURL")
             return False
 
         self.headers = headers
         cache_manager.save_headers(headers)
         reload_session()
-        print("[Success] Headers configured and cached.")
+        _cli_print("[Success] Headers configured and cached.")
         return True
 
     def download_answers(self, urls: list[str], delay: float = 1.0) -> list[dict]:
@@ -394,7 +404,7 @@ class ContentDownloader:
         """
         results: list[dict] = []
         if not self.headers:
-            print("[Error] Load headers first")
+            _cli_print("[Error] Load headers first")
             return results
 
         for url in urls:
@@ -434,11 +444,11 @@ class ContentDownloader:
                     }
                 )
 
-                print(f"[Success] {url}")
-                print(f"  -> {filepath}")
-                print(f"  Question: {question_title}")
-                print(f"  Author: {author}")
-                print(f"  Time: {created}")
+                _cli_print(f"[Success] {url}")
+                _cli_print(f"  -> {filepath}")
+                _cli_print(f"  Question: {question_title}")
+                _cli_print(f"  Author: {author}")
+                _cli_print(f"  Time: {created}")
 
             except TimeoutError:
                 results.append(
@@ -451,7 +461,7 @@ class ContentDownloader:
                         "error": "Timeout",
                     }
                 )
-                print(f"[Timeout] {url}")
+                _cli_print(f"[Timeout] {url}")
                 continue
             except Exception as e:
                 results.append(
@@ -464,7 +474,7 @@ class ContentDownloader:
                         "error": str(e),
                     }
                 )
-                print(f"[Error] Failed to process {url}: {e}")
+                _cli_print(f"[Error] Failed to process {url}: {e}")
                 continue
             wait(delay)
 
@@ -516,7 +526,7 @@ class ContentDownloader:
         """
         results: list[dict] = []
         if not self.headers:
-            print("[Error] Load headers first")
+            _cli_print("[Error] Load headers first")
             return results
 
         for url in urls:
@@ -535,11 +545,11 @@ class ContentDownloader:
                     }
                 )
 
-                print(f"[Success] {url}")
-                print(f"  -> {filepath}")
-                print(f"  Title: {metadata['title']}")
-                print(f"  Author: {metadata['author']}")
-                print(f"  Time: {metadata['created']}")
+                _cli_print(f"[Success] {url}")
+                _cli_print(f"  -> {filepath}")
+                _cli_print(f"  Title: {metadata['title']}")
+                _cli_print(f"  Author: {metadata['author']}")
+                _cli_print(f"  Time: {metadata['created']}")
 
             except TimeoutError:
                 results.append(
@@ -552,7 +562,7 @@ class ContentDownloader:
                         "error": "Timeout",
                     }
                 )
-                print(f"[Timeout] {url}")
+                _cli_print(f"[Timeout] {url}")
                 continue
             except Exception as e:
                 results.append(
@@ -565,7 +575,7 @@ class ContentDownloader:
                         "error": str(e),
                     }
                 )
-                print(f"[Error] Failed to process {url}: {e}")
+                _cli_print(f"[Error] Failed to process {url}: {e}")
                 continue
             wait(delay)
 
@@ -574,7 +584,7 @@ class ContentDownloader:
     def download_pins(self, urls: list[str], delay: float = 1.0) -> None:
         """Download pin pages and convert to Markdown."""
         if not self.headers:
-            print("[Error] Load headers first")
+            _cli_print("[Error] Load headers first")
             return
 
         for url in urls:
@@ -584,11 +594,11 @@ class ContentDownloader:
                 try:
                     entities = get_page_state(html_content)
                 except ValueError as e:
-                    print(f"[Error] {e} in {url}")
+                    _cli_print(f"[Error] {e} in {url}")
                     continue
                 pins = entities.get("pins", {})
                 if not pins:
-                    print(f"[Error] No pin data found in {url}")
+                    _cli_print(f"[Error] No pin data found in {url}")
                     continue
 
                 pin_id = next(iter(pins.keys()))
@@ -644,17 +654,17 @@ class ContentDownloader:
                 }
                 filepath = save_pin(url, meta, markdown_content, self.output_dir, with_media=self.with_media)
 
-                print(f"[Success] {url}")
-                print(f"  -> {filepath}")
-                print(f"  Author: {author_name}")
-                print(f"  Time: {created_date}")
-                print(f"  IP: {ip_info}")
+                _cli_print(f"[Success] {url}")
+                _cli_print(f"  -> {filepath}")
+                _cli_print(f"  Author: {author_name}")
+                _cli_print(f"  Time: {created_date}")
+                _cli_print(f"  IP: {ip_info}")
 
             except TimeoutError:
-                print(f"[Timeout] {url}")
+                _cli_print(f"[Timeout] {url}")
                 continue
             except Exception as e:
-                print(f"[Error] Failed to process {url}: {e}")
+                _cli_print(f"[Error] Failed to process {url}: {e}")
                 continue
             wait(delay)
 
@@ -689,10 +699,10 @@ def main() -> None:
             parser.print_help()
             sys.exit(1)
     except NotImplementedError as e:
-        print(f"[Error] {e}")
+        _cli_print(f"[Error] {e}")
         sys.exit(1)
     except TimeoutError:
-        print("[Fatal] Operation timed out")
+        _cli_print("[Fatal] Operation timed out")
         sys.exit(1)
 
 

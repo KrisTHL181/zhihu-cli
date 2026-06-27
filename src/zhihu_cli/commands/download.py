@@ -46,6 +46,7 @@ from zhihu_cli.output import (
     item_index,
     print_json,
     section,
+    set_json_mode,
     success,
     warning,
 )
@@ -173,6 +174,7 @@ def download_pin(url: str, output_dir: str, output_json: bool, with_media: bool)
 @click.option("--no-download-video", is_flag=True, default=False, help="Skip downloading the video file")
 def download_video(url: str, output_dir: str, output_json: bool, no_download_video: bool) -> None:
     """Download a Zhihu zvideo and its metadata."""
+    set_json_mode(output_json)
     metadata, markdown = scrape_zvideo(url)
     filepath = _save_markdown(metadata, markdown, output_dir)
 
@@ -231,6 +233,7 @@ def download_batch_answers(
     input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool, output_json: bool
 ) -> None:
     """Batch download all answers listed in an assets JSON file."""
+    set_json_mode(output_json)
     if not os.path.exists(input_file):
         error(f"file not found: {input_file}")
         raise SystemExit(1)
@@ -275,6 +278,7 @@ def download_batch_articles(
     input_file: str, output_dir: str, delay: float, no_cache_headers: bool, with_media: bool, output_json: bool
 ) -> None:
     """Batch download all articles listed in an assets JSON file."""
+    set_json_mode(output_json)
     if not os.path.exists(input_file):
         error(f"file not found: {input_file}")
         raise SystemExit(1)
@@ -326,6 +330,7 @@ def download_user(
     output_json: bool,
 ) -> None:
     """Download all answers, articles, and pins from a Zhihu user."""
+    set_json_mode(output_json)
     url_token = _extract_url_token(user)
 
     profile = fetch_member_profile(url_token)
