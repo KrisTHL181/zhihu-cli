@@ -116,6 +116,7 @@ def register_auth(main_group) -> None:
 
         # Fetch authenticated user info from /api/v4/me
         username = None
+        uid = None
         user_id = None
         url_token = None
         if has_cookie:
@@ -126,6 +127,7 @@ def register_auth(main_group) -> None:
                     username = me.get("name")
                     user_id = me.get("id")
                     url_token = me.get("url_token")
+                    uid = me.get("uid")
             except Exception:
                 pass  # Silently ignore — user info is a best-effort bonus
 
@@ -139,6 +141,7 @@ def register_auth(main_group) -> None:
                     "username": username,
                     "user_id": user_id,
                     "url_token": url_token,
+                    "uid": uid,
                 }
             )
             return
@@ -161,6 +164,8 @@ def register_auth(main_group) -> None:
                         echo(f"  {f_label('User ID:')} {f_num(user_id)}")
                     if url_token:
                         echo(f"  {f_label('URL token:')} {url_token}")
+                    if uid:
+                        echo(f"  {f_label('UID:')} {f_num(uid)}")
             else:
                 warning("No Cookie header found.")
         else:
