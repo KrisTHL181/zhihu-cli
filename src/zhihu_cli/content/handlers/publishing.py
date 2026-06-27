@@ -9,9 +9,10 @@ from zhihu_cli.content.utils.markdown2html import markdown2html
 PUBLISH_API: str = "https://www.zhihu.com/api/v4/content/publish"
 
 
-def publish_answer(question_id: str, content: str) -> dict[str, Any]:
+def publish_answer(question_id: str, content: str, *, html: str | None = None) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
-    html = markdown2html(content, scene="answer")
+    if html is None:
+        html = markdown2html(content, scene="answer")
 
     resp = session.post(
         PUBLISH_API,
@@ -43,9 +44,10 @@ def publish_answer(question_id: str, content: str) -> dict[str, Any]:
     return resp.json()
 
 
-def modify_answer(answer_id: str, content: str) -> dict[str, Any]:
+def modify_answer(answer_id: str, content: str, *, html: str | None = None) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
-    html = markdown2html(content, scene="answer")
+    if html is None:
+        html = markdown2html(content, scene="answer")
     text_length = calculate_text_length(html)
 
     payload = {
@@ -77,9 +79,69 @@ def modify_answer(answer_id: str, content: str) -> dict[str, Any]:
     return resp.json()
 
 
-def publish_article(title: str, content: str) -> dict[str, Any]:
+def publish_draft(url: str) -> dict[str, Any]:
+    """Publish the latest draft for a Zhihu content URL.
+
+    Fetches the most recent draft associated with *url* and publishes it.
+    For question URLs the draft answer is published as a new answer; for
+    answer and article URLs the draft is published as a modification of
+    the existing content.
+
+    :param url: Zhihu URL (question, answer, or article) whose draft
+        should be published.
+    :returns: API response dict.
+    :raises ValueError: If the URL cannot be parsed, no drafts are found,
+        or the draft has no content.
+    """
+    from zhihu_cli.content.handlers import get_type_and_id
+    from zhihu_cli.content.handlers.draft import get_draft, list_drafts
+    from zhihu_cli.content.utils.html2markdown import converter
+
+    object_type, object_id = get_type_and_id(url)
+    if not object_type or not object_id:
+        raise ValueError(f"Cannot parse Zhihu URL: {url}")
+
+    type_map = {"questions": "question", "answers": "answer", "articles": "article"}
+    api_type = type_map.get(object_type)
+    if not api_type:
+        raise ValueError(f"Drafts not supported for type: {object_type}")
+
+    draft_object_id = object_id
+    if object_type == "answers" and "/" in object_id:
+        draft_object_id = object_id.split("/")[1]
+
+    drafts = list_drafts(api_type, draft_object_id)
+    if not drafts:
+        raise ValueError(f"No drafts found for: {url}")
+
+    latest = drafts[0]
+    draft_detail = get_draft(latest["id"], latest.get("version_type", "current"))
+
+    draft_data = draft_detail.get("draft", {})
+    html_content = draft_data.get("content", "")
+    if not html_content:
+        raise ValueError("Draft has no content")
+
+    markdown_content = converter.convert(html_content)
+
+    if object_type == "questions":
+        return publish_answer(object_id, markdown_content, html=html_content)
+    elif object_type == "answers":
+        answer_id = object_id.split("/")[1] if "/" in object_id else object_id
+        return modify_answer(answer_id, markdown_content, html=html_content)
+    elif object_type == "articles":
+        title = draft_data.get("title") or draft_detail.get("title", "")
+        if not title:
+            raise ValueError("Draft has no title")
+        return modify_article(object_id, title, markdown_content, html=html_content)
+    else:
+        raise ValueError(f"Unsupported type for draft publishing: {object_type}")
+
+
+def publish_article(title: str, content: str, *, html: str | None = None) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
-    html = markdown2html(content, scene="article")
+    if html is None:
+        html = markdown2html(content, scene="article")
     text_length = calculate_text_length(html)
 
     pc_business_params = json.dumps(
@@ -114,9 +176,10 @@ def publish_article(title: str, content: str) -> dict[str, Any]:
     return resp.json()
 
 
-def modify_article(article_id: str, title: str, content: str) -> dict[str, Any]:
+def modify_article(article_id: str, title: str, content: str, *, html: str | None = None) -> dict[str, Any]:
     trace_id = ",".join([str(x) for x in generate_trace_context()])
-    html = markdown2html(content, scene="article")
+    if html is None:
+        html = markdown2html(content, scene="article")
     text_length = calculate_text_length(html)
 
     pc_business_params = json.dumps(
