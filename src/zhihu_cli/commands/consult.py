@@ -8,6 +8,7 @@ from zhihu_cli.content.handlers.consult import (
     fetch_consult_answers,
     fetch_conversation_detail,
     parse_conversation_id,
+    send_consult_answer,
 )
 from zhihu_cli.output import (
     blank,
@@ -24,6 +25,7 @@ from zhihu_cli.output import (
     info,
     print_json,
     set_json_mode,
+    success,
 )
 
 
@@ -237,5 +239,57 @@ def register_consult(main_group: click.Group) -> click.Group:
             print_json(detail)
             return
         _print_conversation_detail(detail)
+
+    # ── answer ──────────────────────────────────────────────────────────────
+
+    @consult.command("answer")
+    @click.argument("url_or_id")
+    @click.argument("content")
+    @click.option("--image", "-i", default=None, help="Image URL to attach (Zhihu CDN URL)")
+    @click.option("--image-width", type=int, default=0, help="Image width in pixels")
+    @click.option("--image-height", type=int, default=0, help="Image height in pixels")
+    @json_opt
+    def consult_answer(
+        url_or_id: str,
+        content: str,
+        image: str | None,
+        image_width: int,
+        image_height: int,
+        output_json: bool,
+    ) -> None:
+        """Answer a paid-consultation question.
+
+        URL_OR_ID can be a full conversation URL
+        (``https://www.zhihu.com/consult/conversation/...``) or a
+        bare numeric conversation ID.
+
+        CONTENT is the answer text.  Use ``--image`` to attach an image.
+        """
+        set_json_mode(output_json)
+        try:
+            conversation_id = parse_conversation_id(url_or_id)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="URL_OR_ID") from e
+
+        info("Sending answer...")
+        try:
+            result = send_consult_answer(
+                conversation_id,
+                content,
+                image_url=image,
+                image_width=image_width,
+                image_height=image_height,
+            )
+        except RuntimeError as e:
+            raise click.ClickException(str(e)) from e
+
+        if output_json:
+            print_json(result)
+            return
+        success(
+            f"Answer sent!  "
+            f"{f_label('message_id=')}{result.get('message_id', '?')}  "
+            f"{f_label('conversation_id=')}{result.get('conversation_id', '?')}"
+        )
 
     return consult

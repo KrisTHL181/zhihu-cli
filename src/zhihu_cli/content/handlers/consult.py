@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 INFINITY_BASE = "https://www.zhihu.com/api/v4/infinity/self/answers"
@@ -166,6 +166,88 @@ def fetch_conversation_detail(conversation_id: str) -> dict[str, Any]:
         "messages": messages,
         "url": f"https://www.zhihu.com/consult/conversation/{conv.get('id', '')}",
     }
+
+
+def send_consult_answer(
+    conversation_id: str,
+    content_text: str,
+    image_url: str | None = None,
+    image_width: int = 0,
+    image_height: int = 0,
+) -> dict[str, Any]:
+    """Send an answer message in a consultation conversation.
+
+    Posts to the infinity conversations API to reply to a paid-consultation
+    question.  Supports plain-text answers and optional image attachments.
+
+    :param conversation_id: The conversation (answer) ID string.
+    :param content_text: The answer text content.
+    :param image_url: Optional image URL to attach (Zhihu CDN URL).
+    :param image_width: Image width in pixels (used when *image_url* is set).
+    :param image_height: Image height in pixels (used when *image_url* is set).
+    :returns: API response dict with ``conversation_id``, ``created_at``,
+        and ``message_id``.
+    :raises RuntimeError: If the API returns an error (e.g. 403).
+    """
+    content_blocks: list[dict[str, Any]] = []
+
+    if content_text:
+        content_blocks.append(
+            {
+                "contentType": 0,
+                "stability": 0,
+                "content": content_text,
+                "duration": 0,
+                "filename": None,
+                "height": 0,
+                "md5": None,
+                "original_url": None,
+                "type": "text",
+                "url": None,
+                "watermark": None,
+                "watermark_url": None,
+                "width": 0,
+            }
+        )
+
+    if image_url:
+        content_blocks.append(
+            {
+                "contentType": 1,
+                "stability": 0,
+                "content": image_url,
+                "duration": 0,
+                "filename": None,
+                "height": image_height,
+                "md5": None,
+                "original_url": None,
+                "type": "image",
+                "url": image_url,
+                "watermark": None,
+                "watermark_url": None,
+                "width": image_width,
+            }
+        )
+
+    payload: dict[str, Any] = {
+        "reserve_at": 0,
+        "conversation_type": 0,
+        "content": content_blocks,
+        "is_public": 0,
+        "is_anonymous": 0,
+        "service_no": None,
+        "type": "answer",
+    }
+
+    url = f"https://api.zhihu.com/api/v4/infinity/conversations/{conversation_id}/messages"
+    resp = session.post(url, json=payload)
+
+    data: dict[str, Any] = resp.json()
+    if resp.status_code == 403 and "error" in data:
+        raise RuntimeError(f"Failed to send answer: {data['error'].get('message', data['error'])}")
+    resp.raise_for_status()
+
+    return data
 
 
 def fetch_consult_answers(
