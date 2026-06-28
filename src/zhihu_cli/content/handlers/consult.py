@@ -51,6 +51,7 @@ def _parse_consult_answer(item: dict[str, Any]) -> dict[str, Any]:
         "url": f"https://www.zhihu.com/consult/conversation/{item.get('id', '')}",
         "created_time": fmt_time(question.get("created_at")),
         "expires_at": fmt_time(item.get("expires_at")),
+        "first_answer_at": fmt_time(item.get("first_answer_at")) if item.get("first_answer_at") else "",
         "status": item.get("status", ""),
         "price": item.get("price", 0),
         "audience_price": item.get("audience_price", 0),
@@ -258,7 +259,8 @@ def fetch_consult_answers(
 ) -> list[dict[str, Any]]:
     """Fetch self-answers filtered by consultation *status*.
 
-    :param status: One of ``"unanswered"``, ``"closed"``, ``"other"``.
+    :param status: One of ``"unanswered"``, ``"closed"``, ``"other"``,
+        ``"answered"``.
     :param limit: Page size for each API request.
     :param max_items: Cap on total items returned (``None`` = unlimited).
     :param sub_status: Optional sub-filter (used with ``status="closed"``,
@@ -276,4 +278,39 @@ def fetch_consult_answers(
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
+    return items
+
+
+def fetch_answering_with_detail(
+    limit: int = 20,
+    max_items: int | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch in-progress (answering) consultations enriched with answer messages.
+
+    Fetches the answered list from the infinity API, then for each item
+    fetches the SSR conversation detail page to extract the answer
+    message(s).
+
+    :param limit: Page size for the list API request.
+    :param max_items: Cap on total items returned (``None`` = unlimited).
+    :returns: Normalized list of answering consultation dicts, each with
+        an extra ``answers`` key (list of answer message dicts) and a
+        ``_detail`` key (the raw conversation detail or ``None`` on
+        fetch failure).
+    """
+    items = fetch_consult_answers("answered", limit=limit, max_items=max_items)
+    for item in items:
+        conversation_id = item.get("conversation_id", "")
+        if not conversation_id:
+            item["answers"] = []
+            item["_detail"] = None
+            continue
+        try:
+            detail = fetch_conversation_detail(conversation_id)
+            answer_msgs = [m for m in detail.get("messages", []) if m.get("type") == "answer"]
+            item["answers"] = answer_msgs
+            item["_detail"] = detail
+        except Exception:
+            item["answers"] = []
+            item["_detail"] = None
     return items

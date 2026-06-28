@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from zhihu_cli.content.handlers.consult import (
+    fetch_answering_with_detail,
     fetch_consult_answers,
     fetch_conversation_detail,
     parse_conversation_id,
@@ -65,6 +66,67 @@ def _print_consult(item: dict) -> None:
     echo(f"  {tag_str}{f_bold(title[:120])}")
     echo(f"  {f_dim('  '.join(parts))}")
     echo(f"  {f_url(item.get('url', ''))}")
+    blank()
+
+
+def _print_answering_item(item: dict, show_answers: bool = False) -> None:
+    """Print a single in-progress (answering) consultation item, optionally with answer content."""
+    title = item.get("title", "(no question)")
+    questioner = item.get("questioner_name", "")
+    service = item.get("service_title", "")
+    price = item.get("price", 0)
+    audience = item.get("audience_price", 0)
+    created = item.get("created_time", "")
+    expires = item.get("expires_at", "")
+    first_answer = item.get("first_answer_at", "")
+    is_public = item.get("is_public", False)
+    is_anonymous = item.get("is_anonymous", False)
+    excerpt = item.get("excerpt", "")
+
+    # Build status tags
+    tags: list[str] = []
+    if service:
+        tags.append(service)
+    if is_public:
+        tags.append("public")
+    if is_anonymous:
+        tags.append("anonymous")
+    tags.append("answering")
+
+    # Build stats line
+    parts: list[str] = [f_meta(created)]
+    if questioner:
+        parts.append(f"{f_label('from')} {f_name(questioner)}")
+    if price:
+        parts.append(f"{f_label('¥')}{f_num(f'{price / 100:.2f}')}")
+    if audience:
+        parts.append(f"{f_dim('(旁听')} {f_num(f'{audience / 100:.2f}')}{f_dim(')')}")
+    if first_answer:
+        parts.append(f"{f_label('answered:')} {f_meta(first_answer)}")
+    if expires:
+        parts.append(f"{f_dim('expires:')} {f_meta(expires)}")
+
+    tag_str = " ".join(f_tag(t) for t in tags) + " " if tags else ""
+    echo(f"  {tag_str}{f_bold(title[:120])}")
+    if excerpt:
+        echo(f"  {f_dim(excerpt[:200])}")
+    echo(f"  {f_dim('  '.join(parts))}")
+    echo(f"  {f_url(item.get('url', ''))}")
+
+    # ── answers ──────────────────────────────────────────────────────────
+    if show_answers:
+        answers = item.get("answers", [])
+        if answers:
+            for ans in answers:
+                echo(f"  {f_bold('━━ Answer')} {f_meta(ans.get('created_at', ''))}")
+                text = ans.get("text", "")
+                if text:
+                    for line in text.split("\n"):
+                        echo(f"  {f_dim('│')} {line}")
+                for img in ans.get("images", []):
+                    echo(f"  {f_dim('│')} {f_url(img)}")
+        else:
+            echo(f"  {f_dim('(no answer content available)')}")
     blank()
 
 
@@ -213,6 +275,43 @@ def register_consult(main_group: click.Group) -> click.Group:
         heading(f"Other ({len(items)})")
         for item in items:
             _print_consult(item)
+        echo(f"  {f_dim(f'── {len(items)} total')}")
+
+    # ── answering ───────────────────────────────────────────────────────
+
+    @consult.command("answering")
+    @limit_opt
+    @max_opt
+    @click.option(
+        "--show-answers",
+        "-a",
+        "with_answers",
+        is_flag=True,
+        default=False,
+        help="Fetch and display the answer content for each consultation.",
+    )
+    @json_opt
+    def consult_answering(limit: int, max_items: int | None, with_answers: bool, output_json: bool) -> None:
+        """List in-progress paid-consultation questions, optionally showing answers.
+
+        These are conversations where you have already replied but both
+        parties can still send follow-up questions and additional answers.
+
+        Use ``--show-answers`` / ``-a`` to fetch and display the full answer
+        text for each consultation (requires one extra request per item).
+        """
+        set_json_mode(output_json)
+        info("Fetching answering consultations...")
+        items = fetch_answering_with_detail(limit=limit, max_items=max_items)
+        if output_json:
+            print_json(items)
+            return
+        if not items:
+            info("No answering consultations.")
+            return
+        heading(f"Answering ({len(items)})")
+        for item in items:
+            _print_answering_item(item, show_answers=with_answers)
         echo(f"  {f_dim(f'── {len(items)} total')}")
 
     # ── show ────────────────────────────────────────────────────────────
