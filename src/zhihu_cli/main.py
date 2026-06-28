@@ -7,6 +7,7 @@ from zhihu_cli.commands.auth import register_auth
 from zhihu_cli.commands.browse import register_browse
 from zhihu_cli.commands.chat import register_chat
 from zhihu_cli.commands.config import register_config
+from zhihu_cli.commands.consult import register_consult
 from zhihu_cli.commands.convert import register_convert
 from zhihu_cli.commands.daemon import register_daemon
 from zhihu_cli.commands.download import register_download
@@ -38,6 +39,7 @@ register_auth(main)
 register_browse(main)
 register_chat(main)
 register_config(main)
+register_consult(main)
 register_convert(main)
 register_daemon(main)
 register_download(main)
