@@ -134,6 +134,7 @@ def _build_session() -> Any:
             # Ensure daemon session matches active profile
             proxy._send_reload()
 
+            _inject_app_headers(proxy)
             return proxy
         except Exception:
             # Close socket if we connected but a later step failed
@@ -147,7 +148,23 @@ def _build_session() -> Any:
     # ── direct session (lazy heavy import) ───────────────────────────
     from zhihu_cli.content.handlers._session_core import _build_direct_session
 
-    return _build_direct_session()
+    session_ = _build_direct_session()
+    _inject_app_headers(session_)
+    return session_
+
+
+def _inject_app_headers(sess: Any) -> None:
+    """Add ``x-app-version`` and ``x-app-za`` headers to *sess*.
+
+    These headers are required by mobile-api endpoints
+    (e.g. ``segment_comment``) to identify the request as coming from the
+    Android app.  Without them those endpoints return ``data: null``.
+
+    The values are loaded from config so users can update the version
+    string and tune the device fingerprint.
+    """
+    sess.headers["x-app-version"] = cache_manager.get_app_version()
+    sess.headers["x-app-za"] = cache_manager.get_app_za()
 
 
 def reload_session() -> None:
@@ -178,6 +195,7 @@ def reload_session() -> None:
         # Direct reload: rebuild the session
         sess = _build_session()
         _session = sess
+        _inject_app_headers(sess)
         try:
             _headers = dict(sess.headers)
         except Exception:

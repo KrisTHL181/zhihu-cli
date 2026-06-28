@@ -12,6 +12,7 @@ from zhihu_cli.commands._helpers import (
     _save_json_output,
     _sort_items,
 )
+from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.comments import print_comments
 from zhihu_cli.content.handlers.feed import fetch_feed, fetch_feed_with_markdown
@@ -26,6 +27,7 @@ from zhihu_cli.content.handlers.following import (
 from zhihu_cli.content.handlers.hot import fetch_hot_list
 from zhihu_cli.content.handlers.question import scrape_answer_page, scrape_answers, scrape_question_data
 from zhihu_cli.content.handlers.question_log import fetch_question_log
+from zhihu_cli.content.handlers.segment_comments import fetch_segment_comments
 from zhihu_cli.content.handlers.upvoter import fetch_upvoters
 from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
 from zhihu_cli.output import (
@@ -33,6 +35,7 @@ from zhihu_cli.output import (
     echo,
     error,
     f_bold,
+    f_cyan,
     f_dim,
     f_green,
     f_label,
@@ -255,6 +258,91 @@ def register_browse(main_group):
             return
 
         print_comments(comments=comments)
+
+    @browse.command("annotation")
+    @click.argument("url")
+    @click.option("--limit", type=int, default=20, help="Comments per page (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total comments to fetch")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    @click.option(
+        "--sort",
+        "sort_by",
+        type=click.Choice(["default", "time", "likes"]),
+        default="default",
+        help="Sort segment comments by criteria",
+    )
+    def browse_annotation(url: str, limit: int, max_items: int | None, output_json: bool, sort_by: str) -> None:
+        """Show segment comments (句子评论) for an answer.
+
+        Segment comments are anchored to specific text spans within the
+        answer, shown together with the highlighted passage they annotate.
+
+        URL must point to a Zhihu answer.
+        """
+        set_json_mode(output_json)
+
+        _, item_id = _parse_item_url(url)
+        answer_id = _resolve_answer_id(item_id)
+
+        info(f"Fetching segment comments for answer {answer_id} ...")
+        comments = list(fetch_segment_comments(answer_id))
+
+        if max_items is not None and len(comments) > max_items:
+            comments = comments[:max_items]
+
+        if sort_by != "default":
+            _SORT_MAP = {"time": "created_time", "likes": "like_count"}
+            comments = _sort_items(comments, _SORT_MAP[sort_by])
+
+        if output_json:
+            print_json(comments)
+            return
+
+        if not comments:
+            info("No segment comments found.")
+            return
+
+        echo(f"  {f_bold(f'Segment Comments ({len(comments)})')}")
+        blank()
+
+        for i, cmt in enumerate(comments, 1):
+            author = cmt["author"]["name"]
+            seg_text = cmt.get("segment_text", "")
+            seg_removed = cmt.get("segment_is_removed", False)
+            seg_reaction = cmt.get("segment_reaction", {})
+            seg_likes = seg_reaction.get("like_count", 0)
+
+            # ── Segment highlight ──────────────────────────────────────
+            if seg_text:
+                seg_marker = f" {f_tag('[已删除]')}" if seg_removed else ""
+                echo(f"  {item_index(i)} {f_cyan('「')}{f_dim(seg_text)}{f_cyan('」')}{seg_marker}")
+                if seg_likes:
+                    echo(f"    {f_meta(f'segment likes: {seg_likes}')}")
+            else:
+                echo(f"  {item_index(i)} {f_dim('(segment text unavailable)')}")
+
+            # ── Comment line ───────────────────────────────────────────
+            echo(
+                f"    {f_name(author)} "
+                f"{f_meta('| ' + fmt_time(cmt.get('created_time')))} "
+                f"{f_meta('|')} {f_green('+' + str(cmt.get('like_count', 0)))}"
+            )
+            echo(f"    {cmt.get('content', '')}")
+
+            # ── Reply count hint ───────────────────────────────────────
+            child_count = cmt.get("child_comment_count", 0)
+            if child_count:
+                echo(f"    {f_dim(f'↳ {child_count} replies')}")
+
+            # ── Comment tags (IP location etc.) ────────────────────────
+            tags = cmt.get("comment_tag", [])
+            ip_tag = next((t for t in tags if t.get("type") == "ip_info"), None)
+            if ip_tag:
+                echo(f"    {f_dim(ip_tag.get('text', ''))}")
+
+            blank()
+
+        echo(f"  {f_dim(f'── {len(comments)} segment comments')}")
 
     @browse.command("feed")
     @click.option("--type", "-t", "feed_type", type=click.Choice(["recommend", "follow"]), default="recommend")

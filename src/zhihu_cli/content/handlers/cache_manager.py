@@ -237,6 +237,33 @@ class CacheManager:
         config["smoothing"] = method
         self._atomic_write(self.config_file, json.dumps(config, indent=2))
 
+    def get_app_za(self) -> str:
+        """Return the configured ``x-app-za`` header value (default ``OS=Android``).
+
+        This is the minimal non-leaking value.  Users who need to pass
+        Zhihu's mobile-app checks may need to provide a fuller device
+        fingerprint.
+        """
+        config = self.get_config()
+        return config.get("app_za", "OS=Android")
+
+    def set_app_za(self, value: str) -> None:
+        """Set the ``x-app-za`` header value."""
+        config = self.get_config()
+        config["app_za"] = value
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
+
+    def get_app_version(self) -> str:
+        """Return the configured ``x-app-version`` header value (default ``10.95.0``)."""
+        config = self.get_config()
+        return config.get("app_version", "10.95.0")
+
+    def set_app_version(self, version: str) -> None:
+        """Set the ``x-app-version`` header value."""
+        config = self.get_config()
+        config["app_version"] = version
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
+
     def get_plot_dpi(self) -> int:
         """Return the configured plot DPI (default 300)."""
         config = self.get_config()

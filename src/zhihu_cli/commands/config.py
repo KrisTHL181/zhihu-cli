@@ -162,6 +162,90 @@ def register_config(main_group):
         cache_manager.set_plot_dpi(300)
         success("Plot DPI reset to: 300")
 
+    # ── config app-za ────────────────────────────────────────────────────────────
+
+    @config.group("app-za")
+    def config_app_za() -> None:
+        """Manage the x-app-za header sent to mobile-api endpoints.
+
+        This header identifies the client device/platform to Zhihu's
+        mobile APIs (e.g. segment comments).  The default value
+        ``OS=Android`` is the minimal non-leaking string — it contains
+        no device fingerprint.
+
+        If Zhihu starts rejecting requests you can provide a fuller
+        value, e.g.:
+
+          zhihu config app-za set \\
+            "OS=Android&Release=14&Model=Generic&VersionName=10.95.0&Product=com.zhihu.android"
+        """
+
+    @config_app_za.command("set")
+    @click.argument("value")
+    def config_app_za_set(value: str) -> None:
+        """Set the x-app-za header value."""
+        cache_manager.set_app_za(value)
+        from zhihu_cli.content.handlers.requests import reload_session
+
+        reload_session()
+        success(f"x-app-za set to: {value}")
+
+    @config_app_za.command("show")
+    def config_app_za_show() -> None:
+        """Show the current x-app-za header value."""
+        value = cache_manager.get_app_za()
+        echo(f"{f_label('x-app-za:')} {value}")
+
+    @config_app_za.command("clear")
+    def config_app_za_clear() -> None:
+        """Reset x-app-za to the default (OS=Android)."""
+        cache_manager.set_app_za("OS=Android")
+        from zhihu_cli.content.handlers.requests import reload_session
+
+        reload_session()
+        success("x-app-za reset to: OS=Android")
+
+    # ── config app-version ──────────────────────────────────────────────────────
+
+    @config.group("app-version")
+    def config_app_version() -> None:
+        """Manage the x-app-version header sent to mobile-api endpoints.
+
+        This header identifies the Zhihu Android app version.  The
+        default is ``10.95.0``.  If Zhihu starts returning ``data:
+        null`` for mobile endpoints, bump this to a recent version
+        string.
+        """
+
+    @config_app_version.command("set")
+    @click.argument("version")
+    def config_app_version_set(version: str) -> None:
+        """Set the x-app-version header value.
+
+        \\033[2mExample:\\033[0m
+          zhihu config app-version set 11.2.0
+        """
+        cache_manager.set_app_version(version)
+        from zhihu_cli.content.handlers.requests import reload_session
+
+        reload_session()
+        success(f"x-app-version set to: {version}")
+
+    @config_app_version.command("show")
+    def config_app_version_show() -> None:
+        """Show the current x-app-version header value."""
+        version = cache_manager.get_app_version()
+        echo(f"{f_label('x-app-version:')} {version}")
+
+    @config_app_version.command("clear")
+    def config_app_version_clear() -> None:
+        """Reset x-app-version to the default (10.95.0)."""
+        cache_manager.set_app_version("10.95.0")
+        from zhihu_cli.content.handlers.requests import reload_session
+
+        reload_session()
+        success("x-app-version reset to: 10.95.0")
+
     # ── config llm ──────────────────────────────────────────────────────
 
     @config.group("llm")
