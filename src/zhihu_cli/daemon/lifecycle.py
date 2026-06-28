@@ -83,19 +83,24 @@ def start_daemon(idle_timeout: int = 300, foreground: bool = False) -> int:
         proc = subprocess.Popen(daemon_args)
         return proc.pid
 
-    # Background: detach from terminal, redirect output to log
+    # Background: detach from terminal, redirect output to log.
+    log_fh = subprocess.DEVNULL
     try:
         log_fh = open(DAEMON_LOG_FILE, "a")
     except OSError:
-        log_fh = subprocess.DEVNULL
+        pass
 
-    proc = subprocess.Popen(
-        daemon_args,
-        stdout=log_fh,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    try:
+        proc = subprocess.Popen(
+            daemon_args,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    finally:
+        if log_fh is not subprocess.DEVNULL:
+            log_fh.close()  # type: ignore[union-attr]
 
     # Wait for the socket to appear (up to 2 seconds)
     for _ in range(20):
@@ -106,13 +111,17 @@ def start_daemon(idle_timeout: int = 300, foreground: bool = False) -> int:
     # Timeout — try to kill the child
     try:
         proc.kill()
+    except ProcessLookupError:
+        pass  # Process already exited
+    try:
         proc.wait(timeout=2)
-        # Read any logged error
-        if DAEMON_LOG_FILE.exists():
-            tail = _tail_log(DAEMON_LOG_FILE, 20)
-            raise RuntimeError(f"Daemon failed to start:\n{tail}")
     except subprocess.TimeoutExpired:
+        # Process didn't die — will be raised as RuntimeError below
         pass
+    # Read any logged error
+    if DAEMON_LOG_FILE.exists():
+        tail = _tail_log(DAEMON_LOG_FILE, 20)
+        raise RuntimeError(f"Daemon failed to start:\n{tail}")
     raise RuntimeError("Daemon failed to start within 2 seconds")
 
 
@@ -176,11 +185,11 @@ def daemon_status() -> dict:
 
     pid = _read_pid()
 
+    sock = None
     try:
         sock = _connect()
         send_message(sock, {"id": make_msg_id(), "type": MSG_PING})
         pong = recv_message(sock)
-        sock.close()
 
         if pong.get("type") == MSG_PONG:
             return {
@@ -191,6 +200,12 @@ def daemon_status() -> dict:
             }
     except Exception:
         pass
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     return {"running": True, "pid": pid}
 

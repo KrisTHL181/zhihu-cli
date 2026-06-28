@@ -33,7 +33,7 @@ def register_daemon(main_group: click.Group) -> None:
         "-t",
         default=300,
         type=int,
-        help="Auto-exit after N seconds of inactivity (default: 300).",
+        help="Auto-exit after N seconds of inactivity (default: 300; 0 = never).",
     )
     @click.option(
         "--foreground",
@@ -88,7 +88,7 @@ def register_daemon(main_group: click.Group) -> None:
         "-t",
         default=300,
         type=int,
-        help="Auto-exit after N seconds of inactivity (default: 300).",
+        help="Auto-exit after N seconds of inactivity (default: 300; 0 = never).",
     )
     def daemon_restart(idle_timeout: int) -> None:
         """Stop and restart the daemon."""

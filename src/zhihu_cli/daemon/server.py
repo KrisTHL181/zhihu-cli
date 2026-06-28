@@ -12,6 +12,13 @@ blocking on interactive prompts.  When a captcha is detected, the daemon
 returns a ``captcha_required`` message to the client (CLI), which handles
 resolution interactively.  The client then sends ``captcha_resolved`` so
 the daemon can harvest cookies and retry.
+
+Logging
+-------
+Errors are written to stderr, which is redirected to
+``~/.zhihu-cli/daemon.log`` by ``start_daemon()``.  This avoids importing
+the logging module (keeping startup fast) while still producing
+diagnosable output when the daemon misbehaves.
 """
 
 from __future__ import annotations
@@ -19,8 +26,10 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +59,25 @@ from zhihu_cli.daemon.protocol import (
     write_message,
 )
 
+# ── stderr-based logging (output -> daemon.log) ──────────────────────────
+
+
+def _log(msg: str, *, exc: bool = False) -> None:
+    """Write a timestamped message to stderr (captured by daemon.log).
+
+    :param msg: Human-readable message.
+    :param exc: If :data:`True`, append the current exception traceback.
+    """
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+    print(f"[daemon {ts}] {msg}", file=sys.stderr, flush=True)
+    if exc:
+        traceback.print_exc(file=sys.stderr)
+
+
+# Default timeout for requests that don't specify one (prevents a single
+# hung request from blocking the shared session indefinitely).
+_DEFAULT_REQUEST_TIMEOUT = 30.0
+
 
 class DaemonServer:
     """Async Unix socket server that proxies HTTP requests through a persistent
@@ -73,12 +101,21 @@ class DaemonServer:
     def run(self) -> None:
         """Start the server (blocking).  Sets up signal handlers and enters
         the asyncio event loop.
-        """
-        self._init_session()
-        self._write_pid_file()
-        self._cleanup_stale_socket()
 
-        asyncio.run(self._async_main())
+        Any exception during initialisation or the event loop is logged to
+        stderr (→ daemon.log) and triggers cleanup so stale PID/socket
+        files don't block a subsequent restart.
+        """
+        try:
+            self._init_session()
+            self._cleanup_stale_socket()
+            asyncio.run(self._async_main())
+        except KeyboardInterrupt:
+            _log("Received KeyboardInterrupt, shutting down")
+        except Exception:
+            _log("Daemon terminated by unhandled exception", exc=True)
+        finally:
+            self.cleanup()
 
     # ── initialization ──────────────────────────────────────────────────
 
@@ -145,6 +182,12 @@ class DaemonServer:
         except OSError:
             pass
 
+        # Write PID file only after the socket is successfully listening.
+        # Doing it here ensures a stale PID file is never left behind if
+        # the event loop fails to start.
+        self._write_pid_file()
+        _log(f"Daemon started (PID {os.getpid()}), listening on {self.SOCKET_PATH}, idle timeout={self.idle_timeout}s")
+
         # Idle-timeout background task
         idle_task = asyncio.create_task(self._idle_checker())
 
@@ -157,7 +200,7 @@ class DaemonServer:
         except asyncio.CancelledError:
             pass
 
-        self.cleanup()
+        _log("Daemon shutting down normally")
 
     def _handle_signal(self) -> None:
         self._shutdown_event.set()
@@ -175,7 +218,16 @@ class DaemonServer:
         try:
             while not self._shutdown_event.is_set():
                 msg = await read_message(reader)
-                response = await self._process_message(msg)
+                msg_id = msg.get("id", make_msg_id())
+                try:
+                    response = await self._process_message(msg)
+                except Exception:
+                    _log(f"Unhandled exception processing message {msg_id}", exc=True)
+                    response = build_error(
+                        msg_id,
+                        "InternalError",
+                        "Daemon encountered an unexpected error.  Check daemon.log for details.",
+                    )
                 write_message(writer, response)
                 await writer.drain()
                 self._last_activity = time.monotonic()
@@ -183,7 +235,7 @@ class DaemonServer:
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
             pass  # Client disconnected — normal
         except Exception:
-            pass  # Log would go here in production
+            _log("Unhandled exception in connection handler", exc=True)
         finally:
             try:
                 writer.close()
@@ -236,7 +288,8 @@ class DaemonServer:
         value = msg.get("value")
 
         with self._session_lock:
-            assert self._session is not None, "Session not initialised"
+            if self._session is None:
+                return build_error(msg_id, "InternalError", "Session not initialised")
             if key == "captcha_handler":
                 if isinstance(value, str):
                     self._session.captcha_handler = value
@@ -255,8 +308,14 @@ class DaemonServer:
 
         loop = asyncio.get_running_loop()
 
-        # Execute the synchronous request in a thread
-        resp = await loop.run_in_executor(None, self._do_request, method, url, kwargs)
+        # Execute the synchronous request in a thread.  Wrap in try/except
+        # so network errors don't propagate to the connection handler and
+        # silently kill the client socket (client would hang until timeout).
+        try:
+            resp = await loop.run_in_executor(None, self._do_request, method, url, kwargs)
+        except Exception as e:
+            _log(f"HTTP request failed: {method} {url}: {e}")
+            return build_error(msg_id, type(e).__name__, str(e))
 
         # Check for captcha after the request (skip captcha endpoints to
         # avoid re-entrant handling — same guard as ZhihuSession.request()).
@@ -309,14 +368,23 @@ class DaemonServer:
         """Execute an HTTP request with the shared session.
 
         All access to ``self._session`` is protected by ``_session_lock``.
+        A default timeout is applied when the caller does not specify one
+        to prevent a single hung request from blocking all concurrent
+        requests (and the idle checker) indefinitely.
         """
         # Strip timeout=None (curl_cffi's Session.request accepts it but
         # uses a sentinel internally; passing None explicitly can cause
         # issues on some versions).
         safe_kwargs = {k: v for k, v in kwargs.items() if not (k == "timeout" and v is None)}
 
+        # Apply a default timeout so one hung request doesn't block the
+        # shared session forever.
+        if "timeout" not in safe_kwargs:
+            safe_kwargs["timeout"] = _DEFAULT_REQUEST_TIMEOUT
+
         with self._session_lock:
-            assert self._session is not None, "Session not initialised"
+            if self._session is None:
+                raise RuntimeError("Session not initialised")
             return self._session.request(method, url, **safe_kwargs)
 
     def _build_response(self, msg_id: str, resp: Any) -> dict[str, Any]:
@@ -355,7 +423,12 @@ class DaemonServer:
     # ── idle checker ────────────────────────────────────────────────────
 
     async def _idle_checker(self) -> None:
-        """Shut down if the server is idle for longer than *idle_timeout*."""
+        """Shut down if the server is idle for longer than *idle_timeout*.
+
+        Set *idle_timeout* to 0 to disable automatic shutdown entirely.
+        """
+        if self.idle_timeout <= 0:
+            return  # Disabled — never auto-exit
         while not self._shutdown_event.is_set():
             await asyncio.sleep(60)
             if time.monotonic() - self._last_activity > self.idle_timeout:
@@ -379,8 +452,12 @@ def _main() -> None:
     )
     args = parser.parse_args()
 
-    server = DaemonServer(idle_timeout=args.idle_timeout)
-    server.run()
+    try:
+        server = DaemonServer(idle_timeout=args.idle_timeout)
+        server.run()
+    except Exception:
+        _log("Fatal error in _main()", exc=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
