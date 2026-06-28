@@ -7,7 +7,7 @@ from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state,
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import converter
 
-NEXT_URL_API = "https://www.zhihu.com/api/v4/questions/{question_id}/answers?include=data%5B%2A%5D.content%2Cfavlists_count%2Cvoteup_count%2Ccomment_count%2Cauthor.name&limit=5&offset=0&sort_by=default&platform=desktop"
+NEXT_URL_API = "https://www.zhihu.com/api/v4/questions/{question_id}/feeds?include=data%5B%2A%5D.is_normal%2Ccontent%2Cvoteup_count%2Ccomment_count%2Cfavlists_count%2Ccreated_time%2Cauthor.name%2Cauthor.follower_count&limit=5&offset=0&order=default&platform=desktop"
 
 
 def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
@@ -44,13 +44,16 @@ def scrape_answers(question_data: dict[str, Any]) -> Generator[dict[str, Any], N
     url = NEXT_URL_API.replace("{question_id}", question_data["id"])
 
     def parse_ans(data):
-        for ans in data.get("data", []):
+        for item in data.get("data", []):
+            # /feeds endpoint wraps answers in a "target" field
+            ans = item.get("target", item)
             yield {
                 "author": ans.get("author", {}).get("name", "anonymous"),
-                "id": ans.get("url", "/unknown").split("/")[-1],
+                "id": str(ans.get("id", ans.get("url", "/unknown").split("/")[-1])),
                 "vote": ans.get("voteup_count", 0),
                 "comment": ans.get("comment_count", 0),
                 "favorite": ans.get("favlists_count", 0),
+                "created_time": ans.get("created_time", 0),
                 "content": converter.convert(ans.get("content", "")),
             }
 
