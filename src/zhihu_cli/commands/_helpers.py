@@ -190,3 +190,23 @@ def _display_following_items(items: list[dict], totals: int | None = None) -> No
     if items:
         total_str = f"/{totals}" if totals else ""
         echo(f"  {f_dim(f'── {len(items)}{total_str} items')}")
+
+
+def _sort_items(items: list[dict], field: str, *, reverse: bool = True) -> list[dict]:
+    """Sort a list of item dicts by *field* locally (descending by default).
+
+    Used by browse subcommands to re-sort fetched data without additional API calls.
+
+    :param items: List of item dicts to sort.
+    :param field: Dict key to sort by. ``"default"`` or empty string returns
+                  items in original order.
+    :param reverse: Sort descending (highest first). Default ``True``.
+    :returns: A new sorted list (original is not mutated).
+    """
+    if not items or field in ("default", ""):
+        return list(items)
+    # Auto-detect numeric vs string sort from the first item
+    sample = items[0].get(field) if items else None
+    if isinstance(sample, (int, float)):
+        return sorted(items, key=lambda x: x.get(field) or 0, reverse=reverse)
+    return sorted(items, key=lambda x: x.get(field) or "", reverse=reverse)

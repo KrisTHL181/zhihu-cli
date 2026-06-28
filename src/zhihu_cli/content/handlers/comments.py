@@ -119,11 +119,31 @@ def fetch_comments(item_type: str, item_id: str) -> list[dict[str, Any]]:
     return list(fetch_root_comments(item_type, item_id))
 
 
-def print_comments(item_type: str, item_id: str) -> None:
-    comment_id = 1
-    for comment in fetch_root_comments(item_type, item_id):
+def print_comments(
+    item_type: str | None = None,
+    item_id: str | None = None,
+    *,
+    comments: list[dict] | None = None,
+) -> None:
+    """Display a comment tree.
+
+    Either provide *(item_type, item_id)* to fetch comments, or pass a
+    pre-fetched *comments* list directly.
+
+    :param item_type: Resource type (answers, articles, pins, questions).
+    :param item_id: Resource ID.
+    :param comments: Pre-fetched list of comment dicts (as returned by
+        :func:`fetch_root_comments` or :func:`fetch_comments`).
+    :raises ValueError: If neither *(item_type, item_id)* nor *comments* is supplied.
+    """
+    if comments is None:
+        if item_type is None or item_id is None:
+            raise ValueError("Either (item_type, item_id) or comments must be provided")
+        comments = list(fetch_root_comments(item_type, item_id))
+
+    for cid, comment in enumerate(comments, 1):
         header = (
-            f"\n{item_index(comment_id)} "
+            f"\n{item_index(cid)} "
             f"{f_name(comment['author'])} "
             f"{f_meta('| ID:')} {f_dim(comment['id'])} "
             f"{f_meta('| Likes:')} {f_num(comment['like_count'])} "
@@ -146,7 +166,6 @@ def print_comments(item_type: str, item_id: str) -> None:
                 echo(child_header)
                 echo(f"      {child['content']}\n")
         divider("-", 20)
-        comment_id += 1
 
 
 def comment_item(item_type: str, item_id: str, content: str, reply_comment_id: str | None = None) -> dict[str, Any]:

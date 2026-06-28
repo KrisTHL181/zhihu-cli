@@ -9,6 +9,7 @@ from zhihu_cli.commands._helpers import (
     _resolve_url_token,
     _save_json_output,
     _save_markdown,
+    _sort_items,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "_resolve_url_token",
     "_save_json_output",
     "_save_markdown",
+    "_sort_items",
 ]
