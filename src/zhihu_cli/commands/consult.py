@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import click
 
-from zhihu_cli.content.handlers.consult import fetch_consult_answers
+from zhihu_cli.content.handlers.consult import (
+    fetch_consult_answers,
+    fetch_conversation_detail,
+    parse_conversation_id,
+)
 from zhihu_cli.output import (
     blank,
     echo,
@@ -60,6 +64,72 @@ def _print_consult(item: dict) -> None:
     echo(f"  {f_dim('  '.join(parts))}")
     echo(f"  {f_url(item.get('url', ''))}")
     blank()
+
+
+def _print_conversation_detail(item: dict) -> None:
+    """Print a single consultation conversation in full detail."""
+    # ── header ─────────────────────────────────────────────────────────
+    service = item.get("service_title", "")
+    tags: list[str] = [service] if service else []
+    if item.get("is_anonymous"):
+        tags.append("anonymous")
+    if item.get("is_public"):
+        tags.append("public")
+
+    questioner = item["questioner"]
+    responder = item["responder"]
+    questioner_label = f"{questioner['name']} (anonymous)" if item.get("is_anonymous") else questioner["name"]
+
+    tag_str = " ".join(f_tag(t) for t in tags) + " " if tags else ""
+    status = item["status"]
+    price_yuan = f"{item['price'] / 100:.2f}"
+    heading(f"Consultation {tag_str}{f_dim(f'[{status}]')}")
+
+    # Metadata block
+    echo(f"  {f_label('From:')}    {f_name(questioner_label)}")
+    echo(f"  {f_label('To:')}      {f_name(responder['name'])}")
+    echo(f"  {f_label('Price:')}   ¥{f_num(price_yuan)}")
+    if item.get("audience_price"):
+        audience_yuan = f"{item['audience_price'] / 100:.2f}"
+        echo(f"  {f_label('Audience:')} ¥{f_num(audience_yuan)} (旁听)")
+    if item.get("actual_income_title"):
+        echo(f"  {f_label('Income:')}  {f_dim(item['actual_income_title'])}")
+    echo(f"  {f_label('Expires:')} {f_meta(item['expires_at'])}")
+    if item.get("first_answer_at"):
+        echo(f"  {f_label('Answered:')} {f_meta(item['first_answer_at'])}")
+    echo(f"  {f_url(item.get('url', ''))}")
+    blank()
+
+    # ── messages ───────────────────────────────────────────────────────
+    messages = item.get("messages", [])
+    if not messages:
+        info("No messages.")
+        return
+
+    for i, msg in enumerate(messages):
+        msg_type = msg.get("type", "")
+        if msg_type == "question":
+            if msg.get("is_first_question"):
+                label = "Question"
+            else:
+                label = "Follow-up"
+            echo(f"  {f_bold(f'[{label}]')} {f_meta(msg.get('created_at', ''))}")
+        elif msg_type == "answer":
+            echo(f"  {f_bold('[Answer]')} {f_meta(msg.get('created_at', ''))}")
+        else:
+            echo(f"  {f_bold(f'[{msg_type}]')} {f_meta(msg.get('created_at', ''))}")
+
+        text = msg.get("text", "")
+        if text:
+            # Indent multi-line text
+            for line in text.split("\n"):
+                echo(f"  {f_dim('│')} {line}")
+        # Images
+        for img in msg.get("images", []):
+            echo(f"  {f_dim('│')} {f_url(img)}")
+
+        if i < len(messages) - 1:
+            blank()
 
 
 def register_consult(main_group: click.Group) -> click.Group:
@@ -142,5 +212,30 @@ def register_consult(main_group: click.Group) -> click.Group:
         for item in items:
             _print_consult(item)
         echo(f"  {f_dim(f'── {len(items)} total')}")
+
+    # ── show ────────────────────────────────────────────────────────────
+
+    @consult.command("show")
+    @click.argument("url_or_id")
+    @json_opt
+    def consult_show(url_or_id: str, output_json: bool) -> None:
+        """Show full detail of a consultation conversation.
+
+        URL_OR_ID can be a full conversation URL
+        (``https://www.zhihu.com/consult/conversation/...``) or a
+        bare numeric conversation ID.
+        """
+        set_json_mode(output_json)
+        info("Fetching conversation detail...")
+        try:
+            conversation_id = parse_conversation_id(url_or_id)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="URL_OR_ID") from e
+
+        detail = fetch_conversation_detail(conversation_id)
+        if output_json:
+            print_json(detail)
+            return
+        _print_conversation_detail(detail)
 
     return consult

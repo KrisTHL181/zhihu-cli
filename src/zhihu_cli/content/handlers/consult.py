@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
+from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 INFINITY_BASE = "https://www.zhihu.com/api/v4/infinity/self/answers"
+
+CONVERSATION_URL_RE = re.compile(r"https?://(?:www\.)?zhihu\.com/consult/conversation/(\d+)(?:/answer)?")
 
 
 def _extract_question_text(question: dict[str, Any]) -> str:
@@ -63,6 +67,105 @@ def _parse_consult_answer(item: dict[str, Any]) -> dict[str, Any]:
 def _parse_answer_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
     for item in data.get("data", []):
         yield _parse_consult_answer(item)
+
+
+def parse_conversation_id(url_or_id: str) -> str:
+    """Extract a conversation ID from a consult conversation URL or a raw numeric ID.
+
+    :param url_or_id: A full URL like
+        ``https://www.zhihu.com/consult/conversation/123456`` (the
+        ``/answer`` suffix is optional) or a bare numeric ID string.
+    :returns: The conversation ID as a string.
+    :raises ValueError: If the input doesn't look like a valid consult URL or ID.
+    """
+    m = CONVERSATION_URL_RE.search(url_or_id)
+    if m:
+        return m.group(1)
+    if url_or_id.strip().isdigit():
+        return url_or_id.strip()
+    raise ValueError(f"Invalid consult conversation URL or ID: {url_or_id!r}")
+
+
+def fetch_conversation_detail(conversation_id: str) -> dict[str, Any]:
+    """Fetch full detail for a single consultation conversation.
+
+    Fetches the SSR page at
+    ``https://www.zhihu.com/consult/conversation/<id>/answer`` and
+    extracts ``js-initialData`` → ``initialState.archive`` via
+    :func:`~zhihu_cli.content.handlers.requests.get_page_state`.
+
+    :param conversation_id: The conversation (answer) ID string.
+    :returns: A normalized dict with ``conversation_id``, ``status``,
+        ``price``, ``questioner``, ``responder``, ``messages``, and more.
+    :raises ValueError: If the page doesn't contain archive data.
+    """
+    url = f"https://www.zhihu.com/consult/conversation/{conversation_id}/answer"
+    html = fetch_page_html(url)
+    archive = get_page_state(html, key="archive")
+
+    conv = archive.get("conversation")
+    if not conv:
+        raise ValueError(f"No archive data for conversation {conversation_id} (not found or not accessible)")
+
+    # ── messages (ordered) ─────────────────────────────────────────────
+    message_dict = archive.get("messageDict", {})
+    messages: list[dict[str, Any]] = []
+    for msg in conv.get("messages", []):
+        msg_id = str(msg.get("id", ""))
+        enriched = message_dict.get(msg_id, {})
+        text: str = enriched.get("text", "") or _extract_question_text({"content": msg.get("content", [])})
+        images: list[str] = enriched.get("images", []) or []
+        messages.append(
+            {
+                "id": msg.get("id"),
+                "type": msg.get("type", ""),
+                "text": text,
+                "images": images,
+                "created_at": fmt_time(msg.get("createdAt")),
+                "is_first_question": bool(msg.get("isFirstQuestion")),
+            }
+        )
+
+    # ── services ───────────────────────────────────────────────────────
+    services = conv.get("services", [])
+    service_title = services[0].get("title", "") if services else ""
+
+    questioner = archive.get("questioner", {})
+    responder = archive.get("responder", {})
+    user = archive.get("user", {})
+
+    return {
+        "conversation_id": conv.get("id", ""),
+        "status": conv.get("status", ""),
+        "price": conv.get("price", 0),
+        "audience_price": conv.get("audiencePrice", 0),
+        "actual_income": conv.get("actualIncome", 0),
+        "actual_income_title": conv.get("actualIncomeTitle", ""),
+        "pay_status": conv.get("payStatus", ""),
+        "is_public": conv.get("isPublic", False),
+        "is_anonymous": conv.get("isAnonymous", False),
+        "is_expired": conv.get("isExpired", False),
+        "expires_at": fmt_time(conv.get("expiresAt")),
+        "first_answer_at": fmt_time(conv.get("firstAnswerAt")) if conv.get("firstAnswerAt") else None,
+        "like_count": conv.get("likeCount", 0),
+        "purchase_count": conv.get("purchaseCount", 0),
+        "service_title": service_title,
+        "questioner": {
+            "name": questioner.get("fullname", ""),
+            "avatar_url": questioner.get("avatarUrl", ""),
+            "id": questioner.get("id"),
+        },
+        "responder": {
+            "name": responder.get("fullname", ""),
+            "avatar_url": responder.get("avatarUrl", ""),
+            "id": responder.get("id", ""),
+        },
+        "user_identity": user.get("identity", ""),
+        "can_read": user.get("canRead", False),
+        "is_liked": user.get("isLiked", False),
+        "messages": messages,
+        "url": f"https://www.zhihu.com/consult/conversation/{conv.get('id', '')}",
+    }
 
 
 def fetch_consult_answers(
