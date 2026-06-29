@@ -15,6 +15,10 @@ DRAFT_URL = "https://www.zhihu.com/api/v4/draft-history"
 ARTICLE_DRAFT_URL = "https://zhuanlan.zhihu.com/api/articles/{article_id}/draft"
 ANSWER_DRAFT_URL = "https://www.zhihu.com/api/v4/questions/{question_id}/draft"
 
+ANSWER_DRAFTS_URL = "https://www.zhihu.com/api/v4/answer-drafts"
+ARTICLE_DRAFTS_URL = "https://www.zhihu.com/api/v4/articles/my_drafts"
+PIN_DRAFTS_URL = "https://www.zhihu.com/api/v4/content/drafts"
+
 ANSWER_DRAFT_SETTINGS: dict[str, Any] = {
     "reshipment_settings": "allowed",
     "columns": None,
@@ -48,6 +52,54 @@ def list_drafts(object_type: str, object_id: str, limit: int = 10) -> list[dict]
         f"{DRAFT_HISTORIES_URL}?"
         f"{urlencode({'object_type': object_type, 'object_id': object_id, 'limit': page_size, 'offset': 0})}"
     )
+    drafts: list[dict] = []
+    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
+        drafts.append(draft)
+        if len(drafts) >= limit:
+            break
+    return drafts
+
+
+def list_answer_drafts(limit: int = 20) -> list[dict]:
+    """List all answer drafts for the current user.
+
+    :param limit: Maximum number of drafts to return.
+    :returns: List of draft metadata dicts, newest first.
+    """
+    page_size = min(limit, 20)
+    url = f"{ANSWER_DRAFTS_URL}?{urlencode({'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
+    drafts: list[dict] = []
+    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
+        drafts.append(draft)
+        if len(drafts) >= limit:
+            break
+    return drafts
+
+
+def list_article_drafts(limit: int = 20) -> list[dict]:
+    """List all article drafts for the current user.
+
+    :param limit: Maximum number of drafts to return.
+    :returns: List of draft metadata dicts, newest first.
+    """
+    page_size = min(limit, 20)
+    url = f"{ARTICLE_DRAFTS_URL}?{urlencode({'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
+    drafts: list[dict] = []
+    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
+        drafts.append(draft)
+        if len(drafts) >= limit:
+            break
+    return drafts
+
+
+def list_pin_drafts(limit: int = 20) -> list[dict]:
+    """List all pin drafts for the current user.
+
+    :param limit: Maximum number of drafts to return.
+    :returns: List of draft metadata dicts, newest first.
+    """
+    page_size = min(limit, 20)
+    url = f"{PIN_DRAFTS_URL}?{urlencode({'action': 'pin', 'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
     drafts: list[dict] = []
     for draft in stream_handler(url, _parse_draft_page, delay=0.3):
         drafts.append(draft)
