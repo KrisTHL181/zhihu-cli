@@ -11,6 +11,7 @@ from zhihu_cli.commands.consult import register_consult
 from zhihu_cli.commands.convert import register_convert
 from zhihu_cli.commands.daemon import register_daemon
 from zhihu_cli.commands.download import register_download
+from zhihu_cli.commands.draft import register_draft
 from zhihu_cli.commands.interact import register_interact
 from zhihu_cli.commands.listen import register_listen
 from zhihu_cli.commands.people import register_people
@@ -42,6 +43,7 @@ register_config(main)
 register_consult(main)
 register_convert(main)
 register_daemon(main)
+register_draft(main)
 register_download(main)
 register_interact(main)
 register_listen(main)

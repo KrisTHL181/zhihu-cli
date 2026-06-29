@@ -6,10 +6,8 @@ import os
 import click
 
 from zhihu_cli.content.handlers import get_data_dir
-from zhihu_cli.content.handlers.draft import draft_to_markdown
 from zhihu_cli.content.universal_converter import convert_items, load_json
 from zhihu_cli.output import (
-    echo,
     error,
     f_dim,
     f_num,
@@ -60,25 +58,3 @@ def register_convert(main_group):
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(converted, f, ensure_ascii=False, indent=2)
         success(f"Converted {f_num(len(converted))} items {f_dim('→')} {f_path(output_file)}")
-
-    @convert.command("draft")
-    @click.argument("url")
-    @click.option("--output", "-o", default=None, help="Save Markdown to file instead of printing")
-    def convert_draft(url: str, output: str | None) -> None:
-        """Convert the latest draft of a Zhihu question/answer to Markdown.
-
-        Provide a Zhihu question URL (e.g. https://www.zhihu.com/question/123456)
-        to fetch and convert your unpublished draft to Markdown.
-        """
-        try:
-            metadata, markdown = draft_to_markdown(url)
-        except ValueError as e:
-            error(f"{e}")
-            raise SystemExit(1)
-
-        if output:
-            with open(output, "w", encoding="utf-8") as f:
-                f.write(markdown)
-            success(f"Draft saved to {f_path(output)}")
-        else:
-            echo(markdown)
