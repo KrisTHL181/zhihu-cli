@@ -264,11 +264,32 @@ def register_draft(main_group):
 
         TYPE is the content type: 'article' or 'answer'.
 
-        ID is the article_id (for article drafts) or question_id (for answer drafts).
+        ID is the article_id (for article drafts), question_id (for answer
+        drafts), or a full Zhihu URL from which the ID will be extracted.
 
         Reads Markdown from --file/-f, or from stdin if not provided.
         The Markdown is converted to HTML before uploading.
         """
+        # If ID looks like a URL, extract the actual ID
+        if "://" in id:
+            url_type, url_id = get_type_and_id(id)
+            if not url_type or not url_id:
+                error(f"Cannot parse Zhihu URL: {id}")
+                raise SystemExit(1)
+            if type == "answer":
+                if url_type == "answers" and "/" in url_id:
+                    id = url_id.split("/")[0]  # question_id
+                elif url_type == "questions":
+                    id = url_id
+                else:
+                    error(f"URL type '{url_type}' is not compatible with answer draft upload. Provide a question URL.")
+                    raise SystemExit(1)
+            elif type == "article":
+                if url_type != "articles":
+                    error(f"URL type '{url_type}' is not compatible with article draft upload. Provide an article URL.")
+                    raise SystemExit(1)
+                id = url_id
+
         content = _read_content(file)
         if not content.strip():
             error("Empty content.")
