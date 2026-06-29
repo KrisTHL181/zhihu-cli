@@ -203,6 +203,7 @@ def upload_draft(content_type: str, object_id: str, html_content: str) -> dict[s
                 "delta_time": delta_time,
                 "can_reward": False,
             },
+            skip_app_headers=True,
         )
         resp.raise_for_status()
         return resp.json()
@@ -228,6 +229,7 @@ def upload_draft(content_type: str, object_id: str, html_content: str) -> dict[s
                     "attachment": None,
                     "settings": ANSWER_DRAFT_SETTINGS,
                 },
+                skip_app_headers=True,
             )
         else:
             delta_time = new_length
@@ -241,6 +243,7 @@ def upload_draft(content_type: str, object_id: str, html_content: str) -> dict[s
                     "draft_type": "normal",
                     "settings": ANSWER_DRAFT_SETTINGS,
                 },
+                skip_app_headers=True,
             )
         resp.raise_for_status()
         return resp.json()

@@ -145,42 +145,57 @@ class ZhihuSession(_requests.Session):
         return "+".join(parts)
 
     def request(self, method, url, **kwargs):
-        sign_source = self._build_sign_source(method, url, kwargs)
-        if sign_source is not None:
-            md5_hash = hashlib.md5(sign_source.encode()).hexdigest()
-            signature = self.zse_cipher.encrypt(md5_hash)
+        skip_app = kwargs.pop("skip_app_headers", False)
 
-            zse_headers = {
-                "x-zse-93": ZSE93,
-                "x-zse-96": "2.0_" + signature,
-                "x-requested-with": "fetch",
-            }
-            user_headers = kwargs.get("headers", {})
-            zse_headers.update(user_headers)
-            kwargs["headers"] = zse_headers
+        saved_version = None
+        saved_za = None
+        if skip_app:
+            saved_version = self.headers.pop("x-app-version", None)
+            saved_za = self.headers.pop("x-app-za", None)
 
-        resp = super().request(method, url, **kwargs)
+        try:
+            sign_source = self._build_sign_source(method, url, kwargs)
+            if sign_source is not None:
+                md5_hash = hashlib.md5(sign_source.encode()).hexdigest()
+                signature = self.zse_cipher.encrypt(md5_hash)
 
-        # Post-response captcha / risk-control handling
-        if self.captcha_handler != "ignore":
-            captcha_error = detect_captcha(resp)
-            if captcha_error is not None:
-                # Avoid re-entrant handling for captcha-related endpoints
-                parsed = urlparse(url)
-                path = parsed.path
-                if not _is_captcha_endpoint(path):
-                    mode = self.captcha_handler
-                    if mode == "auto":
-                        result = handle_captcha(self, captcha_error)
-                        if result == "resolved":
-                            # Retry the original request once after verification
-                            resp = super().request(method, url, **kwargs)
-                        # For "skipped" or "cancelled", return the original
-                        # 403 response so the caller can handle it appropriately.
-                    elif mode == "prompt":
-                        _print_captcha_warning(captcha_error)
+                zse_headers = {
+                    "x-zse-93": ZSE93,
+                    "x-zse-96": "2.0_" + signature,
+                    "x-requested-with": "fetch",
+                }
+                user_headers = kwargs.get("headers", {})
+                zse_headers.update(user_headers)
+                kwargs["headers"] = zse_headers
 
-        return resp
+            resp = super().request(method, url, **kwargs)
+
+            # Post-response captcha / risk-control handling
+            if self.captcha_handler != "ignore":
+                captcha_error = detect_captcha(resp)
+                if captcha_error is not None:
+                    # Avoid re-entrant handling for captcha-related endpoints
+                    parsed = urlparse(url)
+                    path = parsed.path
+                    if not _is_captcha_endpoint(path):
+                        mode = self.captcha_handler
+                        if mode == "auto":
+                            result = handle_captcha(self, captcha_error)
+                            if result == "resolved":
+                                # Retry the original request once after verification
+                                resp = super().request(method, url, **kwargs)
+                            # For "skipped" or "cancelled", return the original
+                            # 403 response so the caller can handle it appropriately.
+                        elif mode == "prompt":
+                            _print_captcha_warning(captcha_error)
+
+            return resp
+        finally:
+            if skip_app:
+                if saved_version is not None:
+                    self.headers["x-app-version"] = saved_version
+                if saved_za is not None:
+                    self.headers["x-app-za"] = saved_za
 
 
 def _resolve_user_agent(headers: dict[str, str]) -> str:

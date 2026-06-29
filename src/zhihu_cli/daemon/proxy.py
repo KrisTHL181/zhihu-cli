@@ -305,11 +305,21 @@ class DaemonProxySession:
         :param method: HTTP method (GET, POST, PUT, DELETE, …).
         :param url: Full URL to request.
         :param kwargs: Same keyword arguments accepted by
-            :meth:`curl_cffi.requests.Session.request`.
+            :meth:`curl_cffi.requests.Session.request`, plus:
+
+            ``skip_app_headers`` (:class:`bool`)
+                When :data:`True`, suppress ``x-app-version`` and ``x-app-za``
+                headers for this request.  The daemon does not inject these
+                headers (only the direct session does), so this is a no-op
+                — accepted for interface parity with
+                :class:`~zhihu_cli.content.handlers._session_core.ZhihuSession`.
         :returns: A :class:`DaemonProxyResponse`.
         :raises DaemonNotRunningError: if the daemon is unavailable.
         :raises DaemonConnectionError: if the IPC connection fails.
         """
+        # Pop client-only kwargs before serialisation / fallback
+        kwargs.pop("skip_app_headers", None)
+
         # ── streaming fallback ──
         if kwargs.get("stream", False):
             streamless = {k: v for k, v in kwargs.items() if k != "stream"}
