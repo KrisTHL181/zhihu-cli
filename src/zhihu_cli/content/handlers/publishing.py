@@ -9,10 +9,22 @@ from zhihu_cli.content.utils.markdown2html import markdown2html
 PUBLISH_API: str = "https://www.zhihu.com/api/v4/content/publish"
 
 
-def publish_answer(question_id: str, content: str, *, html: str | None = None) -> dict[str, Any]:
+def publish_answer(
+    question_id: str, content: str, *, html: str | None = None, text_length: int | None = None
+) -> dict[str, Any]:
+    """Publish a new answer to *question_id*.
+
+    :param question_id: Zhihu question ID.
+    :param content: Markdown content.
+    :param html: Pre-converted HTML (avoids re-conversion).
+    :param text_length: Server-provided word count from draft data.
+        When omitted, computed client-side via :func:`calculate_text_length`.
+    """
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     if html is None:
         html = markdown2html(content, scene="answer")
+    if text_length is None:
+        text_length = calculate_text_length(html)
 
     resp = session.post(
         PUBLISH_API,
@@ -28,7 +40,7 @@ def publish_answer(question_id: str, content: str, *, html: str | None = None) -
                     "include": "is_contain_ai_content,is_visible,paid_info,paid_info_content,has_column,admin_closed_comment,reward_info,annotation_action,annotation_detail,collapse_reason,is_normal,is_sticky,collapsed_by,suggest_edit,comment_count,thanks_count,favlists_count,can_comment,content,editable_content,voteup_count,reshipment_settings,comment_permission,created_time,updated_time,review_info,relevant_info,question,excerpt,attachment,content_source,is_labeled,endorsements,reaction_instruction,reaction,ip_info,relationship.is_authorized,voting,is_thanked,is_author,is_nothelp,is_favorited;author.vip_info,kvip_info,badge[*].topics;settings.table_of_content.enabled",
                     "pc_business_params": '{"reshipment_settings":"allowed","comment_permission":"all","columns":null,"reward_setting":{"can_reward":false,"tagline":""},"disclaimer_status":"close","disclaimer_type":"none","commercial_report_info":{"is_report":false},"commercial_zhitask_bind_info":null,"is_report":false,"push_activity":true,"table_of_contents_enabled":false,"thank_inviter_status":"close","thank_inviter":""}',
                 },
-                "hybrid": {"html": html, "textLength": calculate_text_length(html)},
+                "hybrid": {"html": html, "textLength": text_length},
                 "reprint": {"reshipment_settings": "allowed"},
                 "commentsPermission": {"comment_permission": "all"},
                 "appreciate": {"can_reward": False, "tagline": ""},
@@ -44,11 +56,22 @@ def publish_answer(question_id: str, content: str, *, html: str | None = None) -
     return resp.json()
 
 
-def modify_answer(answer_id: str, content: str, *, html: str | None = None) -> dict[str, Any]:
+def modify_answer(
+    answer_id: str, content: str, *, html: str | None = None, text_length: int | None = None
+) -> dict[str, Any]:
+    """Modify an existing *answer_id*.
+
+    :param answer_id: Zhihu answer ID.
+    :param content: Markdown content.
+    :param html: Pre-converted HTML (avoids re-conversion).
+    :param text_length: Server-provided word count from draft data.
+        When omitted, computed client-side via :func:`calculate_text_length`.
+    """
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     if html is None:
         html = markdown2html(content, scene="answer")
-    text_length = calculate_text_length(html)
+    if text_length is None:
+        text_length = calculate_text_length(html)
 
     payload = {
         "action": "answer",
@@ -122,27 +145,43 @@ def publish_draft(url: str) -> dict[str, Any]:
     if not html_content:
         raise ValueError("Draft has no content")
 
+    # Use server-provided word count from draft data when available;
+    # falls back to client-side calculate_text_length inside each publish fn.
+    content_words = draft_data.get("content_words") or draft_detail.get("content_words")
+    text_length = int(content_words) if content_words is not None else None
+
     markdown_content = converter.convert(html_content)
 
     if object_type == "questions":
-        return publish_answer(object_id, markdown_content, html=html_content)
+        return publish_answer(object_id, markdown_content, html=html_content, text_length=text_length)
     elif object_type == "answers":
         answer_id = object_id.split("/")[1] if "/" in object_id else object_id
-        return modify_answer(answer_id, markdown_content, html=html_content)
+        return modify_answer(answer_id, markdown_content, html=html_content, text_length=text_length)
     elif object_type == "articles":
         title = draft_data.get("title") or draft_detail.get("title", "")
         if not title:
             raise ValueError("Draft has no title")
-        return modify_article(object_id, title, markdown_content, html=html_content)
+        return modify_article(object_id, title, markdown_content, html=html_content, text_length=text_length)
     else:
         raise ValueError(f"Unsupported type for draft publishing: {object_type}")
 
 
-def publish_article(title: str, content: str, *, html: str | None = None) -> dict[str, Any]:
+def publish_article(
+    title: str, content: str, *, html: str | None = None, text_length: int | None = None
+) -> dict[str, Any]:
+    """Publish a new article.
+
+    :param title: Article title.
+    :param content: Markdown content.
+    :param html: Pre-converted HTML (avoids re-conversion).
+    :param text_length: Server-provided word count from draft data.
+        When omitted, computed client-side via :func:`calculate_text_length`.
+    """
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     if html is None:
         html = markdown2html(content, scene="article")
-    text_length = calculate_text_length(html)
+    if text_length is None:
+        text_length = calculate_text_length(html)
 
     pc_business_params = json.dumps(
         {
@@ -176,11 +215,23 @@ def publish_article(title: str, content: str, *, html: str | None = None) -> dic
     return resp.json()
 
 
-def modify_article(article_id: str, title: str, content: str, *, html: str | None = None) -> dict[str, Any]:
+def modify_article(
+    article_id: str, title: str, content: str, *, html: str | None = None, text_length: int | None = None
+) -> dict[str, Any]:
+    """Modify an existing article.
+
+    :param article_id: Zhihu article ID.
+    :param title: Article title.
+    :param content: Markdown content.
+    :param html: Pre-converted HTML (avoids re-conversion).
+    :param text_length: Server-provided word count from draft data.
+        When omitted, computed client-side via :func:`calculate_text_length`.
+    """
     trace_id = ",".join([str(x) for x in generate_trace_context()])
     if html is None:
         html = markdown2html(content, scene="article")
-    text_length = calculate_text_length(html)
+    if text_length is None:
+        text_length = calculate_text_length(html)
 
     pc_business_params = json.dumps(
         {

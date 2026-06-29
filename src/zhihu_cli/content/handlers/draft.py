@@ -185,10 +185,12 @@ def upload_draft(content_type: str, object_id: str, html_content: str) -> dict[s
     if content_type == "article":
         drafts = list_drafts("article", object_id)
         if drafts:
-            old_html = (
-                get_draft(drafts[0]["id"], drafts[0].get("version_type", "current")).get("draft", {}).get("content", "")
-            )
-            old_length = calculate_text_length(old_html)
+            old_draft = get_draft(drafts[0]["id"], drafts[0].get("version_type", "current")).get("draft", {})
+            # Prefer server-provided content_words over client-side computation
+            old_length = old_draft.get("content_words")
+            if old_length is None:
+                old_html = old_draft.get("content", "")
+                old_length = calculate_text_length(old_html)
             delta_time = new_length - old_length
         else:
             delta_time = new_length
@@ -208,10 +210,12 @@ def upload_draft(content_type: str, object_id: str, html_content: str) -> dict[s
     elif content_type == "answer":
         drafts = list_drafts("question", object_id)
         if drafts:
-            old_html = (
-                get_draft(drafts[0]["id"], drafts[0].get("version_type", "current")).get("draft", {}).get("content", "")
-            )
-            old_length = calculate_text_length(old_html)
+            old_draft = get_draft(drafts[0]["id"], drafts[0].get("version_type", "current")).get("draft", {})
+            # Prefer server-provided content_words over client-side computation
+            old_length = old_draft.get("content_words")
+            if old_length is None:
+                old_html = old_draft.get("content", "")
+                old_length = calculate_text_length(old_html)
             delta_time = new_length - old_length
 
             url = ANSWER_DRAFT_URL.format(question_id=object_id)
