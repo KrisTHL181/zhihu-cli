@@ -164,24 +164,28 @@ def register_tools(main_group):
             return
         analyze_monthly_income(file_path)
 
-    @tools_creator_income.command("plot")
-    def creator_plot() -> None:
+    @tools_creator_income.group("plot")
+    def tools_creator_income_plot() -> None:
+        """Income plot subcommands — basic, advanced, derivative."""
+
+    @tools_creator_income_plot.command("basic")
+    def creator_plot_basic() -> None:
         """Generate basic income plot (bar chart + EMA + trend)."""
         from zhihu_cli.creator_tools.plot_zhihu_incomes import plot_analysis
 
         plot_analysis()
         success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'income_analysis.png'))}")
 
-    @tools_creator_income.command("advanced")
-    def creator_advanced() -> None:
+    @tools_creator_income_plot.command("advanced")
+    def creator_plot_advanced() -> None:
         """Generate advanced analysis plot (Bollinger + MACD)."""
         from zhihu_cli.creator_tools.plot_zhihu_incomes_advanced import plot_advanced_analysis
 
         plot_advanced_analysis()
         success(f"Saved {f_path(str(get_data_dir() / 'plots' / 'income_advanced_analysis.png'))}")
 
-    @tools_creator_income.command("derivative")
-    def creator_derivative() -> None:
+    @tools_creator_income_plot.command("derivative")
+    def creator_plot_derivative() -> None:
         """Generate derivative analysis plot (velocity, acceleration, jerk)."""
         from zhihu_cli.creator_tools.derivative_analysis import plot_derivative_analysis
 
