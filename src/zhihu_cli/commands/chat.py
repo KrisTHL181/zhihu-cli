@@ -1,5 +1,7 @@
 """Chat commands for zhihu CLI — inbox, history, send, and interactive chat."""
 
+import asyncio
+
 import click
 
 from zhihu_cli.content.handlers.chat import (
@@ -104,4 +106,4 @@ def register_chat(main_group: click.Group) -> None:
 
         mqtt_filter = sender if sender else user_id
         info(f"Connecting to Zhihu MQTT (messages from {mqtt_filter})...")
-        interactive_chat(user_id, url_token, mqtt_filter)
+        asyncio.run(interactive_chat(user_id, url_token, mqtt_filter))

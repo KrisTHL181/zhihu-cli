@@ -14,7 +14,7 @@ dependencies = [
     "cssselect",
     "pyyaml",
     "rich",
-    "paho-mqtt",
+    "aiomqtt",
     "prompt-toolkit>=3.0",
     "qrcode",
     "Pillow",

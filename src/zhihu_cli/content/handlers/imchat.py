@@ -1,11 +1,12 @@
+import asyncio
 import json
-import queue
 import random
+import ssl
+from collections.abc import AsyncGenerator
 from typing import Any
 
+import aiomqtt
 import click
-from paho.mqtt import client as mqtt_client
-from paho.mqtt.enums import CallbackAPIVersion
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -16,16 +17,38 @@ IMCHAT_TOPIC: str = "zhihu/message/v1/im/user/{USER_HASH}/"
 
 
 def get_pm_mqtt_topic(url_token: str) -> str:
+    """Resolve a user's MQTT topic hash from their profile page.
+
+    :param url_token: The user's URL token (e.g. ``"zhangsan"``).
+    :returns: The 32-character hex hash used in MQTT topic subscriptions.
+    """
     entities = get_page_state(fetch_page_html(f"https://www.zhihu.com/people/{url_token}"))
     item = entities["users"]
     return next(iter(item))
 
 
 class ZhihuMessageListener:
-    def __init__(self, url_token: str, topic: str, incognito: bool = False, sender_filter: str | None = None) -> None:
+    """Async MQTT listener for real-time Zhihu notifications and IM messages.
+
+    Uses ``aiomqtt`` over WebSocket+TLS to connect to Zhihu's MQTT broker.
+    Messages are received asynchronously and can be consumed via
+    :func:`iter_messages` (programmatic) or :func:`listen` (standalone CLI).
+
+    :param url_token: The logged-in user's URL token.
+    :param topic: MQTT topic template string containing ``{USER_HASH}``.
+    :param incognito: Unused; reserved for future use.
+    :param sender_filter: Optional sender filter (url_token or 32-char hex hash).
+    """
+
+    def __init__(
+        self,
+        url_token: str,
+        topic: str,
+        incognito: bool = False,
+        sender_filter: str | None = None,
+    ) -> None:
         self.url_token = url_token
         self.user_hash = get_pm_mqtt_topic(url_token)
-        self.msg_queue = queue.Queue()
 
         self.topic = topic.replace("{USER_HASH}", self.user_hash)
 
@@ -53,60 +76,67 @@ class ZhihuMessageListener:
         self.port = 443
         self.client_id = f"mqttjs_{random.randint(0, 0xFFFFFFFF):08x}"
         self.incognito = incognito
-        self.client = self._connect()
 
-    def _connect(self) -> mqtt_client.Client:
-        client = mqtt_client.Client(CallbackAPIVersion.VERSION2, self.client_id, transport="websockets")
-        client.tls_set()
+        # Pre-compute connection parameters (headers are cached at build time;
+        # the connection itself is established lazily on first listen/iterate).
+        self._tls_context = ssl.create_default_context()
+        self._ws_headers = cache_manager.load_headers()
+        self._ws_path = "/mqtt?client_info=OS%3DWeb&user_group=zhihu_web"
 
-        headers = cache_manager.load_headers()
+    def _build_client(self) -> aiomqtt.Client:
+        """Build an :class:`aiomqtt.Client` configured for Zhihu's MQTT broker.
 
-        ws_path = "/mqtt?client_info=OS%3DWeb&user_group=zhihu_web"
-        client.ws_set_options(path=ws_path, headers=headers)
-
-        client.on_connect = self.on_connect
-        client.on_message = self.on_message
-
-        client.connect(self.broker, self.port, keepalive=30)
-        return client
-
-    def on_connect(
-        self, client: mqtt_client.Client, userdata: Any, flags: dict[str, Any], reason_code: Any, properties: Any
-    ) -> None:
-        if reason_code.is_failure:
-            raise ConnectionError(
-                f"Failed to connect to Zhihu MQTT Broker. Reason: {reason_code} (Code: {reason_code.value})"
-            )
-        else:
-            client.subscribe(self.topic)
-
-    def on_message(self, client: mqtt_client.Client, userdata: Any, msg: mqtt_client.MQTTMessage) -> None:
-        raw_payload = msg.payload.decode("utf-8")
-        data = json.loads(raw_payload)
-        self.msg_queue.put(data)
-
-    def start(self, output_json: bool = False) -> None:
-        """Start the MQTT listener and print incoming messages to stdout.
-
-        If ``receiver_id`` is set, only messages to that receiver are printed.
-        When *output_json* is False (the default), messages are formatted in
-        chat-history style (``[time]sender: content``).
+        The client is not connected — call this inside an ``async with`` block.
         """
-        self.client.loop_start()
-        try:
-            while True:
-                data = self.msg_queue.get()
-                # `meta.sender_id` carries the sender's hash; `meta.receiver_id`
-                # is the recipient (i.e. the logged-in user).  Filter on sender.
+        return aiomqtt.Client(
+            hostname=self.broker,
+            port=self.port,
+            transport="websockets",
+            tls_context=self._tls_context,
+            websocket_path=self._ws_path,
+            websocket_headers=self._ws_headers,
+            identifier=self.client_id,
+            keepalive=30,
+        )
+
+    async def iter_messages(self) -> AsyncGenerator[dict[str, Any], None]:
+        """Async generator that connects to the MQTT broker and yields parsed message dicts.
+
+        Each yielded dict is the JSON-decoded MQTT payload.  Messages that
+        don't match *sender_filter* (when set) are silently skipped.  The
+        connection is held open for the lifetime of the iteration — cancel
+        the task or break out of the loop to disconnect.
+
+        :yields: Parsed JSON message dicts.
+        """
+        async with self._build_client() as client:
+            await client.subscribe(self.topic)
+            async for message in client.messages:
+                try:
+                    data = json.loads(message.payload.decode("utf-8"))
+                except json.JSONDecodeError:
+                    continue
                 if self.receiver_id and data.get("meta", {}).get("sender_id") != self.receiver_id:
                     continue
+                yield data
+
+    async def listen(self, output_json: bool = False) -> None:
+        """Connect to MQTT and print incoming messages to stdout (standalone mode).
+
+        Designed for CLI usage via ``zhihu listen``.  Runs until cancelled
+        (Ctrl+C), which triggers a clean disconnect via aiomqtt's context
+        manager.
+
+        :param output_json: If True, print raw JSON instead of formatted text.
+        """
+        try:
+            async for data in self.iter_messages():
                 if output_json:
                     print(json.dumps(data, ensure_ascii=False, indent=2))
                 else:
                     click.echo(self._format_message(data))
-        except KeyboardInterrupt:
-            self.client.loop_stop()
-            self.client.disconnect()
+        except asyncio.CancelledError:
+            pass  # clean shutdown on Ctrl+C
 
     def _format_message(self, data: dict) -> str:
         """Format a single MQTT IM message in chat-history style.

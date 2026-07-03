@@ -1,6 +1,3 @@
-import json
-import queue
-import threading
 from collections.abc import Generator, Iterable
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -214,7 +211,7 @@ def _fmt_chat_line(sender: str, content: str, ts: int | float | None) -> str:
     return f"  {time_part}{sender_part}: {content}"
 
 
-def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None = None) -> None:
+async def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None = None) -> None:
     """Start an interactive chat session with real-time MQTT listener.
 
     Combines chat history display, a background MQTT listener for incoming
@@ -226,6 +223,9 @@ def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None 
         my_url_token: Current logged-in user's url_token (for MQTT connection).
         sender_filter: Optional MQTT filter (defaults to *chat_id*).
     """
+    import asyncio
+    import time as _time
+
     from prompt_toolkit import PromptSession, print_formatted_text
     from prompt_toolkit.formatted_text import ANSI
     from prompt_toolkit.history import InMemoryHistory
@@ -258,21 +258,8 @@ def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None 
     mqtt_filter = sender_filter if sender_filter else chat_id
     listener = ZhihuMessageListener(my_url_token, IMCHAT_TOPIC, sender_filter=mqtt_filter)
 
-    # Replace on_message to route incoming data to our display queue.
-    display_queue: queue.Queue[dict[str, Any]] = queue.Queue()
-
-    def on_message(client: Any, userdata: Any, msg: Any) -> None:
-        raw = msg.payload.decode("utf-8")
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return
-        # Filter by sender_id (not receiver_id — that is the logged-in user).
-        if listener.receiver_id and data.get("meta", {}).get("sender_id") != listener.receiver_id:
-            return
-        display_queue.put(data)
-
-    listener.client.on_message = on_message
+    # asyncio.Queue for routing incoming MQTT messages to the display loop.
+    display_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     # ── 3. Format an MQTT message for display ────────────────────────────
     def _fmt_mqtt(data: dict[str, Any]) -> str:
@@ -294,21 +281,28 @@ def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None 
 
         return _fmt_chat_line(sender, text, ts)
 
-    # ── 4. Background display thread ─────────────────────────────────────
-    stop_event = threading.Event()
+    # ── 4. Background async tasks ────────────────────────────────────────
 
-    def display_loop() -> None:
+    async def mqtt_worker() -> None:
+        """Bridge MQTT messages into the display queue."""
+        try:
+            async for data in listener.iter_messages():
+                display_queue.put_nowait(data)
+        except asyncio.CancelledError:
+            pass
+
+    async def display_worker() -> None:
         """Continuously drain the display queue and print formatted messages."""
-        while not stop_event.is_set():
-            try:
-                data = display_queue.get(timeout=0.15)
-            except queue.Empty:
-                continue
-            _pt_echo(_fmt_mqtt(data))
+        try:
+            while True:
+                data = await display_queue.get()
+                _pt_echo(_fmt_mqtt(data))
+        except asyncio.CancelledError:
+            pass
 
     # ── 5. Run the interactive session ───────────────────────────────────
-    listener.client.loop_start()
-    display_thread = threading.Thread(target=display_loop, daemon=True)
+    mqtt_task = asyncio.create_task(mqtt_worker())
+    display_task = asyncio.create_task(display_worker())
 
     with patch_stdout():
         # Print history (history messages have pre-formatted time strings).
@@ -321,13 +315,11 @@ def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None 
         if history_msgs:
             _pt_echo(click.style("  ── history loaded ──", dim=True))
 
-        display_thread.start()
-
         session = PromptSession(history=InMemoryHistory())
         try:
             while True:
                 try:
-                    text = session.prompt("\n> ")
+                    text = await session.prompt_async("\n> ")
                 except (EOFError, KeyboardInterrupt):
                     break
 
@@ -338,21 +330,20 @@ def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None 
                     break
 
                 try:
-                    import sys as _sys
-                    import time as _time
-
                     send_text_message(chat_id, text)
                     now = _time.time()
                     # Prompt is "\n> " (2 lines).  \x1b[2A goes up both
                     # the blank line and "> text", \x1b[J clears to end
                     # of screen so both lines are erased before we print
                     # the sent message in the same space.
+                    import sys as _sys
+
                     _sys.__stdout__.write("\x1b[2A\r\x1b[J")
                     _sys.__stdout__.flush()
                     _pt_echo(_fmt_chat_line(my_name, text, now))
                 except Exception as exc:
                     _pt_echo(f"  {click.style('[error]', fg='red')} Failed to send: {exc}")
         finally:
-            stop_event.set()
-            listener.client.loop_stop()
-            listener.client.disconnect()
+            mqtt_task.cancel()
+            display_task.cancel()
+            await asyncio.gather(mqtt_task, display_task, return_exceptions=True)
