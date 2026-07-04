@@ -16,9 +16,13 @@ Bold        — emphasis on key actionable items
 """
 
 import json
+import sys
 from typing import Any
 
 import click
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 __all__ = [
     "echo",
@@ -54,9 +58,16 @@ __all__ = [
     "set_json_mode",
     "in_json_mode",
 ]
-from rich import box
-from rich.console import Console
-from rich.table import Table
+
+
+def lazy_rich_excepthook(type, value, tb):
+    from rich.traceback import install
+
+    rich_hook = install(show_locals=True)
+    rich_hook(type, value, tb)
+
+
+sys.excepthook = lazy_rich_excepthook
 
 # ── console singleton ───────────────────────────────────────────────────────
 
