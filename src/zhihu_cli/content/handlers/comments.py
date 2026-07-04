@@ -283,3 +283,43 @@ def delete_comment(comment_id: str) -> None:
     resp = session.delete(f"https://www.zhihu.com/api/v4/comment_v5/comment/{comment_id}")
     if not resp.json()["success"]:
         raise RuntimeError(f"Failed to delete comment {comment_id}")
+
+
+def like_comment(comment_id: str) -> dict[str, Any]:
+    """Like a comment.
+
+    :param comment_id: The comment ID to like.
+    :returns: API response dict.
+    """
+    resp = session.post(f"https://www.zhihu.com/api/v4/comments/{comment_id}/like")
+    return resp.json()
+
+
+def dislike_comment(comment_id: str) -> dict[str, Any]:
+    """Dislike a comment.
+
+    :param comment_id: The comment ID to dislike.
+    :returns: API response dict.
+    """
+    resp = session.put(f"https://www.zhihu.com/api/v4/comment_v5/comment/{comment_id}/reaction/dislike")
+    return resp.json()
+
+
+def cancel_like_comment(comment_id: str) -> dict[str, Any]:
+    """Cancel a previous like on a comment.
+
+    :param comment_id: The comment ID.
+    :returns: API response dict.
+    """
+    resp = session.delete(f"https://www.zhihu.com/api/v4/comments/{comment_id}/like")
+    return resp.json()
+
+
+def cancel_dislike_comment(comment_id: str) -> dict[str, Any]:
+    """Cancel a previous dislike on a comment.
+
+    :param comment_id: The comment ID.
+    :returns: API response dict.
+    """
+    resp = session.delete(f"https://www.zhihu.com/api/v4/comment_v5/comment/{comment_id}/reaction/dislike")
+    return resp.json()

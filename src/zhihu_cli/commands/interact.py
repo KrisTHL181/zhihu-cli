@@ -22,7 +22,14 @@ from zhihu_cli.content.handlers.collection import (
     list_collection_contents,
     list_collections,
 )
-from zhihu_cli.content.handlers.comments import comment_item, delete_comment
+from zhihu_cli.content.handlers.comments import (
+    cancel_dislike_comment,
+    cancel_like_comment,
+    comment_item,
+    delete_comment,
+    dislike_comment,
+    like_comment,
+)
 from zhihu_cli.content.handlers.people import block, follow, unblock, unfollow
 from zhihu_cli.content.handlers.question import (
     downvote_answer,
@@ -230,6 +237,60 @@ def register_interact(main_group) -> None:
         """Delete a comment by ID."""
         delete_comment(comment_id)
         success(f"Deleted comment {comment_id}")
+
+    @interact_comment.command("like")
+    @click.argument("comment_id")
+    def comment_like(comment_id: str) -> None:
+        """Like a comment."""
+        like_comment(comment_id)
+        success(f"Liked comment {comment_id}")
+
+    @interact_comment.command("unlike")
+    @click.argument("comment_id")
+    def comment_unlike(comment_id: str) -> None:
+        """Cancel a previous like on a comment."""
+        cancel_like_comment(comment_id)
+        success(f"Canceled like on comment {comment_id}")
+
+    @interact_comment.command("dislike")
+    @click.argument("comment_id")
+    def comment_dislike(comment_id: str) -> None:
+        """Dislike a comment."""
+        dislike_comment(comment_id)
+        success(f"Disliked comment {comment_id}")
+
+    @interact_comment.command("undislike")
+    @click.argument("comment_id")
+    def comment_undislike(comment_id: str) -> None:
+        """Cancel a previous dislike on a comment."""
+        cancel_dislike_comment(comment_id)
+        success(f"Canceled dislike on comment {comment_id}")
+
+    @interact_comment.command("interactive")
+    @click.argument("url")
+    def comment_interactive(url: str) -> None:
+        """Browse and reply to comments in an interactive terminal UI.
+
+        Fetches the full comment tree for the given URL, then opens a
+        keyboard-navigable interface:
+
+        \b
+          ↑/↓ or j/k  — Navigate comments (including children)
+          PgUp/PgDn   — Jump to previous/next top-level comment
+          Enter       — Open reply panel for the selected comment
+          Esc         — Cancel reply / close reply panel
+          q           — Quit
+
+        \b
+        Example:
+          zhihu interact comment interactive https://www.zhihu.com/question/123/answer/456
+        """
+        item_type, item_id = _parse_item_url(url)
+        if item_type == "answers":
+            item_id = _resolve_answer_id(item_id)
+        from zhihu_cli.commands.interact_comment_interactive import run_interactive_comments
+
+        run_interactive_comments(item_type, item_id)
 
     # ── collect ─────────────────────────────────────────────────────────────
 
