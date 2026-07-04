@@ -153,7 +153,7 @@ def _build_reply_header_tokens(target: dict[str, Any]) -> list[tuple[str, str]]:
         ("class:dim", f'│  "{content}"\n'),
         ("", "│\n"),
         ("class:reply-hint", "│  Type your reply below.\n"),
-        ("class:reply-hint", "│  Ctrl+Enter to send, Esc to cancel.\n"),
+        ("class:reply-hint", "│  Enter to send, Esc to cancel.\n"),
         ("", "│" + "─" * 35 + "\n"),
     ]
 
@@ -251,7 +251,7 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
         app.layout.focus(comment_window)
 
     def _submit_reply(buf: Buffer) -> bool:
-        """Accept handler for reply buffer — called on Ctrl+Enter."""
+        """Accept handler for reply buffer — submit the reply and refresh the list."""
         content = buf.text.strip()
         if not content:
             state["replying"] = False
@@ -266,13 +266,30 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
 
         try:
             comment_item(item_type, item_id, content, reply_comment_id=target["id"])
-            state["status"] = f"✓ Reply posted to {target.get('author', 'anonymous')}"
+            state["status"] = f"✓ Reply posted to {target.get('author', 'anonymous')} — refreshing..."
         except Exception as exc:
             state["status"] = f"✗ Failed to post reply: {exc}"
+            state["replying"] = False
+            state["reply_target"] = None
+            buf.text = ""
+            return True
 
         state["replying"] = False
         state["reply_target"] = None
         buf.text = ""
+
+        # Refresh the comment list so the new reply appears immediately
+        nonlocal flat_items
+        try:
+            new_comments = list(fetch_root_comments(item_type, item_id))
+            if new_comments:
+                flat_items = _flatten_comments(new_comments)
+                if state["selected"] >= len(flat_items):
+                    state["selected"] = max(0, len(flat_items) - 1)
+                _ensure_visible()
+                state["status"] = f"✓ Reply posted — {len(flat_items)} comments loaded."
+        except Exception as exc:
+            state["status"] = f"✓ Reply posted (refresh failed: {exc})"
         return True
 
     reply_buffer.accept_handler = _submit_reply
@@ -325,8 +342,10 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
 
     @kb.add("enter")
     def _(event: KeyPressEvent) -> None:
+        """Enter: submit reply in reply mode, or enter reply mode on a comment."""
         if state["replying"]:
-            return  # handled by BufferControl accept_handler
+            _submit_reply(reply_buffer)
+            return
         # Enter reply mode for the selected comment
         item = flat_items[state["selected"]]
         state["reply_target"] = item["comment"]
