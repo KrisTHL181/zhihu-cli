@@ -400,6 +400,29 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
     def _(event: KeyPressEvent) -> None:
         event.app.exit()
 
+    @kb.add("c-r")
+    def _(event: KeyPressEvent) -> None:
+        """Refresh comments (re-fetch from server)."""
+        if state["replying"]:
+            return
+        nonlocal flat_items
+        state["status"] = "Refreshing comments..."
+        event.app.invalidate()
+        try:
+            new_comments = list(fetch_root_comments(item_type, item_id))
+            if new_comments:
+                flat_items = _flatten_comments(new_comments)
+                # Clamp selected index if new list is shorter
+                if state["selected"] >= len(flat_items):
+                    state["selected"] = max(0, len(flat_items) - 1)
+                _ensure_visible()
+                state["status"] = f"✓ Refreshed — {len(flat_items)} comments loaded."
+            else:
+                state["status"] = "No comments found after refresh."
+        except Exception as exc:
+            state["status"] = f"✗ Failed to refresh: {exc}"
+        event.app.invalidate()
+
     # ── Dynamic content builders ────────────────────────────────────────
 
     def _get_comment_text() -> list[tuple[str, str]]:
@@ -437,7 +460,7 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
         tokens.append(
             (
                 "class:help",
-                " ↑↓/jk: Navigate  │  PgUp/PgDn: Jump root  │  Enter: Reply  │  Tab: Like  │  Shift+Tab: Dislike  │  q: Quit\n",
+                " ↑↓/jk: Navigate  │  PgUp/PgDn: Jump root  │  Enter: Reply  │  Tab: Like  │  Shift+Tab: Dislike  │  Ctrl+R: Refresh  │  q: Quit\n",
             )
         )
         tokens.append(("class:dim", f" Item {state['selected'] + 1} of {total}\n"))
