@@ -335,7 +335,8 @@ def register_tools(main_group):
     @click.option("--folder", default=str(get_data_dir() / "downloads" / "answers"), help="Folder with Markdown files")
     @click.option("--no-code", is_flag=True, help="Exclude code blocks")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def nlp_count(folder: str, no_code: bool, output_json: bool) -> None:
+    @click.option("--no-frontmatter", is_flag=True, default=False, help="Exclude YAML frontmatter from word count")
+    def nlp_count(folder: str, no_code: bool, output_json: bool, no_frontmatter: bool) -> None:
         """Count words in downloaded Markdown files."""
         import numpy as np
 
@@ -343,7 +344,7 @@ def register_tools(main_group):
 
         word_counts = []
         for filepath in Path(folder).rglob("*.md"):
-            word_counts.append(count_words(str(filepath), no_code=no_code))
+            word_counts.append(count_words(str(filepath), no_code=no_code, no_frontmatter=no_frontmatter))
 
         if not word_counts:
             if output_json:
@@ -358,6 +359,7 @@ def register_tools(main_group):
                 {
                     "files": len(wc),
                     "mean": round(float(np.mean(wc)), 1),
+                    "min": int(min(wc)),
                     "std": round(float(np.std(wc)), 1),
                     "p50": int(np.percentile(wc, 50)),
                     "p90": int(np.percentile(wc, 90)),
@@ -373,7 +375,7 @@ def register_tools(main_group):
         echo(
             f"  {f_label('P50:')} {f_num(f'{np.percentile(word_counts, 50):.0f}')}  {f_label('P90:')} {f_num(f'{np.percentile(word_counts, 90):.0f}')}"
         )
-        echo(f"  {f_label('Max:')} {f_num(max(word_counts))}")
+        echo(f"  {f_label('Min:')} {f_num(min(word_counts))}  {f_label('Max:')} {f_num(max(word_counts))}")
 
     @tools_nlp.command("wordcloud")
     @click.option("--source-dir", default=str(get_data_dir() / "downloads"), help="Directory with Markdown files")

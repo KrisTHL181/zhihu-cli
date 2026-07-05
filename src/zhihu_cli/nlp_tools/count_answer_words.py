@@ -6,14 +6,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def count_words(filepath: str, no_code: bool = False) -> int:
+def count_words(filepath: str, no_code: bool = False, no_frontmatter: bool = False) -> int:
     with open(filepath, encoding="utf-8") as f:
         content = f.read()
-        # Split file, extract body only (compatible with YAML frontmatter and legacy JSON format)
-        parts = content.split("---", 2)
-        if len(parts) < 2:
-            return 0
-        body = parts[-1]
+        if no_frontmatter:
+            # Split file, extract body only (compatible with YAML frontmatter and legacy JSON format)
+            parts = content.split("---", 2)
+            if len(parts) < 2:
+                return 0
+            body = parts[-1]
+        else:
+            body = content
 
         # Clean: remove LaTeX markers, whitespace
         clean_text = re.sub(r"\$.*?\$", "", body)
