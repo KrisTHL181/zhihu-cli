@@ -334,9 +334,10 @@ def register_tools(main_group):
     @tools_nlp.command("count")
     @click.option("--folder", default=str(get_data_dir() / "downloads" / "answers"), help="Folder with Markdown files")
     @click.option("--no-code", is_flag=True, help="Exclude code blocks")
+    @click.option("--no-latex", is_flag=True, help="Exclude LaTeX blocks")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--no-frontmatter", is_flag=True, default=False, help="Exclude YAML frontmatter from word count")
-    def nlp_count(folder: str, no_code: bool, output_json: bool, no_frontmatter: bool) -> None:
+    def nlp_count(folder: str, no_code: bool, no_latex: bool, output_json: bool, no_frontmatter: bool) -> None:
         """Count words in downloaded Markdown files."""
         import numpy as np
 
@@ -344,7 +345,9 @@ def register_tools(main_group):
 
         word_counts = []
         for filepath in Path(folder).rglob("*.md"):
-            word_counts.append(count_words(str(filepath), no_code=no_code, no_frontmatter=no_frontmatter))
+            word_counts.append(
+                count_words(str(filepath), no_code=no_code, no_latex=no_latex, no_frontmatter=no_frontmatter)
+            )
 
         if not word_counts:
             if output_json:

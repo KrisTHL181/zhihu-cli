@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def count_words(filepath: str, no_code: bool = False, no_frontmatter: bool = False) -> int:
+def count_words(filepath: str, no_code: bool = False, no_latex: bool = False, no_frontmatter: bool = False) -> int:
     with open(filepath, encoding="utf-8") as f:
         content = f.read()
         if no_frontmatter:
@@ -19,9 +19,10 @@ def count_words(filepath: str, no_code: bool = False, no_frontmatter: bool = Fal
             body = content
 
         # Clean: remove LaTeX markers, whitespace
-        clean_text = re.sub(r"\$.*?\$", "", body)
-        clean_text = re.sub(r"\\begin\{.*?\}.*?\\end\{.*?\}", "", clean_text, flags=re.DOTALL)
-        clean_text = re.sub(r"\s+", "", clean_text)
+        clean_text = re.sub(r"\s+", "", body)
+        if no_latex:
+            clean_text = re.sub(r"\$.*?\$", "", clean_text)
+            clean_text = re.sub(r"\\begin\{.*?\}.*?\\end\{.*?\}", "", clean_text, flags=re.DOTALL)
         if no_code:
             clean_text = re.sub(r"```.*?```", "", clean_text, flags=re.DOTALL)
 
