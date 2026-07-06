@@ -4,6 +4,7 @@ import click
 
 from zhihu_cli.commands._helpers import _extract_url_token
 from zhihu_cli.content.handlers.people import (
+    fetch_member_activities,
     fetch_member_answers,
     fetch_member_articles,
     fetch_member_pins,
@@ -59,6 +60,34 @@ def _print_content_item(item: dict, show_type: bool = False) -> None:
     echo(f"  {type_label}{f_bold(title[:100])}")
     echo(f"  {f_dim('  '.join(parts))}")
     echo(f"  {f_url(item.get('url', ''))}")
+    blank()
+
+
+def _print_activity_item(item: dict) -> None:
+    """Print a single parsed activity feed item."""
+    verb = item.get("action_text", "")
+    title = item.get("title", "") or item.get("excerpt", "") or "(no title)"
+    created = item.get("created_time", "")
+    url = item.get("url", "")
+    votes = item.get("voteup_count", 0)
+    comments = item.get("comment_count", 0)
+    ttype = item.get("target_type", "")
+    sticky = item.get("is_sticky", False)
+
+    # Label: action_text + optional type tag
+    prefix = f_tag(ttype) if ttype else ""
+    sticky_marker = f_dim(" [置顶]") if sticky else ""
+    echo(f"  {prefix} {f_bold(verb)}{sticky_marker}")
+
+    echo(f"  {f_bold(title[:120])}")
+    parts = [f_meta(created)]
+    if votes:
+        parts.append(f_green(f"+{votes}"))
+    if comments:
+        parts.append(f"{f_num(comments)} {f_dim('comments')}")
+    echo(f"  {f_dim('  '.join(parts))}")
+    if url:
+        echo(f"  {f_url(url)}")
     blank()
 
 
@@ -292,3 +321,30 @@ def register_people(main_group):
         for item in items:
             _print_content_item(item)
         echo(f"  {f_dim(f'── {len(items)} questions total')}")
+
+    @people.command("activities")
+    @click.argument("url_token")
+    @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+    @click.option(
+        "--creations-only", is_flag=True, default=False, help="Only show content creations (answers, pins, articles)"
+    )
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def people_activities(url_token: str, limit: int, creations_only: bool, output_json: bool) -> None:
+        """List a user's recent activities (new answers, articles, pins, etc.).
+
+        By default shows ALL activities including votes and follows.
+        Use --creations-only to filter to content creation only.
+        """
+        set_json_mode(output_json)
+        token = _extract_url_token(url_token)
+        info(f"Fetching activities for {token}...")
+        items = fetch_member_activities(token, max_items=limit, creations_only=creations_only)
+        if output_json:
+            print_json(items)
+            return
+        if not items:
+            info("No activities found.")
+            return
+        for item in items:
+            _print_activity_item(item)
+        echo(f"  {f_dim(f'── {len(items)} activities total')}")

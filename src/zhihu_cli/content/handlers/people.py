@@ -254,20 +254,115 @@ def fetch_member_questions(
 
 # ── activity feed ──────────────────────────────────────────────────────────
 
+# Verbs that represent content creation (not votes, follows, etc.)
+_CREATION_VERBS = frozenset(
+    {
+        "MEMBER_CREATE_PIN",
+        "MEMBER_ANSWER_QUESTION",
+        "MEMBER_CREATE_ARTICLE",
+        "MEMBER_ASK_QUESTION",
+        "MEMBER_CREATE_QUESTION",
+    }
+)
+
+
+def _parse_activity_item(raw: dict[str, Any]) -> dict[str, Any]:
+    """Parse a raw v3 moments/activities item into a structured dict.
+
+    The v3 API returns items with ``verb``, ``action_text``, ``target``, ``actor``,
+    and ``created_time``.  This normalizes them into a flat dict suitable for both
+    display and JSON output.
+    """
+    verb = raw.get("verb", "")
+    target = raw.get("target", {})
+    actor = raw.get("actor", {})
+
+    # Determine target type from verb or target structure
+    target_type = ""
+    if target.get("type") == "pin":
+        target_type = "pin"
+    elif target.get("type") == "answer":
+        target_type = "answer"
+    elif target.get("type") == "article":
+        target_type = "article"
+    elif target.get("type") == "question":
+        target_type = "question"
+
+    # Extract title (strip HTML tags for clean display)
+    title = target.get("title", "") or target.get("excerpt_title", "")
+    if not title and target.get("question"):
+        title = target["question"].get("title", "")
+    if isinstance(title, str):
+        title = re.sub(r"<[^>]+>", "", title).strip()
+
+    # Build URL (strip query params like ?native=0)
+    url = target.get("url", "")
+    if url and url.startswith("https://api.zhihu.com/"):
+        # Convert API URLs to web URLs
+        url = url.replace("https://api.zhihu.com/answers/", "https://www.zhihu.com/question/")
+        if target_type == "answer" and target.get("question", {}).get("id"):
+            url = f"https://www.zhihu.com/question/{target['question']['id']}/answer/{target.get('id', '')}"
+        elif target_type == "article":
+            url = f"https://zhuanlan.zhihu.com/p/{target.get('id', '')}"
+        elif target_type == "pin":
+            url = f"https://www.zhihu.com/pin/{target.get('id', '')}"
+        elif target_type == "question":
+            url = f"https://www.zhihu.com/question/{target.get('id', '')}"
+    # Strip query params from web URLs
+    if url and "?" in url:
+        url = url.split("?")[0]
+
+    # Excerpt
+    excerpt = target.get("excerpt", "") or target.get("excerpt_new", "")
+    if isinstance(excerpt, str):
+        excerpt = re.sub(r"<[^>]+>", "", excerpt).strip()[:200]
+
+    return {
+        "id": raw.get("id", ""),
+        "verb": verb,
+        "action_text": raw.get("action_text", ""),
+        "is_creation": verb in _CREATION_VERBS,
+        "is_sticky": raw.get("is_sticky", False),
+        "target_type": target_type,
+        "target_id": target.get("id", ""),
+        "title": title,
+        "url": url,
+        "excerpt": excerpt,
+        "voteup_count": target.get("voteup_count", 0),
+        "comment_count": target.get("comment_count", 0),
+        "favorite_count": target.get("favlists_count", target.get("favorite_count", 0)),
+        "created_time": fmt_time(raw.get("created_time")),
+        "created_ts": raw.get("created_time", 0),
+        # Actor info
+        "actor_name": actor.get("name", ""),
+        "actor_url_token": actor.get("url_token", ""),
+    }
+
 
 def _parse_activity_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
-    yield from data.get("data", [])
+    for item in data.get("data", []):
+        yield _parse_activity_item(item)
 
 
 def fetch_member_activities(
     url_token: str,
     limit: int = 20,
     max_items: int | None = None,
+    creations_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Fetch a member's activity feed (raw API items)."""
-    url = f"{MEMBER_API.format(token=url_token)}/activities?limit={limit}&after_id=0&desktop=True"
+    """Fetch a member's activity feed from the v3 moments API.
+
+    :param url_token: The user's url_token.
+    :param limit: Page size for each API request.
+    :param max_items: Maximum total items to return (None = follow pagination).
+    :param creations_only: If True, only return content-creation activities
+        (answers, pins, articles, questions), filtering out votes, follows, etc.
+    """
+    url = f"https://www.zhihu.com/api/v3/moments/{url_token}/activities?limit={limit}&desktop=True"
     items: list[dict[str, Any]] = []
     for item in stream_handler(url, _parse_activity_list):
+        if creations_only and not item["is_creation"]:
+            continue
         items.append(item)
         if max_items is not None and len(items) >= max_items:
             break
