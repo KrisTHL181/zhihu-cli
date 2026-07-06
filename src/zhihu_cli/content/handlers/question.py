@@ -40,13 +40,22 @@ def scrape_question_data(question_url: str) -> tuple[dict[str, Any], str]:
     return parse_question_metadata(item_data), converter.convert(item_data.get("detail"))
 
 
-def scrape_answers(question_data: dict[str, Any]) -> Generator[dict[str, Any], None, None]:
+def scrape_answers(question_data: dict[str, Any], raw: bool = False) -> Generator[dict[str, Any], None, None]:
+    """Yield answers for a question, one dict per answer.
+
+    :param question_data: dict with at least an ``"id"`` key (the question ID).
+    :param raw: when True, return raw HTML in the ``"content"`` field
+        instead of converting to Markdown.
+    """
     url = NEXT_URL_API.replace("{question_id}", question_data["id"])
 
     def parse_ans(data):
         for item in data.get("data", []):
             # /feeds endpoint wraps answers in a "target" field
             ans = item.get("target", item)
+            content = ans.get("content", "")
+            if not raw:
+                content = converter.convert(content)
             yield {
                 "author": ans.get("author", {}).get("name", "anonymous"),
                 "id": str(ans.get("id", ans.get("url", "/unknown").split("/")[-1])),
@@ -54,7 +63,7 @@ def scrape_answers(question_data: dict[str, Any]) -> Generator[dict[str, Any], N
                 "comment": ans.get("comment_count", 0),
                 "favorite": ans.get("favlists_count", 0),
                 "created_time": ans.get("created_time", 0),
-                "content": converter.convert(ans.get("content", "")),
+                "content": content,
             }
 
     return stream_handler(url, parse_ans)
@@ -110,10 +119,12 @@ def unfollow_question(question_id: str) -> dict[str, Any]:
     return resp.json()
 
 
-def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
+def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, Any], str]:
     """Scrape full content from a single answer page URL.
 
-    Returns (metadata, markdown_content).
+    :param answer_url: full URL to a Zhihu answer page.
+    :param raw: when True, return raw HTML instead of converting to Markdown.
+    :returns: (metadata, content) — content is Markdown by default, raw HTML if ``raw=True``.
     """
     entities = get_page_state(fetch_page_html(answer_url))
 
@@ -162,6 +173,6 @@ def scrape_answer_page(answer_url: str) -> tuple[dict[str, Any], str]:
     }
 
     content_html = answer_data.get("content", "")
-    markdown = converter.convert(content_html)
+    content = content_html if raw else converter.convert(content_html)
 
-    return metadata, markdown
+    return metadata, content
