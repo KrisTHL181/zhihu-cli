@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import socket
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -147,6 +148,7 @@ class DaemonProxySession:
         self.headers: dict[str, str] = {}
         self.cookies: _CookieProxy = _CookieProxy(self)
         self._sock: socket.socket | None = None
+        self._lock: threading.Lock = threading.Lock()
 
     # ── persistent connection management ──────────────────────────────
 
@@ -181,22 +183,28 @@ class DaemonProxySession:
         On the first call the socket is lazily connected.  If the socket
         has been closed by the peer (e.g. daemon restart), reconnects
         once and retries.
+
+        The entire send+recv pair is protected by a lock so that
+        concurrent callers (multi-threaded use of zhihu_cli as a library)
+        do not interleave messages on the shared socket, which would
+        cause "Message too large" and other framing errors.
         """
-        sock = self._get_sock()
-        try:
-            send_message(sock, msg)
-            return recv_message(sock)
-        except (BrokenPipeError, ConnectionResetError, OSError) as e:
-            # Socket died — reconnect once and retry
-            self._close_sock()
-            sock = self._connect()
-            self._sock = sock
+        with self._lock:
+            sock = self._get_sock()
             try:
                 send_message(sock, msg)
                 return recv_message(sock)
-            except Exception:
+            except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                # Socket died — reconnect once and retry
                 self._close_sock()
-                raise DaemonConnectionError(f"IPC error after reconnect: {e}") from e
+                sock = self._connect()
+                self._sock = sock
+                try:
+                    send_message(sock, msg)
+                    return recv_message(sock)
+                except Exception:
+                    self._close_sock()
+                    raise DaemonConnectionError(f"IPC error after reconnect: {e}") from e
 
     def _close_sock(self) -> None:
         """Close and clear the persistent socket."""
