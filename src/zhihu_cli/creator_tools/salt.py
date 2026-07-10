@@ -67,6 +67,49 @@ def _ratio_bar(score: int, max_val: int = 1000, width: int = 16) -> str:
     return f"{bar} {pct * 100:.0f}%"
 
 
+def _show_history_dimensions(credit_record: list[dict[str, Any]]) -> None:
+    """Render a table showing dimension scores across all historical weeks.
+
+    :param credit_record: List of weekly credit record entries from the API.
+    """
+    console = Console()
+    console.print()
+    hist_dim_table = Table(title="历史维度变化 (Historical Dimension Scores)", highlight=True)
+    hist_dim_table.add_column("日期", style="cyan", no_wrap=True)
+    hist_dim_table.add_column("盐值", justify="right", style="green bold")
+    hist_dim_table.add_column("Δ", justify="center", style="yellow", width=5)
+    for dim_key in DIMENSION_ORDER:
+        label = DIMENSION_LABELS.get(dim_key, dim_key)
+        hist_dim_table.add_column(label, justify="right", style="magenta")
+
+    for entry in credit_record:
+        date_str = entry["date"]
+        update = entry.get("updateRecord", {})
+        delta = update.get("score", 0)
+        ts = entry.get("totalScore", 0)
+        fields = entry.get("creditFields", {})
+
+        if delta > 0:
+            delta_str = f"[green]+{delta}[/green]"
+        elif delta < 0:
+            delta_str = f"[red]{delta}[/red]"
+        else:
+            delta_str = "[dim]—[/dim]"
+
+        row: list[str] = [
+            date_str,
+            _fmt_num(ts),
+            delta_str,
+        ]
+        for dim_key in DIMENSION_ORDER:
+            score = fields.get(dim_key, 0)
+            row.append(_fmt_num(score))
+
+        hist_dim_table.add_row(*row)
+
+    console.print(hist_dim_table)
+
+
 def show_salt(json_output: bool = False) -> None:
     """Fetch and display Zhihu salt value data.
 
@@ -120,32 +163,9 @@ def show_salt(json_output: bool = False) -> None:
 
         console.print(dim_table)
 
-    # ── 3. Weekly score history ────────────────────────────────────────
+    # ── 3. Historical dimension breakdown ───────────────────────────────
     if len(credit_record) > 1:
-        console.print()
-        hist_table = Table(title="周变化记录", highlight=True)
-        hist_table.add_column("日期", style="cyan", no_wrap=True)
-        hist_table.add_column("变化", justify="center", style="yellow", width=8)
-        hist_table.add_column("盐值", justify="right", style="green")
-        hist_table.add_column("详情", style="dim")
-
-        for entry in credit_record:
-            date_str = entry["date"]
-            update = entry.get("updateRecord", {})
-            delta = update.get("score", 0)
-            detail = update.get("detail", "")
-            ts = entry.get("totalScore", 0)
-
-            if delta > 0:
-                delta_str = f"+{delta}"
-            elif delta < 0:
-                delta_str = str(delta)
-            else:
-                delta_str = "—"
-
-            hist_table.add_row(date_str, delta_str, _fmt_num(ts), detail)
-
-        console.print(hist_table)
+        _show_history_dimensions(credit_record)
 
     # ── 4. Permissions / 权益 ──────────────────────────────────────────
     permissions = credit.get("permissions", [])
