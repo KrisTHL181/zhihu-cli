@@ -227,6 +227,14 @@ def register_tools(main_group):
 
         show_growth_level(json_output=output_json)
 
+    @tools_creator.command("salt")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def creator_salt(output_json: bool) -> None:
+        """Fetch and display Zhihu salt value (盐值) data."""
+        from zhihu_cli.creator_tools.salt import show_salt
+
+        show_salt(json_output=output_json)
+
     @tools_creator.command("score")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def creator_score(output_json: bool) -> None:
