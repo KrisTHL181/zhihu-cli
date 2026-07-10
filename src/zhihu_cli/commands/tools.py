@@ -345,11 +345,29 @@ def register_tools(main_group):
     @click.option("--no-latex", is_flag=True, help="Exclude LaTeX blocks")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--no-frontmatter", is_flag=True, default=False, help="Exclude YAML frontmatter from word count")
-    def nlp_count(folder: str, no_code: bool, no_latex: bool, output_json: bool, no_frontmatter: bool) -> None:
-        """Count words in downloaded Markdown files."""
+    @click.option(
+        "--plot-cdf",
+        "plot_cdf_flag",
+        is_flag=True,
+        default=False,
+        help="Plot CDF (Cumulative Distribution Function) of character counts",
+    )
+    @click.option(
+        "--log", "log_scale", is_flag=True, default=False, help="Use logarithmic scale for character count axis"
+    )
+    def nlp_count(
+        folder: str,
+        no_code: bool,
+        no_latex: bool,
+        output_json: bool,
+        no_frontmatter: bool,
+        plot_cdf_flag: bool,
+        log_scale: bool,
+    ) -> None:
+        """Count characters in downloaded Markdown files."""
         import numpy as np
 
-        from zhihu_cli.nlp_tools.count_answer_words import count_words
+        from zhihu_cli.nlp_tools.count_answer_words import count_words, plot_cdf
 
         word_counts = []
         for filepath in Path(folder).rglob("*.md"):
@@ -387,6 +405,9 @@ def register_tools(main_group):
             f"  {f_label('P50:')} {f_num(f'{np.percentile(word_counts, 50):.0f}')}  {f_label('P90:')} {f_num(f'{np.percentile(word_counts, 90):.0f}')}"
         )
         echo(f"  {f_label('Min:')} {f_num(min(word_counts))}  {f_label('Max:')} {f_num(max(word_counts))}")
+
+        if plot_cdf_flag:
+            plot_cdf(word_counts, log_scale=log_scale)
 
     @tools_nlp.command("wordcloud")
     @click.option("--source-dir", default=str(get_data_dir() / "downloads"), help="Directory with Markdown files")
