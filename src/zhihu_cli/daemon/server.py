@@ -277,29 +277,56 @@ class DaemonServer:
         return build_pong(msg_id)
 
     async def _handle_reload_session(self, msg_id: str, _msg: dict[str, Any]) -> dict[str, Any]:
+        """Rebuild the session from the current profile headers.
+
+        Runs in a thread-pool worker so that acquiring ``_session_lock``
+        never blocks the asyncio event loop — even when a long-running
+        HTTP request already holds the lock.
+        """
+        loop = asyncio.get_running_loop()
         try:
-            self._init_session()
+            await loop.run_in_executor(None, self._init_session)
             return build_pong(msg_id)
         except Exception as e:
             return build_error(msg_id, type(e).__name__, str(e))
 
     async def _handle_set_config(self, msg_id: str, msg: dict[str, Any]) -> dict[str, Any]:
+        """Propagate a live configuration change to the daemon session.
+
+        All session mutations are dispatched to a thread-pool worker so
+        that ``_session_lock`` contention never stalls the event loop.
+        The ``user_agent`` key rebuilds the entire session and must NOT
+        be called inside ``_session_lock`` (``threading.Lock`` is
+        non-reentrant — doing so would deadlock).
+        """
         key = msg.get("key")
         value = msg.get("value")
+        loop = asyncio.get_running_loop()
 
+        if key == "captcha_handler":
+            try:
+                await loop.run_in_executor(None, self._do_set_captcha_handler, value)
+                return build_pong(msg_id)
+            except Exception as e:
+                return build_error(msg_id, type(e).__name__, str(e))
+        elif key == "user_agent":
+            try:
+                await loop.run_in_executor(None, self._init_session)
+                return build_pong(msg_id)
+            except Exception as e:
+                return build_error(msg_id, type(e).__name__, str(e))
+        else:
+            return build_error(msg_id, "UnknownConfig", f"Unknown config key: {key}")
+
+    def _do_set_captcha_handler(self, value: Any) -> None:
+        """Set the captcha_handler mode on the shared session (called from
+        a thread-pool worker).
+        """
         with self._session_lock:
             if self._session is None:
-                return build_error(msg_id, "InternalError", "Session not initialised")
-            if key == "captcha_handler":
-                if isinstance(value, str):
-                    self._session.captcha_handler = value
-                return build_pong(msg_id)
-            elif key == "user_agent":
-                # Rebuild session to pick up new UA
-                self._init_session()
-                return build_pong(msg_id)
-            else:
-                return build_error(msg_id, "UnknownConfig", f"Unknown config key: {key}")
+                raise RuntimeError("Session not initialised")
+            if isinstance(value, str):
+                self._session.captcha_handler = value
 
     async def _handle_http_request(self, msg_id: str, msg: dict[str, Any]) -> dict[str, Any]:
         method = msg.get("method", "GET")
