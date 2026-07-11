@@ -121,6 +121,103 @@ def register_tools(main_group):
                 break
             time.sleep(period_seconds)
 
+    @tools.command("request")
+    @click.argument("url", type=str)
+    @click.option(
+        "--method", "-X", "method", default="GET", help="HTTP method (default: GET; auto-set to POST if --data given)"
+    )
+    @click.option("--data", "-d", default=None, help="Request body data")
+    @click.option(
+        "--header", "-H", "extra_headers", multiple=True, help="Extra header (repeatable), format 'Key: Value'"
+    )
+    @click.option(
+        "--curl", "output_curl", is_flag=True, default=False, help="Print equivalent curl command instead of sending"
+    )
+    @click.option(
+        "--include", "-i", "include_headers", is_flag=True, default=False, help="Include response headers in output"
+    )
+    @click.option(
+        "--output",
+        "-o",
+        "output_file",
+        default=None,
+        type=click.Path(),
+        help="Write response body to file instead of stdout",
+    )
+    def tools_request(
+        url: str,
+        method: str,
+        data: str | None,
+        extra_headers: tuple[str, ...],
+        output_curl: bool,
+        include_headers: bool,
+        output_file: str | None,
+    ) -> None:
+        """Send an HTTP request or generate an equivalent curl command.
+
+        URL is the target URL.  For zhihu.com / api.zhihu.com URLs, ZSE
+        signing headers (x-zse-93, x-zse-96) are added automatically — the
+        active profile's auth cookies and User-Agent are included.
+
+        Use --curl to see exactly what would be sent, without sending it.
+
+        \b
+        Examples:
+          zhihu tools request https://api.zhihu.com/me
+          zhihu tools request https://api.zhihu.com/me --curl
+          zhihu tools request https://api.zhihu.com/v4/answer -X POST -d '{"id":123}'
+          zhihu tools request https://example.com/api -H "Authorization: Bearer xxx"
+        """
+        # ── parse extra headers ──────────────────────────────────────────
+        parsed_headers: dict[str, str] = {}
+        for h in extra_headers:
+            if ":" not in h:
+                raise click.BadParameter(f"Invalid header format: {h!r}. Use 'Key: Value'.")
+            key, _, value = h.partition(":")
+            parsed_headers[key.strip()] = value.strip()
+
+        # ── auto-set method when --data is given ─────────────────────────
+        if data is not None and method == "GET":
+            method = "POST"
+
+        from zhihu_cli.content.handlers.request_tool import build_curl_command, send_request
+
+        # ── --curl mode: print curl command and exit ─────────────────────
+        if output_curl:
+            profile_headers = cache_manager.load_headers()
+            merged = {**profile_headers, **parsed_headers}
+            curl_cmd = build_curl_command(url, method=method, headers=merged, data=data)
+            echo(curl_cmd)
+            return
+
+        # ── send request ─────────────────────────────────────────────────
+        resp = send_request(url, method=method, headers=parsed_headers if parsed_headers else None, data=data)
+
+        # ── output ───────────────────────────────────────────────────────
+        body = resp.text
+
+        if output_file:
+            out_path = Path(output_file)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if include_headers:
+                lines = [f"HTTP/1.1 {resp.status_code} {getattr(resp, 'reason', '')}"]
+                for k, v in resp.headers.items():
+                    lines.append(f"{k}: {v}")
+                lines.append("")
+                lines.append(body)
+                out_path.write_text("\n".join(lines), encoding="utf-8")
+            else:
+                out_path.write_text(body, encoding="utf-8")
+            success(f"Saved {f_num(resp.status_code)} → {f_path(str(out_path))}")
+        elif include_headers:
+            echo(f"HTTP/1.1 {resp.status_code} {getattr(resp, 'reason', '')}")
+            for k, v in resp.headers.items():
+                echo(f"{k}: {v}")
+            echo("")
+            echo(body)
+        else:
+            echo(body)
+
     @tools.group("creator")
     def tools_creator() -> None:
         """Zhihu creator analytics."""
