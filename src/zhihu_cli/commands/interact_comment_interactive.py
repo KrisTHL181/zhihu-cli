@@ -1,6 +1,6 @@
 """Interactive comment browser with keyboard navigation and inline reply.
 
-Provides a prompt_toolkit-based terminal UI for browsing threaded comments
+Provides a Textual-based terminal UI for browsing threaded comments
 and replying to them on Zhihu items (answers, articles, pins, questions).
 """
 
@@ -50,112 +50,105 @@ def _truncate(text: str, max_len: int = 70) -> str:
     return text[: max_len - 3] + "..."
 
 
-# ── FormattedText builders for prompt_toolkit ────────────────────────────
+# ── Textual widgets ──────────────────────────────────────────────────────
 
 
-def _build_comment_tokens(
-    item: dict[str, Any],
-    is_selected: bool,
-    item_index: int,
-    total: int,
-    vote_state: str | None = None,
-) -> list[tuple[str, str]]:
-    """Build prompt_toolkit FormattedText tokens for a single comment line.
+class _CommentItem:
+    """Renderable data for a single comment line in the ListView.
 
-    :param item: A flat-list item with ``comment``, ``depth``, ``is_root``.
-    :param is_selected: Whether this comment is the current cursor target.
-    :param item_index: 0-based index of this item in the flat list.
-    :param total: Total number of flat items.
-    :param vote_state: ``"liked"``, ``"disliked"``, or ``None``.
-    :returns: List of ``(style, text)`` tuples.
+    Not a Textual widget itself — stores pre-built Rich markup strings
+    that the :class:`_CommentList` widget renders.
     """
-    c = item["comment"]
-    depth = item["depth"]
 
-    tokens: list[tuple[str, str]] = []
+    __slots__ = ("item", "index", "total", "vote_state", "line1", "line2")
 
-    # ── Row 1: selection marker + checkbox + indent + index + author + stats ──
+    def __init__(
+        self,
+        item: dict[str, Any],
+        index: int,
+        total: int,
+        vote_state: str | None = None,
+    ) -> None:
+        self.item = item
+        self.index = index
+        self.total = total
+        self.vote_state = vote_state
+        self.line1 = ""
+        self.line2 = ""
+        self._build_lines(selected=False)
 
-    # Selection indicator and checkbox
-    if is_selected:
-        tokens.append(("class:selected", "▶"))
-        tokens.append(("class:selected", " ☐ "))
-    else:
-        tokens.append(("", "  ☐ "))
+    def _build_lines(self, selected: bool) -> None:
+        """Rebuild both display lines as Rich :class:`~rich.text.Text` objects.
 
-    # Vote indicator
-    if vote_state == "liked":
-        tokens.append(("class:vote-liked", "♥️ "))
-    elif vote_state == "disliked":
-        tokens.append(("class:vote-disliked", "💔 "))
-    else:
-        tokens.append(("", "  "))
+        Uses ``Text`` instead of raw markup strings so that author names and
+        comment content are displayed literally — brackets, backslashes and
+        other markup-significant characters are never interpreted as tags.
+        """
+        from rich.text import Text
 
-    # Indentation for child comments
-    if depth > 0:
-        indent = "  " * (depth - 1) + " ↳ "
-        tokens.append(("class:dim", indent))
-    elif depth == 0:
-        # Root comment serial number
-        serial = str(item_index + 1) if total > 1 else ""
-        tokens.append(("class:index", serial + " " if serial else ""))
+        c = self.item["comment"]
+        depth = self.item["depth"]
+        author = c.get("author", "anonymous")
+        content_text = _truncate(c.get("content", ""), 80)
 
-    # Author name
-    author = c.get("author", "anonymous")
-    tokens.append(("class:author" if not is_selected else "class:author-sel", author))
+        # ── Line 1: selection marker + vote + indent + author + stats ──
+        line1 = Text()
 
-    # Stats: likes, time
-    tokens.append(("", "  "))
-    tokens.append(("class:stats", f"👍 {c.get('like_count', 0)}"))
-    if c.get("dislike_count", 0):
-        tokens.append(("class:stats", f"  👎 {c.get('dislike_count', 0)}"))
-    created = c.get("created_time")
-    if created:
-        tokens.append(("class:dim", f"  {fmt_time(created)}"))
+        # Selection marker
+        if selected:
+            line1.append("▶", style="bold #b4befe")
+            line1.append(" ☐ ", style="bold #b4befe")
+        else:
+            line1.append("  ☐ ")
 
-    # Reply count
-    child_count = len(c.get("child_comments", []))
-    if child_count:
-        tokens.append(("class:dim", f"  ({child_count} replies)"))
+        # Vote indicator
+        if self.vote_state == "liked":
+            line1.append("♥️ ", style="bold #f38ba8")
+        elif self.vote_state == "disliked":
+            line1.append("💔 ", style="#585b70")
+        else:
+            line1.append("  ")
 
-    tokens.append(("", "\n"))
+        # Indentation for child comments
+        if depth > 0:
+            indent = "  " * (depth - 1) + " ↳ "
+            line1.append(indent, style="#7f849c")
+        elif depth == 0 and self.total > 1:
+            # Root comment serial number
+            serial = str(self.index + 1)
+            line1.append(f"{serial} ", style="bold #fab387")
 
-    # ── Row 2: content preview ──
-    content = _truncate(c.get("content", ""), 80)
+        # Author name — plain text, no markup parsing
+        line1.append(author, style="bold #a6e3a1")
 
-    # Build prefix for alignment
-    prefix = "      "  # after select+checkbox+leading space
-    if depth > 0:
-        prefix += "  " * (depth - 1) + "   "  # indent + ↳
+        # Stats: likes, time
+        stats_parts: list[str] = []
+        stats_parts.append(f"👍 {c.get('like_count', 0)}")
+        if c.get("dislike_count", 0):
+            stats_parts.append(f"👎 {c.get('dislike_count', 0)}")
+        created = c.get("created_time")
+        if created:
+            stats_parts.append(f"{fmt_time(created)}")
+        child_count = len(c.get("child_comments", []))
+        if child_count:
+            stats_parts.append(f"({child_count} replies)")
 
-    if is_selected:
-        tokens.append(("class:content-sel", prefix + content))
-    else:
-        tokens.append(("class:content", prefix + content))
+        line1.append(f"  {'  '.join(stats_parts)}", style="#89b4fa")
 
-    tokens.append(("", "\n"))
+        self.line1 = line1
 
-    return tokens
+        # ── Line 2: content preview ──
+        prefix = "      "  # after select+checkbox+leading space
+        if depth > 0:
+            prefix += "  " * (depth - 1) + "   "  # indent + ↳
 
+        line2 = Text()
+        line2.append(f"{prefix}{content_text}", style="#cdd6f4")
+        self.line2 = line2
 
-def _build_reply_header_tokens(target: dict[str, Any]) -> list[tuple[str, str]]:
-    """Build FormattedText tokens for the reply panel header.
-
-    :param target: The comment dict being replied to.
-    """
-    author = target.get("author", "anonymous")
-    content = target.get("content", "").replace("\n", " ").strip()
-
-    return [
-        ("class:reply-title", "┌─ Replying to ─────────────────────\n"),
-        ("", "│\n"),
-        ("class:reply-author", f"│  {author}\n"),
-        ("class:dim", f'│  "{content}"\n'),
-        ("", "│\n"),
-        ("class:reply-hint", "│  Type your reply below.\n"),
-        ("class:reply-hint", "│  Enter to send, Esc to cancel.\n"),
-        ("", "│" + "─" * 35 + "\n"),
-    ]
+    def update_highlight(self, selected: bool) -> None:
+        """Rebuild line1 to reflect selection state."""
+        self._build_lines(selected)
 
 
 # ── Main TUI entry point ────────────────────────────────────────────────
@@ -171,6 +164,11 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
     :param item_type: Resource type (``"answers"``, ``"articles"``, ``"pins"``, ``"questions"``).
     :param item_id: Resource ID.
     """
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Horizontal, Vertical
+    from textual.widgets import Footer, Header, Input, ListItem, ListView, Static
+
     from zhihu_cli.output import error, info
 
     # ── Fetch comments ──────────────────────────────────────────────────
@@ -187,403 +185,433 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
 
     flat_items = _flatten_comments(comments)
 
-    # ── Prompt-toolkit imports (lazy to keep CLI startup fast) ──────────
-    import shutil
+    # ── Build CommentItem list and optional reply panel ─────────────────
 
-    from prompt_toolkit import Application
-    from prompt_toolkit.buffer import Buffer
-    from prompt_toolkit.filters import Condition
-    from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
-    from prompt_toolkit.layout import HSplit, Layout, VSplit, Window
-    from prompt_toolkit.layout.containers import ConditionalContainer
-    from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
-    from prompt_toolkit.layout.dimension import Dimension
-    from prompt_toolkit.styles import Style
+    class CommentListItem(ListItem):
+        """A single comment row in the ListView."""
 
-    # ── Mutable state ───────────────────────────────────────────────────
-    state: dict[str, Any] = {
-        "selected": 0,
-        "scroll_top": 0,  # index of first visible comment item
-        "replying": False,
-        "reply_target": None,  # comment dict being replied to
-        "status": "Use ↑/↓ or j/k to navigate, Enter to reply, Tab to like, q to quit.",
-        "votes": {},  # comment_id -> "liked" | "disliked" | None
-    }
+        def __init__(self, ci: _CommentItem) -> None:
+            super().__init__()
+            self._ci = ci
+            self._line1 = Static(ci.line1, classes="comment-line1")
+            self._line2 = Static(ci.line2, classes="comment-line2")
 
-    reply_buffer = Buffer(multiline=True)
+        def compose(self) -> ComposeResult:
+            yield self._line1
+            yield self._line2
 
-    def _estimate_visible() -> int:
-        """Return an estimate of how many comment items fit on screen."""
-        term_h = shutil.get_terminal_size().lines
-        # Each comment item: 2 lines (metadata + content), plus header/footer ≈4 lines
-        return max(1, (term_h - 4) // 2)
+        def watch_highlighted(self, value: bool) -> None:  # noqa: FBT001
+            """Update the selection marker when highlight state changes."""
+            self._ci.update_highlight(value)
+            self._line1.update(self._ci.line1)
 
-    def _ensure_visible() -> None:
-        """Adjust scroll_top so the selected item is in the viewport."""
-        visible = _estimate_visible()
-        sel = state["selected"]
-        if sel < state["scroll_top"]:
-            state["scroll_top"] = sel
-        elif sel >= state["scroll_top"] + visible:
-            state["scroll_top"] = sel - visible + 1
-        # Clamp
-        max_top = max(0, len(flat_items) - visible)
-        if state["scroll_top"] > max_top:
-            state["scroll_top"] = max_top
-        if state["scroll_top"] < 0:
-            state["scroll_top"] = 0
+    # ── App ─────────────────────────────────────────────────────────────
 
-    # ── Key bindings ────────────────────────────────────────────────────
-    kb = KeyBindings()
+    class CommentBrowserApp(App[None]):
+        """Textual TUI for browsing and replying to Zhihu comments."""
 
-    def _move_cursor(delta: int) -> None:
-        """Move the cursor by *delta* positions, clamped to valid range."""
-        new = state["selected"] + delta
-        if 0 <= new < len(flat_items):
-            state["selected"] = new
-            _ensure_visible()
+        BINDINGS = [
+            Binding("up,k", "cursor_up", "上移", show=False),
+            Binding("down,j", "cursor_down", "下移", show=False),
+            Binding("pageup", "jump_root_prev", "上个根评论", show=False),
+            Binding("pagedown", "jump_root_next", "下个根评论", show=False),
+            Binding("home", "go_top", "顶部", show=False),
+            Binding("end", "go_bottom", "底部", show=False),
+            Binding("enter", "reply_or_submit", "回复", show=False, priority=True),
+            Binding("tab", "toggle_like", "点赞", show=False, priority=True),
+            Binding("shift+tab", "toggle_dislike", "点踩", show=False, priority=True),
+            Binding("escape", "cancel_reply", "取消回复", show=False),
+            Binding("ctrl+r", "refresh", "刷新", show=False),
+            Binding("q,ctrl+q", "quit_app", "退出", show=True),
+        ]
 
-    def _exit_reply_mode(app: Application) -> None:
-        """Cancel reply mode and clear the reply buffer."""
-        state["replying"] = False
-        state["reply_target"] = None
-        reply_buffer.text = ""
-        app.layout.focus(comment_window)
+        CSS = """
+        Screen {
+            background: #1e1e2e;
+        }
 
-    def _submit_reply(buf: Buffer) -> bool:
-        """Accept handler for reply buffer — submit the reply and refresh the list."""
-        content = buf.text.strip()
-        if not content:
-            state["replying"] = False
-            state["reply_target"] = None
-            buf.text = ""
-            return True  # consumed
+        .comment-line1 {
+            color: #cdd6f4;
+            padding: 0 1;
+            height: 1;
+        }
 
-        target = state["reply_target"]
-        if target is None:
-            state["replying"] = False
-            return True
+        .comment-line2 {
+            color: #cdd6f4;
+            padding: 0 1;
+            height: 1;
+        }
 
-        try:
-            comment_item(item_type, item_id, content, reply_comment_id=target["id"])
-            state["status"] = f"✓ Reply posted to {target.get('author', 'anonymous')} — refreshing..."
-        except Exception as exc:
-            state["status"] = f"✗ Failed to post reply: {exc}"
-            state["replying"] = False
-            state["reply_target"] = None
-            buf.text = ""
-            return True
+        ListView {
+            height: 1fr;
+            background: #1e1e2e;
+        }
 
-        state["replying"] = False
-        state["reply_target"] = None
-        buf.text = ""
+        ListView > ListItem {
+            padding: 0;
+            height: auto;
+        }
 
-        # Refresh the comment list so the new reply appears immediately
-        nonlocal flat_items
-        try:
-            new_comments = list(fetch_root_comments(item_type, item_id))
-            if new_comments:
-                flat_items = _flatten_comments(new_comments)
-                if state["selected"] >= len(flat_items):
-                    state["selected"] = max(0, len(flat_items) - 1)
-                _ensure_visible()
-                state["status"] = f"✓ Reply posted — {len(flat_items)} comments loaded."
-        except Exception as exc:
-            state["status"] = f"✓ Reply posted (refresh failed: {exc})"
-        return True
+        ListView > ListItem.--highlight {
+            background: #313244;
+        }
 
-    reply_buffer.accept_handler = _submit_reply
+        #reply-panel {
+            width: 44;
+            dock: right;
+            background: #181825;
+            border-left: solid #313244;
+            padding: 1;
+            height: 1fr;
+        }
 
-    @kb.add("up")
-    @kb.add("k")
-    def _(event: KeyPressEvent) -> None:
-        if not state["replying"]:
-            _move_cursor(-1)
+        #reply-header {
+            color: #cba6f7;
+            text-style: bold;
+            padding: 0 1;
+        }
 
-    @kb.add("down")
-    @kb.add("j")
-    def _(event: KeyPressEvent) -> None:
-        if not state["replying"]:
-            _move_cursor(1)
+        #reply-info {
+            color: #a6e3a1;
+            padding: 0 1;
+        }
 
-    @kb.add("pageup")
-    def _(event: KeyPressEvent) -> None:
-        """Jump to previous top-level comment."""
-        if state["replying"]:
-            return
-        for i in range(state["selected"] - 1, -1, -1):
-            if flat_items[i]["is_root"]:
-                state["selected"] = i
-                _ensure_visible()
+        #reply-hint {
+            color: #6c7086;
+            text-style: italic;
+            padding: 0 1;
+        }
+
+        Input#reply-input {
+            margin: 1 0;
+            background: #313244;
+            color: #cdd6f4;
+            border: none;
+        }
+
+        Input#reply-input:focus {
+            background: #45475a;
+        }
+
+        Header {
+            background: #313244;
+            color: #cba6f7;
+        }
+
+        Footer {
+            background: #313244;
+            color: #6c7086;
+        }
+        """
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._flat_items = flat_items
+            self._item_type = item_type
+            self._item_id = item_id
+            self._votes: dict[str, str | None] = {}  # comment_id -> "liked" | "disliked" | None
+            self._replying: bool = False
+            self._reply_target: dict[str, Any] | None = None
+
+        def compose(self) -> ComposeResult:
+            yield Header()
+            with Horizontal():
+                yield ListView(
+                    *self._build_list_items(),
+                    id="comments",
+                )
+                with Vertical(id="reply-panel"):
+                    yield Static("", id="reply-header")
+                    yield Static("", id="reply-info")
+                    yield Static(
+                        "Type your reply below.\nEnter to send, Esc to cancel.",
+                        id="reply-hint",
+                    )
+                    yield Input(id="reply-input", placeholder="输入回复...")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            """Initialise UI state after mount."""
+            self.title = f"Comments @ {self._item_type}/{self._item_id}"
+            self._list = self.query_one("#comments", ListView)
+            self._reply_panel = self.query_one("#reply-panel", Vertical)
+            self._reply_panel.display = False
+            self._update_header()
+            self._list.focus()
+
+        # ── Helpers ─────────────────────────────────────────────────
+
+        def _build_list_items(self) -> list[CommentListItem]:
+            """Build :class:`CommentListItem` instances for all flat items."""
+            items: list[CommentListItem] = []
+            for i, fi in enumerate(self._flat_items):
+                cid = fi["comment"].get("id")
+                vote = self._votes.get(cid) if cid else None
+                ci = _CommentItem(fi, i, len(self._flat_items), vote)
+                items.append(CommentListItem(ci))
+            return items
+
+        def _rebuild_list(self, keep_index: bool = True) -> None:  # noqa: FBT001,FBT002
+            """Clear and repopulate the ListView with current state."""
+            old_index = self._list.index if self._list.index is not None else 0
+            self._list.clear()
+            self._list.extend(self._build_list_items())
+            if keep_index and old_index < len(self._flat_items):
+                self._list.index = old_index
+
+        def _update_header(self) -> None:
+            """Update the Header subtitle with current comment count."""
+            total = len(self._flat_items)
+            self.sub_title = f"{total} comments"
+
+        def _get_selected_item(self) -> dict[str, Any] | None:
+            """Return the flat item dict at the current cursor position."""
+            idx = self._list.index
+            if idx is not None and 0 <= idx < len(self._flat_items):
+                return self._flat_items[idx]
+            return None
+
+        def _get_selected_comment_id(self) -> str | None:
+            """Return the comment ID of the currently selected item."""
+            item = self._get_selected_item()
+            if item is None:
+                return None
+            return item["comment"].get("id")  # type: ignore[no-any-return]
+
+        def _notify_status(self, message: str, is_error: bool = False) -> None:  # noqa: FBT001,FBT002
+            """Show a notification toast in the UI."""
+            if is_error:
+                self.notify(message, severity="error", timeout=4)
+            else:
+                self.notify(message, timeout=3)
+
+        # ── Reply panel ──────────────────────────────────────────────
+
+        def _enter_reply_mode(self) -> None:
+            """Show the reply panel and focus the input."""
+            item = self._get_selected_item()
+            if item is None:
+                return
+            c = item["comment"]
+            self._replying = True
+            self._reply_target = c
+
+            author = c.get("author", "anonymous")
+            content = c.get("content", "")
+
+            from rich.text import Text
+
+            header = Text()
+            header.append("┌─ Replying to ", style="bold #cba6f7")
+            header.append("─" * 22, style="bold #cba6f7")
+            self.query_one("#reply-header", Static).update(header)
+
+            info = Text()
+            info.append("│  ", style="bold #cba6f7")
+            info.append(author, style="bold #a6e3a1")
+            info.append("\n")
+            info.append('│  "', style="#cba6f7")
+            info.append(content, style="#7f849c")
+            info.append('"', style="#cba6f7")
+            self.query_one("#reply-info", Static).update(info)
+
+            self._reply_panel.display = True
+            inp = self.query_one("#reply-input", Input)
+            inp.clear()
+            inp.focus()
+
+        def _cancel_reply(self) -> None:
+            """Hide the reply panel and return focus to the list."""
+            self._replying = False
+            self._reply_target = None
+            self._reply_panel.display = False
+            self._list.focus()
+
+        def _submit_reply(self) -> None:
+            """Submit the reply text and refresh the comment list."""
+            inp = self.query_one("#reply-input", Input)
+            content = inp.value.strip()
+            if not content:
+                self._cancel_reply()
                 return
 
-    @kb.add("pagedown")
-    def _(event: KeyPressEvent) -> None:
-        """Jump to next top-level comment."""
-        if state["replying"]:
-            return
-        for i in range(state["selected"] + 1, len(flat_items)):
-            if flat_items[i]["is_root"]:
-                state["selected"] = i
-                _ensure_visible()
+            target = self._reply_target
+            if target is None:
+                self._cancel_reply()
                 return
 
-    @kb.add("home")
-    def _(event: KeyPressEvent) -> None:
-        if not state["replying"]:
-            state["selected"] = 0
-            _ensure_visible()
+            target_id = target["id"]
+            target_author = target.get("author", "anonymous")
 
-    @kb.add("end")
-    def _(event: KeyPressEvent) -> None:
-        if not state["replying"]:
-            state["selected"] = len(flat_items) - 1
-            _ensure_visible()
+            def _do_reply_and_refresh() -> None:
+                """Send reply, then refresh comments — all in worker thread."""
+                try:
+                    comment_item(self._item_type, self._item_id, content, reply_comment_id=target_id)
+                    self.call_from_thread(self._on_reply_result, f"✓ Reply posted to {target_author}")
+                    # Fetch updated comments in the same worker thread to avoid blocking UI
+                    new_comments = list(fetch_root_comments(self._item_type, self._item_id))
+                    if new_comments:
+                        new_flat = _flatten_comments(new_comments)
+                        self.call_from_thread(self._on_refresh_result, new_flat)
+                    else:
+                        self.call_from_thread(self._notify_status, "No comments found after refresh.", True)
+                except Exception as exc:
+                    self.call_from_thread(self._on_reply_result, f"✗ Failed to post reply: {exc}", True)
 
-    @kb.add("enter")
-    def _(event: KeyPressEvent) -> None:
-        """Enter: submit reply in reply mode, or enter reply mode on a comment."""
-        if state["replying"]:
-            _submit_reply(reply_buffer)
-            return
-        # Enter reply mode for the selected comment
-        item = flat_items[state["selected"]]
-        state["reply_target"] = item["comment"]
-        state["replying"] = True
-        reply_buffer.text = ""
-        state["status"] = f"Replying to {item['comment'].get('author', 'anonymous')}..."
-        event.app.layout.focus(reply_input_window)
+            self._cancel_reply()
+            self.run_worker(_do_reply_and_refresh, thread=True)
 
-    @kb.add("tab")
-    def _(event: KeyPressEvent) -> None:
-        """Like the selected comment (toggle)."""
-        if state["replying"]:
-            return
-        item = flat_items[state["selected"]]
-        comment_id = item["comment"].get("id")
-        if not comment_id:
-            return
-        votes: dict = state["votes"]
-        current = votes.get(comment_id)
-        try:
-            if current == "liked":
-                cancel_like_comment(comment_id)
-                votes[comment_id] = None
-                state["status"] = f"✓ Like removed from {item['comment'].get('author', 'anonymous')}"
+        def _on_reply_result(self, message: str, is_error: bool = False) -> None:  # noqa: FBT001,FBT002
+            """Callback from worker thread: show reply result."""
+            self._notify_status(message, is_error=is_error)
+
+        # ── Voting ──────────────────────────────────────────────────
+
+        def _do_vote_action(self, action: str) -> None:
+            """Execute a vote action (like/dislike toggle) in a worker thread."""
+            if self._replying:
+                return
+            cid = self._get_selected_comment_id()
+            if cid is None:
+                return
+            current = self._votes.get(cid)
+
+            def _do() -> None:
+                """Run vote API call in worker thread.  Only drives the HTTP request;
+                all state updates happen on the main thread via call_from_thread."""
+                new_state: str | None = None
+                try:
+                    if action == "like":
+                        if current == "liked":
+                            cancel_like_comment(cid)
+                            new_state = None
+                        else:
+                            if current == "disliked":
+                                cancel_dislike_comment(cid)
+                            like_comment(cid)
+                            new_state = "liked"
+                    else:  # dislike
+                        if current == "disliked":
+                            cancel_dislike_comment(cid)
+                            new_state = None
+                        else:
+                            if current == "liked":
+                                cancel_like_comment(cid)
+                            dislike_comment(cid)
+                            new_state = "disliked"
+                    # Schedule main-thread UI update with the final state
+                    self.call_from_thread(self._update_vote_ui, cid, new_state)
+                    self.call_from_thread(self._notify_status, f"✓ {'Liked' if action == 'like' else 'Disliked'}")
+                except Exception as exc:
+                    self.call_from_thread(self._notify_status, f"✗ Failed: {exc}", True)
+
+            self.run_worker(_do, thread=True)
+
+        def _update_vote_ui(self, cid: str, new_state: str | None) -> None:
+            """Update the vote state and rebuild list to reflect changes."""
+            self._votes[cid] = new_state
+            self._rebuild_list(keep_index=True)
+
+        # ── Refresh ─────────────────────────────────────────────────
+
+        def _do_refresh_fetch(self) -> None:
+            """Fetch comments in worker thread and update list."""
+            try:
+                new_comments = list(fetch_root_comments(self._item_type, self._item_id))
+                if new_comments:
+                    new_flat = _flatten_comments(new_comments)
+                    self.call_from_thread(self._on_refresh_result, new_flat)
+                else:
+                    self.call_from_thread(self._notify_status, "No comments found after refresh.", True)
+            except Exception as exc:
+                self.call_from_thread(self._notify_status, f"✗ Refresh failed: {exc}", True)
+
+        def _on_refresh_result(self, new_flat: list[dict[str, Any]]) -> None:
+            """Apply refreshed comment data to the UI.
+
+            Preserves the current selection position as closely as possible
+            when the list changes size (e.g., after a reply is posted or
+            comments are deleted remotely).
+            """
+            self._flat_items = new_flat
+            self._rebuild_list(keep_index=True)
+            # Clamp selection if the list shrunk
+            if self._list.index is not None and self._list.index >= len(new_flat):
+                self._list.index = max(0, len(new_flat) - 1)
+            self._update_header()
+            self._notify_status(f"✓ {len(new_flat)} comments loaded")
+
+        # ── Actions (bound to keys) ─────────────────────────────────
+
+        def action_reply_or_submit(self) -> None:
+            """Enter: open reply panel or submit current reply."""
+            if self._replying:
+                self._submit_reply()
             else:
-                if current == "disliked":
-                    cancel_dislike_comment(comment_id)
-                like_comment(comment_id)
-                votes[comment_id] = "liked"
-                state["status"] = f"✓ Liked {item['comment'].get('author', 'anonymous')}"
-        except Exception as exc:
-            state["status"] = f"✗ Failed: {exc}"
+                self._enter_reply_mode()
 
-    @kb.add("s-tab")
-    def _(event: KeyPressEvent) -> None:
-        """Dislike the selected comment (toggle)."""
-        if state["replying"]:
-            return
-        item = flat_items[state["selected"]]
-        comment_id = item["comment"].get("id")
-        if not comment_id:
-            return
-        votes: dict = state["votes"]
-        current = votes.get(comment_id)
-        try:
-            if current == "disliked":
-                cancel_dislike_comment(comment_id)
-                votes[comment_id] = None
-                state["status"] = f"✓ Dislike removed from {item['comment'].get('author', 'anonymous')}"
-            else:
-                if current == "liked":
-                    cancel_like_comment(comment_id)
-                dislike_comment(comment_id)
-                votes[comment_id] = "disliked"
-                state["status"] = f"✓ Disliked {item['comment'].get('author', 'anonymous')}"
-        except Exception as exc:
-            state["status"] = f"✗ Failed: {exc}"
+        def action_cancel_reply(self) -> None:
+            """Escape: cancel reply mode if active."""
+            if self._replying:
+                self._cancel_reply()
 
-    @kb.add("escape")
-    def _(event: KeyPressEvent) -> None:
-        if state["replying"]:
-            _exit_reply_mode(event.app)
-            state["status"] = "Reply cancelled."
+        def action_toggle_like(self) -> None:
+            """Tab: toggle like on selected comment."""
+            self._do_vote_action("like")
 
-    @kb.add("q")
-    def _(event: KeyPressEvent) -> None:
-        if not state["replying"]:
-            event.app.exit()
+        def action_toggle_dislike(self) -> None:
+            """Shift+Tab: toggle dislike on selected comment."""
+            self._do_vote_action("dislike")
 
-    @kb.add("c-c")
-    def _(event: KeyPressEvent) -> None:
-        event.app.exit()
+        def action_refresh(self) -> None:
+            """Ctrl+R: re-fetch comments from server."""
+            if self._replying:
+                return
+            self._notify_status("Refreshing comments...")
+            self.run_worker(self._do_refresh_fetch, thread=True)
 
-    @kb.add("c-r")
-    def _(event: KeyPressEvent) -> None:
-        """Refresh comments (re-fetch from server)."""
-        if state["replying"]:
-            return
-        nonlocal flat_items
-        state["status"] = "Refreshing comments..."
-        event.app.invalidate()
-        try:
-            new_comments = list(fetch_root_comments(item_type, item_id))
-            if new_comments:
-                flat_items = _flatten_comments(new_comments)
-                # Clamp selected index if new list is shorter
-                if state["selected"] >= len(flat_items):
-                    state["selected"] = max(0, len(flat_items) - 1)
-                _ensure_visible()
-                state["status"] = f"✓ Refreshed — {len(flat_items)} comments loaded."
-            else:
-                state["status"] = "No comments found after refresh."
-        except Exception as exc:
-            state["status"] = f"✗ Failed to refresh: {exc}"
-        event.app.invalidate()
+        def action_jump_root_prev(self) -> None:
+            """PageUp: jump to previous root comment."""
+            if self._replying:
+                return
+            idx = self._list.index
+            if idx is None:
+                return
+            for i in range(idx - 1, -1, -1):
+                if self._flat_items[i]["is_root"]:
+                    self._list.index = i
+                    return
 
-    # ── Dynamic content builders ────────────────────────────────────────
+        def action_jump_root_next(self) -> None:
+            """PageDown: jump to next root comment."""
+            if self._replying:
+                return
+            idx = self._list.index
+            if idx is None:
+                return
+            for i in range(idx + 1, len(self._flat_items)):
+                if self._flat_items[i]["is_root"]:
+                    self._list.index = i
+                    return
 
-    def _get_comment_text() -> list[tuple[str, str]]:
-        """Build the full comment list display (virtual scrolling)."""
-        tokens: list[tuple[str, str]] = []
-        total = len(flat_items)
-        visible = _estimate_visible()
-        top = state["scroll_top"]
-        # Re-estimate now that terminal size may have changed
-        end = min(top + visible, total)
+        def action_go_top(self) -> None:
+            """Home: go to first comment."""
+            if not self._replying and self._flat_items:
+                self._list.index = 0
 
-        # Header
-        tokens.append(("class:title", f"── Comments ({total} items) [{top + 1}-{end}/{total}] ──\n"))
-        tokens.append(("class:header-sub", f"   {item_type} / {item_id}\n\n"))
+        def action_go_bottom(self) -> None:
+            """End: go to last comment."""
+            if not self._replying and self._flat_items:
+                self._list.index = len(self._flat_items) - 1
 
-        # Overflow indicator at top
-        if top > 0:
-            tokens.append(("class:dim", f"  ... {top} more above ...\n\n"))
-
-        # Visible comment lines
-        votes: dict = state["votes"]
-        for i in range(top, end):
-            is_sel = i == state["selected"]
-            comment_id = flat_items[i]["comment"].get("id")
-            vote_state = votes.get(comment_id) if comment_id else None
-            tokens.extend(_build_comment_tokens(flat_items[i], is_sel, i, total, vote_state))
-
-        # Overflow indicator at bottom
-        if end < total:
-            tokens.append(("", "\n"))
-            tokens.append(("class:dim", f"  ... {total - end} more below ...\n"))
-
-        # Footer help
-        tokens.append(("", "\n"))
-        tokens.append(
-            (
-                "class:help",
-                " ↑↓/jk: Navigate  │  PgUp/PgDn: Jump root  │  Enter: Reply  │  Tab: Like  │  Shift+Tab: Dislike  │  Ctrl+R: Refresh  │  q: Quit\n",
-            )
-        )
-        tokens.append(("class:dim", f" Item {state['selected'] + 1} of {total}\n"))
-
-        return tokens
-
-    def _get_reply_text() -> list[tuple[str, str]]:
-        """Build the reply panel (excluding the text buffer)."""
-        target = state["reply_target"]
-        if target is None:
-            return []
-        return _build_reply_header_tokens(target)
-
-    def _get_status_text() -> list[tuple[str, str]]:
-        status = state.get("status", "")
-        if "✓" in status:
-            return [("class:status-ok", status)]
-        elif "✗" in status:
-            return [("class:status-err", status)]
-        return [("class:dim", status)]
-
-    # ── Conditional filter ──────────────────────────────────────────────
-
-    @Condition
-    def is_replying() -> bool:
-        return state["replying"]
-
-    # ── Controls & Windows ──────────────────────────────────────────────
-
-    comment_control = FormattedTextControl(text=_get_comment_text, focusable=True)
-    comment_window = Window(content=comment_control, wrap_lines=True, always_hide_cursor=True)
-
-    reply_header_control = FormattedTextControl(text=_get_reply_text, focusable=False)
-    reply_header_window = Window(content=reply_header_control, wrap_lines=True, dont_extend_height=True)
-
-    reply_input_control = BufferControl(buffer=reply_buffer, focusable=True)
-    reply_input_window = Window(content=reply_input_control, height=3)
-
-    reply_panel = HSplit(
-        [reply_header_window, reply_input_window],
-        width=Dimension.exact(42),
-        style="class:reply-panel",
-    )
-
-    status_control = FormattedTextControl(text=_get_status_text, focusable=False)
-    status_window = Window(content=status_control, height=1, style="class:status-bar")
-
-    # ── Layout tree ─────────────────────────────────────────────────────
-
-    root_container = HSplit(
-        [
-            VSplit(
-                [
-                    comment_window,
-                    ConditionalContainer(content=reply_panel, filter=is_replying),
-                ],
-            ),
-            status_window,
-        ]
-    )
-
-    layout = Layout(root_container, focused_element=comment_window)
-
-    # ── Styles ──────────────────────────────────────────────────────────
-
-    # Catppuccin Mocha palette: https://github.com/catppuccin/catppuccin
-    style = Style(
-        [
-            # ── Comment list ────────────────────────────────────────
-            ("title", "bold #cba6f7"),  # Mauve
-            ("header-sub", "#6c7086"),  # Overlay0
-            ("author", "bold #a6e3a1"),  # Green
-            ("author-sel", "bold #a6e3a1 bg:#313244"),  # Green on Surface0
-            ("index", "bold #fab387"),  # Peach
-            ("stats", "#89b4fa"),  # Blue
-            ("dim", "#7f849c"),  # Overlay1
-            ("help", "italic #6c7086"),  # Overlay0
-            ("content", "#cdd6f4"),  # Text
-            ("content-sel", "#cdd6f4 bg:#313244"),  # Text on Surface0
-            ("selected", "bold #b4befe bg:#313244"),  # Lavender on Surface0
-            # ── Reply panel ─────────────────────────────────────────
-            ("reply-title", "bold #cba6f7"),  # Mauve
-            ("reply-author", "bold #a6e3a1"),  # Green
-            ("reply-hint", "italic #6c7086"),  # Overlay0
-            ("reply-panel", "bg:#181825"),  # Mantle
-            # ── Status bar ──────────────────────────────────────────
-            ("status-bar", "bg:#313244"),  # Surface0
-            ("status-ok", "bold #a6e3a1"),  # Green
-            ("status-err", "bold #f38ba8"),  # Red
-            ("vote-liked", "bold #f38ba8"),  # Red (like)
-            ("vote-disliked", "bold #585b70"),  # Dim (dislike)
-        ]
-    )
+        def action_quit_app(self) -> None:
+            """q / Ctrl+Q: exit the TUI."""
+            self.exit()
 
     # ── Run ─────────────────────────────────────────────────────────────
 
     try:
-        app = Application(
-            layout=layout,
-            key_bindings=kb,
-            style=style,
-            full_screen=True,
-            mouse_support=False,
-        )
+        app = CommentBrowserApp()
         app.run()
     except Exception as exc:
         error(f"TUI error: {exc}")

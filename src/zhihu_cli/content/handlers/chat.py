@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 from collections.abc import Generator, Iterable
-from typing import Any
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+if TYPE_CHECKING:
+    from typing import Any
 
 import click
 from lxml import html as lxml_html
@@ -211,7 +216,36 @@ def _fmt_chat_line(sender: str, content: str, ts: int | float | None) -> str:
     return f"  {time_part}{sender_part}: {content}"
 
 
-async def interactive_chat(
+def _fmt_chat_line_rich(sender: str, content: str, ts: int | float | str | None):
+    """Format a single chat line as a Rich :class:`~rich.text.Text` object.
+
+    Uses ``Text`` instead of a raw markup string so that *sender* and
+    *content* are treated as plain text — brackets, backslashes and other
+    markup-significant characters are displayed literally without escaping.
+
+    :param sender: Display name of the message sender.
+    :param content: Message body (plain text, may contain brackets).
+    :param ts: Unix timestamp (int/float), pre-formatted time string, or None.
+    :returns: A :class:`~rich.text.Text` renderable ready for ``RichLog.write``.
+    """
+    from rich.text import Text
+
+    if isinstance(ts, str) and ts:
+        time_str = ts
+    elif ts is not None:
+        time_str = fmt_time(ts)
+    else:
+        time_str = ""
+    result = Text("  ")
+    if time_str:
+        result.append(f"[{time_str}]", style="dim")
+    result.append(sender, style="bold green")
+    result.append(": ")
+    result.append(content)
+    return result
+
+
+def interactive_chat(
     chat_id: str,
     my_url_token: str,
     sender_filter: str | None = None,
@@ -219,24 +253,22 @@ async def interactive_chat(
 ) -> None:
     """Start an interactive chat session with real-time MQTT listener.
 
-    Combines chat history display, a background MQTT listener for incoming
-    messages, and a persistent input prompt — all rendered in a single
-    terminal interface without jitter, using *prompt_toolkit*.
+    Launches a Textual TUI combining chat history display, a background
+    MQTT listener for incoming messages, and a persistent input field.
 
-    Args:
-        chat_id: The other user's ID (for history and sending messages).
-        my_url_token: Current logged-in user's url_token (for MQTT connection).
-        sender_filter: Optional MQTT filter (defaults to *chat_id*).
-        desktop_notify: If True, send desktop notifications for incoming
-            messages via ``desktop-notifier`` (when installed).
+    :param chat_id: The other user's ID (for history and sending messages).
+    :param my_url_token: Current logged-in user's url_token (for MQTT connection).
+    :param sender_filter: Optional MQTT filter (defaults to *chat_id*).
+    :param desktop_notify: If True, send desktop notifications for incoming
+        messages via ``desktop-notifier`` (when installed).
     """
     import asyncio
     import time as _time
 
-    from prompt_toolkit import PromptSession, print_formatted_text
-    from prompt_toolkit.formatted_text import ANSI
-    from prompt_toolkit.history import InMemoryHistory
-    from prompt_toolkit.patch_stdout import patch_stdout
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.message import Message
+    from textual.widgets import Footer, Header, Input, RichLog
 
     from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener
 
@@ -249,17 +281,6 @@ async def interactive_chat(
             notifier = DesktopNotifier(app_name="zhihu-cli")
         except ImportError:
             pass  # desktop-notifier not installed — silently skip notifications
-
-    def _pt_echo(text: str) -> None:
-        """Print a string through prompt_toolkit's ANSI renderer.
-
-        Under ``patch_stdout()``, regular ``click.echo`` can't render ANSI
-        escape codes produced by ``click.style`` — the raw escape sequences
-        appear as literal characters.  ``print_formatted_text(ANSI(...))``
-        tells prompt_toolkit to interpret those codes and render them
-        correctly (dim, colours, bold, etc.).
-        """
-        print_formatted_text(ANSI(text))
 
     # ── 1. Load chat history & capture both names ───────────────────────
     partner_info: list[str] = []
@@ -275,102 +296,198 @@ async def interactive_chat(
     mqtt_filter = sender_filter if sender_filter else chat_id
     listener = ZhihuMessageListener(my_url_token, IMCHAT_TOPIC, sender_filter=mqtt_filter)
 
-    # asyncio.Queue for routing incoming MQTT messages to the display loop.
-    display_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    # ── 3. Custom Textual message for incoming MQTT data ────────────────
 
-    # ── 3. Format an MQTT message for display ────────────────────────────
-    def _fmt_mqtt(data: dict[str, Any]) -> str:
-        """Format an MQTT IM message dict to a display line (matches _format_message)."""
-        meta = data.get("meta", {})
-        content = data.get("content", {})
-        sender = partner_name
-        content_type = meta.get("content_type", "text")
+    class IncomingMessage(Message):
+        """Posted when the MQTT worker receives a new chat message."""
 
-        raw_ts = meta.get("created_at", 0)
-        ts = int(raw_ts) / 1000 if raw_ts else None
+        def __init__(self, data: dict[str, Any]) -> None:
+            self.data = data
+            super().__init__()
 
-        if content_type == "image":
-            img = content.get("image") or {}
-            img_url = img.get("url", "") if isinstance(img, dict) else ""
-            text = f"![]({img_url})" if img_url else "[图片]"
-        else:
-            text = content.get("text", "")
+    # ── 4. Textual App ──────────────────────────────────────────────────
 
-        return _fmt_chat_line(sender, text, ts)
+    class ChatSessionApp(App):
+        """Textual TUI for an interactive Zhihu chat session."""
 
-    # ── 4. Background async tasks ────────────────────────────────────────
+        BINDINGS = [
+            Binding("ctrl+q", "quit_app", "退出"),
+            Binding("ctrl+c", "quit_app", "退出", show=False),
+            Binding("ctrl+d", "quit_app", "退出", show=False),
+            Binding("up", "history_prev", "上一条", show=False),
+            Binding("down", "history_next", "下一条", show=False),
+        ]
 
-    async def mqtt_worker() -> None:
-        """Bridge MQTT messages into the display queue."""
-        try:
-            async for data in listener.iter_messages():
-                display_queue.put_nowait(data)
-        except asyncio.CancelledError:
-            pass
+        CSS = """
+        Screen {
+            background: #1e1e2e;
+        }
 
-    async def display_worker() -> None:
-        """Continuously drain the display queue, print formatted messages, and send desktop notifications."""
-        try:
-            while True:
-                data = await display_queue.get()
-                _pt_echo(_fmt_mqtt(data))
-                if notifier is not None:
-                    # Extract notification title (sender) and body (message text).
-                    meta = data.get("meta", {})
-                    content = data.get("content", {})
-                    title = partner_name
-                    if meta.get("content_type") == "image":
-                        body = "[图片]"
-                    else:
-                        body = content.get("text", "")[:200]
-                    await notifier.send(title=title, message=body)
-        except asyncio.CancelledError:
-            pass
+        RichLog#messages {
+            height: 1fr;
+            background: #1e1e2e;
+            padding: 0 1;
+            overflow-x: hidden;
+        }
 
-    # ── 5. Run the interactive session ───────────────────────────────────
-    mqtt_task = asyncio.create_task(mqtt_worker())
-    display_task = asyncio.create_task(display_worker())
+        Input#input {
+            dock: bottom;
+            margin: 0 1 1 1;
+            background: #313244;
+            color: #cdd6f4;
+            border: none;
+        }
 
-    with patch_stdout():
-        # Print history (history messages have pre-formatted time strings).
-        for msg in history_msgs:
-            t = msg.get("time", "")
-            time_part = click.style(f"[{t}]", dim=True) if t else ""
-            sender_part = click.style(msg["sender"], fg="green", bold=True)
-            _pt_echo(f"  {time_part}{sender_part}: {msg['content']}")
+        Input#input:focus {
+            background: #45475a;
+        }
 
-        if history_msgs:
-            _pt_echo(click.style("  ── history loaded ──", dim=True))
+        Header {
+            background: #313244;
+            color: #cba6f7;
+        }
 
-        session = PromptSession(history=InMemoryHistory())
-        try:
-            while True:
+        Footer {
+            background: #313244;
+            color: #6c7086;
+        }
+        """
+
+        def compose(self) -> ComposeResult:
+            yield Header()
+            yield RichLog(id="messages", highlight=True, markup=True, auto_scroll=True, wrap=True)
+            yield Input(id="input", placeholder="输入消息... (/quit 退出)")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            """Print history and start MQTT listener."""
+            self.title = f"Chat @ {partner_name}"
+            log = self.query_one("#messages", RichLog)
+            for msg in history_msgs:
+                log.write(_fmt_chat_line_rich(msg["sender"], msg["content"], msg.get("time", "")))
+            if history_msgs:
+                log.write("[dim]  ── history loaded ──[/dim]")
+
+            # Store references for use in handlers
+            self._listener = listener
+            self._notifier = notifier
+            self._chat_id = chat_id
+            self._my_name = my_name
+            self._partner_name = partner_name
+            self._history: list[str] = []
+            self._history_idx: int = 0
+
+            # Start MQTT background task
+            self._mqtt_task = asyncio.create_task(self._mqtt_worker())
+
+            self.query_one("#input", Input).focus()
+
+        def on_unmount(self) -> None:
+            """Cancel the MQTT task on exit."""
+            if hasattr(self, "_mqtt_task") and not self._mqtt_task.done():
+                self._mqtt_task.cancel()
+
+        def on_input_submitted(self, event: Input.Submitted) -> None:
+            """Handle message submission from the Input widget."""
+            text = event.value.strip()
+            event.input.clear()
+
+            if not text:
+                return
+            if text in ("/quit", "/exit", "/q"):
+                self.exit()
+                return
+
+            self._history.append(text)
+            self._history_idx = len(self._history)
+
+            # Capture the RichLog.write bound method on the main thread so the
+            # worker thread never touches the Textual DOM directly.
+            _write = self.query_one("#messages", RichLog).write
+
+            def _send() -> None:
+                """Send the message in a worker thread (blocking HTTP call)."""
                 try:
-                    text = await session.prompt_async("\n> ")
-                except (EOFError, KeyboardInterrupt):
-                    break
-
-                text = text.strip()
-                if not text:
-                    continue
-                if text in ("/quit", "/exit", "/q"):
-                    break
-
-                try:
-                    send_text_message(chat_id, text)
+                    send_text_message(self._chat_id, text)
                     now = _time.time()
-                    # Prompt is "\n> " (2 lines).  \x1b[2A goes up both
-                    # the blank line and "> text", \x1b[J clears to end
-                    # of screen so both lines are erased before we print
-                    # the sent message in the same space.
-                    import sys as _sys
-
-                    _sys.__stdout__.write("\x1b[2A\r\x1b[J")
-                    _sys.__stdout__.flush()
-                    _pt_echo(_fmt_chat_line(my_name, text, now))
+                    formatted = _fmt_chat_line_rich(self._my_name, text, now)
+                    self.call_from_thread(_write, formatted)
                 except Exception as exc:
-                    _pt_echo(f"  {click.style('[error]', fg='red')} Failed to send: {exc}")
-        finally:
-            mqtt_task.cancel()
-            display_task.cancel()
-            await asyncio.gather(mqtt_task, display_task, return_exceptions=True)
+                    self.call_from_thread(
+                        _write,
+                        f"  [bold red]Failed to send:[/bold red] {exc}",
+                    )
+
+            self.run_worker(_send, thread=True)
+
+        def action_quit_app(self) -> None:
+            """Quit the application."""
+            self.exit()
+
+        def action_history_prev(self) -> None:
+            """Recall the previous message from input history."""
+            if not self._history:
+                return
+            inp = self.query_one("#input", Input)
+            self._history_idx = max(0, self._history_idx - 1)
+            inp.value = self._history[self._history_idx]
+            inp.cursor_position = len(inp.value)
+
+        def action_history_next(self) -> None:
+            """Move forward through input history (or clear to new message)."""
+            if not self._history:
+                return
+            inp = self.query_one("#input", Input)
+            self._history_idx = min(len(self._history), self._history_idx + 1)
+            if self._history_idx < len(self._history):
+                inp.value = self._history[self._history_idx]
+            else:
+                inp.value = ""
+            inp.cursor_position = len(inp.value)
+
+        async def _mqtt_worker(self) -> None:
+            """Bridge MQTT messages into the UI via post_message."""
+            try:
+                async for data in self._listener.iter_messages():
+                    self.post_message(IncomingMessage(data))
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                import logging
+                import traceback
+
+                logger = logging.getLogger("zhihu_cli.chat")
+                logger.debug("MQTT listener terminated unexpectedly:\n%s", traceback.format_exc())
+                self.query_one("#messages", RichLog).write(
+                    "  [bold red]Real-time listener stopped — messages may be missed[/bold red]"
+                )
+
+        def on_incoming_message(self, event: IncomingMessage) -> None:
+            """Display an incoming MQTT message in the chat log."""
+            data = event.data
+            meta = data.get("meta", {})
+            content = data.get("content", {})
+            content_type = meta.get("content_type", "text")
+
+            raw_ts = meta.get("created_at", 0)
+            ts: int | float | None = int(raw_ts) / 1000 if raw_ts else None
+
+            if content_type == "image":
+                img = content.get("image") or {}
+                img_url: str = img.get("url", "") if isinstance(img, dict) else ""
+                text = f"![]({img_url})" if img_url else "[图片]"
+            else:
+                text = content.get("text", "")
+
+            formatted = _fmt_chat_line_rich(self._partner_name, text, ts)
+            self.query_one("#messages", RichLog).write(formatted)
+
+            # Desktop notification
+            if self._notifier is not None:
+                title = self._partner_name
+                body = "[图片]" if content_type == "image" else content.get("text", "")[:200]
+                asyncio.create_task(self._notifier.send(title=title, message=body))
+
+    # ── 5. Run the Textual app (synchronous — manages its own event loop) ──
+    app = ChatSessionApp()
+    app.run()

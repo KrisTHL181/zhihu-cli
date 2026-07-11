@@ -1,6 +1,6 @@
 """Chat commands for zhihu CLI — inbox, history, send, and interactive chat."""
 
-import asyncio
+from __future__ import annotations
 
 import click
 
@@ -100,11 +100,9 @@ def register_chat(main_group: click.Group) -> None:
         Ctrl+D / Ctrl+C to exit.
         """
         try:
-            import prompt_toolkit  # noqa: F401
+            import textual  # noqa: F401
         except ImportError:
-            raise click.UsageError(
-                "prompt_toolkit is required for interactive chat.  Install with: pip install prompt-toolkit"
-            )
+            raise click.UsageError("textual is required for interactive chat.  Install with: pip install textual")
 
         url_token = get_my_url_token()
         if not url_token:
@@ -112,4 +110,4 @@ def register_chat(main_group: click.Group) -> None:
 
         mqtt_filter = sender if sender else user_id
         info(f"Connecting to Zhihu MQTT (messages from {mqtt_filter})...")
-        asyncio.run(interactive_chat(user_id, url_token, mqtt_filter, desktop_notify=desktop_notify))
+        interactive_chat(user_id, url_token, mqtt_filter, desktop_notify=desktop_notify)
