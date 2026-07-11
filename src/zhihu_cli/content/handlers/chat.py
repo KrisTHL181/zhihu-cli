@@ -374,6 +374,7 @@ def interactive_chat(
             self._chat_id = chat_id
             self._my_name = my_name
             self._partner_name = partner_name
+            self._terminal_has_focus: bool = True  # assume focused on start
             self._history: list[str] = []
             self._history_idx: int = 0
 
@@ -386,6 +387,14 @@ def interactive_chat(
             """Cancel the MQTT task on exit."""
             if hasattr(self, "_mqtt_task") and not self._mqtt_task.done():
                 self._mqtt_task.cancel()
+
+        def on_app_focus(self) -> None:
+            """Mark terminal as focused — suppress notifications."""
+            self._terminal_has_focus = True
+
+        def on_app_blur(self) -> None:
+            """Mark terminal as unfocused — allow notifications."""
+            self._terminal_has_focus = False
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
             """Handle message submission from the Input widget."""
@@ -482,8 +491,8 @@ def interactive_chat(
             formatted = _fmt_chat_line_rich(self._partner_name, text, ts)
             self.query_one("#messages", RichLog).write(formatted)
 
-            # Desktop notification
-            if self._notifier is not None:
+            # Desktop notification — only when terminal is NOT focused
+            if self._notifier is not None and not self._terminal_has_focus:
                 title = self._partner_name
                 body = "[图片]" if content_type == "image" else content.get("text", "")[:200]
                 asyncio.create_task(self._notifier.send(title=title, message=body))
