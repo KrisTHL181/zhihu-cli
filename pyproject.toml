@@ -46,6 +46,9 @@ creator = [
     "scipy",
     "seaborn",
 ]
+notify = [
+    "desktop-notifier",
+]
 
 [project.scripts]
 zhihu = "zhihu_cli.main:main"

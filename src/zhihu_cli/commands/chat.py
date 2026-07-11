@@ -83,7 +83,13 @@ def register_chat(main_group: click.Group) -> None:
     @chat.command("interactive")
     @click.argument("user_id")
     @click.option("--sender", "-s", default=None, help="MQTT filter override (defaults to user_id)")
-    def chat_interactive(user_id: str, sender: str | None) -> None:
+    @click.option(
+        "--notify/--no-notify",
+        "desktop_notify",
+        default=True,
+        help="Send desktop notifications for new incoming messages (requires: pip install -e .[notify])",
+    )
+    def chat_interactive(user_id: str, sender: str | None, desktop_notify: bool) -> None:
         """Start an interactive chat session with real-time messages.
 
         Loads chat history, starts a background MQTT listener for incoming
@@ -106,4 +112,4 @@ def register_chat(main_group: click.Group) -> None:
 
         mqtt_filter = sender if sender else user_id
         info(f"Connecting to Zhihu MQTT (messages from {mqtt_filter})...")
-        asyncio.run(interactive_chat(user_id, url_token, mqtt_filter))
+        asyncio.run(interactive_chat(user_id, url_token, mqtt_filter, desktop_notify=desktop_notify))

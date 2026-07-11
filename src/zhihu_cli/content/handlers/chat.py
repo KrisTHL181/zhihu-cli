@@ -211,7 +211,12 @@ def _fmt_chat_line(sender: str, content: str, ts: int | float | None) -> str:
     return f"  {time_part}{sender_part}: {content}"
 
 
-async def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str | None = None) -> None:
+async def interactive_chat(
+    chat_id: str,
+    my_url_token: str,
+    sender_filter: str | None = None,
+    desktop_notify: bool = True,
+) -> None:
     """Start an interactive chat session with real-time MQTT listener.
 
     Combines chat history display, a background MQTT listener for incoming
@@ -222,6 +227,8 @@ async def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str |
         chat_id: The other user's ID (for history and sending messages).
         my_url_token: Current logged-in user's url_token (for MQTT connection).
         sender_filter: Optional MQTT filter (defaults to *chat_id*).
+        desktop_notify: If True, send desktop notifications for incoming
+            messages via ``desktop-notifier`` (when installed).
     """
     import asyncio
     import time as _time
@@ -232,6 +239,16 @@ async def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str |
     from prompt_toolkit.patch_stdout import patch_stdout
 
     from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener
+
+    # ── Optional desktop-notifier import ────────────────────────────────
+    notifier = None
+    if desktop_notify:
+        try:
+            from desktop_notifier import DesktopNotifier
+
+            notifier = DesktopNotifier(app_name="zhihu-cli")
+        except ImportError:
+            pass  # desktop-notifier not installed — silently skip notifications
 
     def _pt_echo(text: str) -> None:
         """Print a string through prompt_toolkit's ANSI renderer.
@@ -292,11 +309,21 @@ async def interactive_chat(chat_id: str, my_url_token: str, sender_filter: str |
             pass
 
     async def display_worker() -> None:
-        """Continuously drain the display queue and print formatted messages."""
+        """Continuously drain the display queue, print formatted messages, and send desktop notifications."""
         try:
             while True:
                 data = await display_queue.get()
                 _pt_echo(_fmt_mqtt(data))
+                if notifier is not None:
+                    # Extract notification title (sender) and body (message text).
+                    meta = data.get("meta", {})
+                    content = data.get("content", {})
+                    title = partner_name
+                    if meta.get("content_type") == "image":
+                        body = "[图片]"
+                    else:
+                        body = content.get("text", "")[:200]
+                    await notifier.send(title=title, message=body)
         except asyncio.CancelledError:
             pass
 
