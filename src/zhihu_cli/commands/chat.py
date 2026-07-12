@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import re
+from typing import TYPE_CHECKING
+
 import click
+
+if TYPE_CHECKING:
+    from rich.text import Text
 
 from zhihu_cli.content.handlers.chat import (
     get_inbox,
@@ -23,6 +29,38 @@ from zhihu_cli.output import (
     info,
     print_json,
 )
+
+# Regex for Markdown image syntax: ![alt](url)
+_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+
+
+def _render_chat_content(text: str) -> Text:
+    """Convert Markdown image references in *text* to Rich clickable ``[图片]`` links.
+
+    Image patterns like ``![](https://pic.zhihu.com/xxx.jpg)`` or
+    ``![描述](url)`` are replaced with a clickable ``[图片]`` styled as a
+    Rich hyperlink.  All other text is preserved verbatim (no markup
+    interpretation).
+
+    :param text: Raw chat message content (may contain ``![alt](url)``).
+    :returns: A :class:`~rich.text.Text` renderable.
+    """
+    from rich.text import Text
+
+    result = Text()
+    pos = 0
+    for m in _IMG_RE.finditer(text):
+        # Append any plain text before this image
+        result.append(text[pos : m.start()])
+        url = m.group(2)
+        if url:
+            result.append("[图片]", style=f"link {url}")
+        else:
+            result.append("[图片]")
+        pos = m.end()
+    # Append any trailing plain text
+    result.append(text[pos:])
+    return result
 
 
 def register_chat(main_group: click.Group) -> None:
@@ -61,16 +99,38 @@ def register_chat(main_group: click.Group) -> None:
     @click.argument("chat_id")
     @click.option("--limit", "-n", type=int, default=50, help="Max messages to fetch")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def chat_history(chat_id: str, limit: int, output_json: bool) -> None:
+    @click.option(
+        "--rich-images/--no-rich-images",
+        "rich_images",
+        is_flag=True,
+        default=False,
+        help="Render images as clickable Rich [图片] links instead of raw URLs",
+    )
+    def chat_history(chat_id: str, limit: int, output_json: bool, rich_images: bool) -> None:
         """Read messages from a chat conversation."""
         if output_json:
             msgs = list(iter_chat_history(chat_id, limit=limit))
             print_json(msgs)
             return
-        for msg in iter_chat_history(chat_id, limit=limit):
-            t = msg["time"]
-            s = msg["sender"]
-            echo(f"  {f_meta(f'[{t}]')}{f_name(s)}: {msg['content']}")
+        if rich_images:
+            from rich.console import Console
+            from rich.text import Text
+
+            _console = Console()
+            for msg in iter_chat_history(chat_id, limit=limit):
+                t = msg["time"]
+                s = msg["sender"]
+                line = Text("  ")
+                line.append(f"[{t}]", style="dim")
+                line.append(s, style="bold green")
+                line.append(": ")
+                line.append(_render_chat_content(msg["content"]))
+                _console.print(line)
+        else:
+            for msg in iter_chat_history(chat_id, limit=limit):
+                t = msg["time"]
+                s = msg["sender"]
+                echo(f"  {f_meta(f'[{t}]')}{f_name(s)}: {msg['content']}")
 
     @chat.command("send")
     @click.argument("user_id")
