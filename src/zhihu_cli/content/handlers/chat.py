@@ -14,6 +14,7 @@ from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter, replace_with_text
+from zhihu_cli.output import warning
 
 
 def _format_image_message(image_data: dict[str, Any] | None) -> str:
@@ -280,7 +281,10 @@ def interactive_chat(
 
             notifier = DesktopNotifier(app_name="zhihu-cli")
         except ImportError:
-            pass  # desktop-notifier not installed — silently skip notifications
+            warning(
+                "desktop-notifier is not installed; desktop notifications will be disabled.  "
+                "Install with: pip install -e .[notify]"
+            )
 
     # ── 1. Load chat history & capture both names ───────────────────────
     partner_info: list[str] = []
