@@ -75,7 +75,7 @@ def _sanitize_html(raw: str) -> str:
     return doc.text_content()
 
 
-def get_inbox(limit: int = 0) -> tuple[list[dict[str, Any]], int]:
+def get_inbox(limit: int = 0, unread_only: bool = False) -> tuple[list[dict[str, Any]], int]:
     """Fetch inbox threads with pagination.
 
     The inbox API is paginated (waterfall-style).  This uses ``stream_handler``
@@ -83,6 +83,7 @@ def get_inbox(limit: int = 0) -> tuple[list[dict[str, Any]], int]:
 
     Args:
         limit: Max threads to fetch (0 = all pages).
+        unread_only: Only include threads with ``unread_count > 0``.
     Returns:
         Tuple of (threads, total_unread) where *total_unread* is the
         ``new_count`` reported by the first page.
@@ -108,6 +109,8 @@ def get_inbox(limit: int = 0) -> tuple[list[dict[str, Any]], int]:
 
     count = 0
     for msg in stream_handler(initial_url, parse_inbox, delay=0.6):
+        if unread_only and msg["unread_count"] == 0:
+            continue
         messages.append(msg)
         count += 1
         if limit > 0 and count >= limit:

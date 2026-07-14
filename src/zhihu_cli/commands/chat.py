@@ -77,9 +77,10 @@ def register_chat(main_group: click.Group) -> None:
     @chat.command("inbox")
     @click.option("--limit", "-n", type=int, default=0, help="Max threads to fetch (0 = all pages)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def chat_inbox(limit: int, output_json: bool) -> None:
+    @click.option("--unread", is_flag=True, default=False, help="Show only threads with unread messages")
+    def chat_inbox(limit: int, output_json: bool, unread: bool) -> None:
         """List recent conversations (paginated — walks all pages by default)."""
-        messages, total_unread = get_inbox(limit=limit)
+        messages, total_unread = get_inbox(limit=limit, unread_only=unread)
         if output_json:
             print_json(messages)
             return
