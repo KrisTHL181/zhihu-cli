@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -24,6 +25,11 @@ from zhihu_cli.output import (
     success,
     warning,
 )
+
+PRINTABLE_BYTES = bytearray(256)
+for i in range(256):
+    if (32 <= i <= 126) or i in (9, 10, 13):
+        PRINTABLE_BYTES[i] = 1
 
 
 def register_tools(main_group):
@@ -216,6 +222,16 @@ def register_tools(main_group):
             echo("")
             echo(body)
         else:
+            if (
+                sys.stdout.isatty()
+                and len(  # Non-printable bytes
+                    resp.content.translate(bytes.maketrans(bytes(PRINTABLE_BYTES), bytes(256)))
+                )
+                / len(body)
+                > 0.8
+            ):  # More than 80% non-printable
+                error("Warning: Binary output can mess up your terminal. Use '--output <FILE>' to save to a file.")
+                return
             echo(body)
 
     @tools.group("creator")
