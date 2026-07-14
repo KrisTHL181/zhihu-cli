@@ -14,6 +14,7 @@ from zhihu_cli.content.handlers.chat import (
     get_inbox,
     interactive_chat,
     iter_chat_history,
+    send_image_message,
     send_text_message,
     unsend_message,
 )
@@ -21,7 +22,9 @@ from zhihu_cli.content.handlers.people import get_my_url_token
 from zhihu_cli.output import (
     blank,
     echo,
+    error,
     f_dim,
+    f_green,
     f_label,
     f_meta,
     f_name,
@@ -160,6 +163,26 @@ def register_chat(main_group: click.Group) -> None:
                 echo(f"  {resp.get('content', '已撤回')}")
             else:
                 echo("  [red]撤回失败[/red]")
+
+    @chat.command("send-image")
+    @click.argument("user_id")
+    @click.argument("file_path")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def chat_send_image(user_id: str, file_path: str, output_json: bool) -> None:
+        """Upload and send an image to a user via chat."""
+        try:
+            resp = send_image_message(user_id, file_path)
+        except FileNotFoundError as e:
+            error(f"{e}")
+            raise SystemExit(1)
+        except RuntimeError as e:
+            error(f"{e}")
+            raise SystemExit(1)
+        if output_json:
+            print_json(resp)
+        else:
+            msg_id = resp.get("info", {}).get("id", "?")
+            echo(f"  {f_green('Image sent')}  id={f_dim(msg_id)}")
 
     @chat.command("interactive")
     @click.argument("user_id")

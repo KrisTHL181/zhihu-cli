@@ -12,6 +12,7 @@ from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.upload_image import upload_image
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter, replace_with_text
 from zhihu_cli.output import warning
@@ -220,6 +221,39 @@ def send_text_message(their_id: str, content: str) -> dict[str, Any]:
         raise RuntimeError(f"Failed to send message: {data['error']['message']}")
     resp.raise_for_status()
 
+    return data
+
+
+def send_image_message(their_id: str, file_path: str) -> dict[str, Any]:
+    """Upload an image and send it as a chat message.
+
+    Handles the full flow: upload to Zhihu image hosting (with
+    ``source="message"``) then POST to the chat API as a
+    ``content_type=1`` message.
+
+    :param their_id: The recipient's user ID (receiver_id).
+    :param file_path: Path to the local image file.
+    :returns: The chat API response dict (includes ``id`` of the sent message).
+    :raises FileNotFoundError: If *file_path* does not exist.
+    :raises RuntimeError: If the upload or send fails.
+    """
+    image_info = upload_image(file_path, source="message")
+    resp = session.post(
+        "https://www.zhihu.com/api/v4/chat",
+        json={
+            "content_type": 1,
+            "receiver_id": their_id,
+            "image": {
+                "url": image_info["src"],
+                "width": image_info.get("width", 0),
+                "height": image_info.get("height", 0),
+            },
+        },
+    )
+    data = resp.json()
+    if resp.status_code == 403 and "error" in data:
+        raise RuntimeError(f"Failed to send image: {data['error']['message']}")
+    resp.raise_for_status()
     return data
 
 
