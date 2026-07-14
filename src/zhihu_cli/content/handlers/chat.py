@@ -192,6 +192,24 @@ def iter_chat_history(
     yield from reversed(all_messages)
 
 
+def unsend_message(message_id: str) -> dict[str, Any]:
+    """Recall (unsend) a previously sent chat message.
+
+    :param message_id: The ID of the message to recall.
+    :returns: The API response dict (contains ``content`` and ``success``).
+    :raises RuntimeError: If the API returns an error.
+    """
+    resp = session.post(
+        "https://api.zhihu.com/messages/actions/cancel",
+        data={"message_id": message_id},
+    )
+    data = resp.json()
+    if resp.status_code == 403 and "error" in data:
+        raise RuntimeError(f"Failed to unsend message: {data['error']['message']}")
+    resp.raise_for_status()
+    return data
+
+
 def send_text_message(their_id: str, content: str) -> dict[str, Any]:
     resp = session.post(
         "https://www.zhihu.com/api/v4/chat", json={"content_type": 0, "text": content, "receiver_id": their_id}

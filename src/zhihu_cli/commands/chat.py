@@ -15,6 +15,7 @@ from zhihu_cli.content.handlers.chat import (
     interactive_chat,
     iter_chat_history,
     send_text_message,
+    unsend_message,
 )
 from zhihu_cli.content.handlers.people import get_my_url_token
 from zhihu_cli.output import (
@@ -139,6 +140,20 @@ def register_chat(main_group: click.Group) -> None:
         """Send a text message to a user."""
         resp = send_text_message(user_id, content)
         echo(resp)
+
+    @chat.command("unsend")
+    @click.argument("message_id")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def chat_unsend(message_id: str, output_json: bool) -> None:
+        """Recall (unsend) a previously sent chat message."""
+        resp = unsend_message(message_id)
+        if output_json:
+            print_json(resp)
+        else:
+            if resp.get("success"):
+                echo(f"  {resp.get('content', '已撤回')}")
+            else:
+                echo("  [red]撤回失败[/red]")
 
     @chat.command("interactive")
     @click.argument("user_id")
