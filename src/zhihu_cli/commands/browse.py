@@ -200,13 +200,20 @@ def register_browse(main_group):
     @click.option(
         "--sort", "sort_by", type=click.Choice(["default", "time"]), default="default", help="Sort log entries by time"
     )
-    def browse_log(url: str, output_json: bool, sort_by: str) -> None:
+    @click.option(
+        "--diff",
+        "diff_style",
+        type=click.Choice(["wikidiff", "git"]),
+        default="wikidiff",
+        help="Diff output style: wikidiff (clean -/+/ ) or git (unified diff with headers)",
+    )
+    def browse_log(url: str, output_json: bool, sort_by: str, diff_style: str) -> None:
         """View the edit history (log) of a Zhihu question."""
         _, question_id = _parse_item_url(url)
         if not question_id:
             raise click.BadParameter(f"Cannot parse question ID from URL: {url}")
 
-        entries = fetch_question_log(question_id)
+        entries = fetch_question_log(question_id, diff_style=diff_style)
         if sort_by != "default":
             _SORT_MAP = {"time": "time"}
             entries = _sort_items(entries, _SORT_MAP[sort_by])
@@ -223,10 +230,42 @@ def register_browse(main_group):
             user = entry["user"] or "unknown"
             action = entry["action"]
             time_str = entry["time"]
-            detail = entry["detail"]
+            detail = entry.get("detail")
+            detail_diff = entry.get("detail_diff")
 
             echo(f"  {f_meta(f'[{time_str}]')} {f_name(user)} {action}")
-            if detail:
+            if detail_diff:
+                if diff_style == "git":
+                    for line in detail_diff.splitlines():
+                        if line.startswith("---") or line.startswith("+++"):
+                            echo(f"    {f_bold(line)}")
+                        elif line.startswith("@@"):
+                            echo(f"    {f_cyan(line)}")
+                        elif line.startswith("-"):
+                            echo(f"    {click.style(line, fg='red')}")
+                        elif line.startswith("+"):
+                            echo(f"    {f_green(line)}")
+                        else:
+                            echo(f"    {line}")
+                else:
+                    prev_blank = False
+                    for line in detail_diff.splitlines():
+                        if line.startswith("-"):
+                            prev_blank = False
+                            echo(f"    {click.style(line, fg='red')}")
+                        elif line.startswith("+"):
+                            prev_blank = False
+                            echo(f"    {f_green(line)}")
+                        else:
+                            text = line[1:] if line.startswith(" ") else line
+                            if text == "":
+                                if not prev_blank:
+                                    echo("")
+                                prev_blank = True
+                            else:
+                                prev_blank = False
+                                echo(f"    {text}")
+            elif detail:
                 echo(f"    {f_dim(detail[:200])}")
             blank()
 
