@@ -340,7 +340,7 @@ class DaemonServer:
         # so network errors don't propagate to the connection handler and
         # silently kill the client socket (client would hang until timeout).
         try:
-            resp = await loop.run_in_executor(None, self._do_request, method, url, kwargs)
+            resp, cookies = await loop.run_in_executor(None, self._do_request, method, url, kwargs)
         except Exception as e:
             _log(f"HTTP request failed: {method} {url}: {e}")
             return build_error(msg_id, type(e).__name__, str(e))
@@ -365,7 +365,7 @@ class DaemonServer:
                     },
                 }
 
-        return self._build_response(msg_id, resp)
+        return self._build_response(msg_id, resp, cookies)
 
     async def _handle_captcha_resolved(self, msg_id: str, msg: dict[str, Any]) -> dict[str, Any]:
         """After the CLI resolves the captcha, harvest cookies via the
@@ -385,20 +385,24 @@ class DaemonServer:
                 await loop.run_in_executor(None, self._do_request, "GET", unhuman_url, {"timeout": 30.0})
 
             # Retry the original request
-            resp = await loop.run_in_executor(None, self._do_request, retry_method, retry_url, retry_kwargs)
-            return self._build_response(msg_id, resp)
+            resp, cookies = await loop.run_in_executor(None, self._do_request, retry_method, retry_url, retry_kwargs)
+            return self._build_response(msg_id, resp, cookies)
         except Exception as e:
             return build_error(msg_id, type(e).__name__, str(e))
 
     # ── session-level request execution ─────────────────────────────────
 
-    def _do_request(self, method: str, url: str, kwargs: dict[str, Any]) -> Any:
+    def _do_request(self, method: str, url: str, kwargs: dict[str, Any]) -> tuple[Any, dict[str, str]]:
         """Execute an HTTP request with the shared session.
 
         All access to ``self._session`` is protected by ``_session_lock``.
         A default timeout is applied when the caller does not specify one
         to prevent a single hung request from blocking all concurrent
         requests (and the idle checker) indefinitely.
+
+        :returns: ``(response, cookies_dict)`` — cookies are read while the
+            lock is still held, avoiding a second lock acquisition just to
+            harvest auth tokens.
         """
         # Strip timeout=None (curl_cffi's Session.request accepts it but
         # uses a sentinel internally; passing None explicitly can cause
@@ -417,25 +421,24 @@ class DaemonServer:
         with self._session_lock:
             if self._session is None:
                 raise RuntimeError("Session not initialised")
-            return self._session.request(method, url, **safe_kwargs)
+            resp = self._session.request(method, url, **safe_kwargs)
+            # Harvest auth cookies while the lock is still held — this
+            # avoids a second lock acquisition in _build_response().
+            cookies: dict[str, str] = {}
+            for name in ("d_c0", "z_c0", "_xsrf"):
+                val = self._session.cookies.get(name, "")
+                if val:
+                    cookies[name] = str(val)
+            return resp, cookies
 
-    def _build_response(self, msg_id: str, resp: Any) -> dict[str, Any]:
-        """Serialise a curl_cffi Response into an ``http_response`` message."""
+    def _build_response(self, msg_id: str, resp: Any, cookies: dict[str, str] | None = None) -> dict[str, Any]:
+        """Serialise a curl_cffi Response into an ``http_response`` message.
+
+        :param cookies: Auth cookies harvested while the session lock was
+            held by the caller.  Avoids a second lock acquisition just to
+            read cookie values.
+        """
         body = getattr(resp, "content", b"") or b""
-
-        # Gather current cookies for the client mirror.
-        # Must hold _session_lock to avoid racing with _init_session(),
-        # which closes and replaces the session object.
-        cookies: dict[str, str] = {}
-        try:
-            with self._session_lock:
-                if self._session is not None:
-                    for name in ("d_c0", "z_c0", "_xsrf"):
-                        val = self._session.cookies.get(name, "")
-                        if val:
-                            cookies[name] = str(val)
-        except Exception:
-            pass
 
         # elapsed may be a timedelta or float
         elapsed: Any = getattr(resp, "elapsed", 0.0)
@@ -449,7 +452,7 @@ class DaemonServer:
             body=body,
             elapsed=float(elapsed),
             url=str(getattr(resp, "url", "")),
-            cookies=cookies,
+            cookies=cookies or {},
         )
 
     # ── idle checker ────────────────────────────────────────────────────
@@ -458,11 +461,13 @@ class DaemonServer:
         """Shut down if the server is idle for longer than *idle_timeout*.
 
         Set *idle_timeout* to 0 to disable automatic shutdown entirely.
+        Checks every 10 seconds so the daemon exits promptly after going
+        idle without wasting CPU on busy-polling.
         """
         if self.idle_timeout <= 0:
             return  # Disabled — never auto-exit
         while not self._shutdown_event.is_set():
-            await asyncio.sleep(60)
+            await asyncio.sleep(10)
             if time.monotonic() - self._last_activity > self.idle_timeout:
                 self._shutdown_event.set()
                 break

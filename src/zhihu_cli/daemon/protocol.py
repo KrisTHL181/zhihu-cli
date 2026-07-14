@@ -102,7 +102,7 @@ async def read_message(reader: asyncio.StreamReader) -> dict[str, Any]:
 
 def write_message(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
     """Encode and write *msg* to *writer* (does NOT drain)."""
-    data = json.dumps(msg, ensure_ascii=False).encode("utf-8")
+    data = json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     writer.write(struct.pack("!I", len(data)))
     writer.write(data)
 
@@ -112,19 +112,25 @@ def write_message(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
 
 def encode_message(msg: dict[str, Any]) -> bytes:
     """Return the wire-format bytes for *msg*."""
-    data = json.dumps(msg, ensure_ascii=False).encode("utf-8")
+    data = json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return struct.pack("!I", len(data)) + data
 
 
 def _recv_exact(sock: socket.socket, n: int) -> bytes:
-    """Receive exactly *n* bytes from *sock*, blocking."""
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
+    """Receive exactly *n* bytes from *sock*, blocking.
+
+    Uses a pre-allocated :class:`bytearray` and :meth:`socket.recv_into`
+    to avoid repeated buffer concatenation.
+    """
+    buf = bytearray(n)
+    mv = memoryview(buf)
+    received = 0
+    while received < n:
+        nread = sock.recv_into(mv[received:], n - received)
+        if nread == 0:
             raise ConnectionError("Socket closed during read")
-        buf += chunk
-    return buf
+        received += nread
+    return bytes(buf)
 
 
 def recv_message(sock: socket.socket) -> dict[str, Any]:

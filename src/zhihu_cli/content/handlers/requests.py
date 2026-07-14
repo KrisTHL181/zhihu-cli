@@ -130,6 +130,7 @@ def _build_session() -> Any:
             proxy.headers = dict(hdrs)
             if hdrs.get("User-Agent"):
                 proxy.headers["User-Agent"] = hdrs["User-Agent"]
+            proxy._init_cookie_cache()
 
             # Ensure daemon session matches active profile
             proxy._send_reload()
@@ -188,6 +189,7 @@ def reload_session() -> None:
         _session.headers = dict(hdrs)
         if hdrs.get("User-Agent"):
             _session.headers["User-Agent"] = hdrs["User-Agent"]
+        _session._init_cookie_cache()
 
         _session._send_reload()
         _session._send_config("captcha_handler", _session.captcha_handler)

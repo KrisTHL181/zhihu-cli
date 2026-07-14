@@ -149,6 +149,10 @@ class DaemonProxySession:
         self.cookies: _CookieProxy = _CookieProxy(self)
         self._sock: socket.socket | None = None
         self._lock: threading.Lock = threading.Lock()
+        # Internal cookie cache — avoids O(n) string-splitting of the
+        # Cookie header on every response.  Kept in sync with the daemon's
+        # actual cookie jar via _sync_cookies().
+        self._cookie_dict: dict[str, str] = {}
 
     # ── persistent connection management ──────────────────────────────
 
@@ -216,22 +220,35 @@ class DaemonProxySession:
             self._sock = None
 
     def _sync_cookies(self, cookies: dict[str, str]) -> None:
-        """Merge *cookies* from a daemon response into the local Cookie header.
+        """Merge *cookies* from a daemon response into the local cookie cache.
 
-        This keeps ``session.cookies.get("d_c0")`` and friends in sync
-        with the daemon's actual cookie jar.
+        Uses an internal ``_cookie_dict`` to avoid O(n) string-splitting of
+        the ``Cookie`` header on every response.  The header is only rebuilt
+        when a cookie value actually changes.
         """
         if not cookies:
             return
+        changed = False
+        for k, v in cookies.items():
+            if self._cookie_dict.get(k) != v:
+                self._cookie_dict[k] = v
+                changed = True
+        if changed:
+            self.headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookie_dict.items())
+
+    def _init_cookie_cache(self) -> None:
+        """Populate ``_cookie_dict`` from the initial ``Cookie`` header.
+
+        Called once after setting ``self.headers`` from the profile, so
+        subsequent ``_sync_cookies`` calls have a baseline to diff against.
+        """
         cookie_header = self.headers.get("Cookie", "")
-        parts: dict[str, str] = {}
-        if isinstance(cookie_header, str):
-            for part in cookie_header.split("; "):
-                if "=" in part:
-                    k, _, v = part.partition("=")
-                    parts[k] = v
-        parts.update(cookies)
-        self.headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in parts.items())
+        if not isinstance(cookie_header, str) or not cookie_header:
+            return
+        for part in cookie_header.split("; "):
+            if "=" in part:
+                k, _, v = part.partition("=")
+                self._cookie_dict[k] = v
 
     def close(self) -> None:
         """Close the persistent daemon connection."""
@@ -485,45 +502,32 @@ class _CookieProxy:
 
     Only ``cookies.get(name)`` is used by the codebase (for ``d_c0``
     extraction in ``ZhihuSession._get_dc0()`` and auth login helpers).
+    Uses the session's ``_cookie_dict`` cache for O(1) lookups instead of
+    O(n) string-scanning of the ``Cookie`` header.
     """
 
     def __init__(self, session: DaemonProxySession) -> None:
         self._session = session
 
     def get(self, name: str, default: str = "") -> str:
-        """Return a cookie value by name.
-
-        Reads from the local headers mirror (``Cookie`` header).
-        """
-        cookie_header = self._session.headers.get("Cookie", "")
-        if isinstance(cookie_header, str):
-            for part in cookie_header.split("; "):
-                if part.startswith(name + "="):
-                    return part[len(name) + 1 :]
-        return default
+        """Return a cookie value by name (O(1) from internal cache)."""
+        return self._session._cookie_dict.get(name, default)
 
     def get_dict(self) -> dict[str, str]:
         """Return all cookies as a dict (used by auth login)."""
-        result: dict[str, str] = {}
-        cookie_header = self._session.headers.get("Cookie", "")
-        if isinstance(cookie_header, str):
-            for part in cookie_header.split("; "):
-                if "=" in part:
-                    key, _, val = part.partition("=")
-                    result[key] = val
-        return result
+        return dict(self._session._cookie_dict)
 
     def set(self, name: str, value: str) -> None:
-        """Set a cookie value in the local headers mirror.
+        """Set a cookie value in the local cache and header mirror.
 
         Note: this does NOT propagate to the daemon.  For persistent
         cookie changes, use ``zhihu auth`` or ``reload_session()``.
         """
-        cookie_header = self._session.headers.get("Cookie", "")
-        parts = [p for p in cookie_header.split("; ") if p and not p.startswith(name + "=")]
         if value:
-            parts.append(f"{name}={value}")
-        self._session.headers["Cookie"] = "; ".join(parts)
+            self._session._cookie_dict[name] = value
+        else:
+            self._session._cookie_dict.pop(name, None)
+        self._session.headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._session._cookie_dict.items())
 
 
 def _synthetic_403(captcha_error: dict[str, Any], url: str) -> DaemonProxyResponse:
