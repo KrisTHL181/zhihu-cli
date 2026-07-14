@@ -107,7 +107,8 @@ def register_chat(main_group: click.Group) -> None:
         default=False,
         help="Render images as clickable Rich [图片] links instead of raw URLs",
     )
-    def chat_history(chat_id: str, limit: int, output_json: bool, rich_images: bool) -> None:
+    @click.option("--show-id", is_flag=True, default=False, help="Show message IDs")
+    def chat_history(chat_id: str, limit: int, output_json: bool, rich_images: bool, show_id: bool) -> None:
         """Read messages from a chat conversation."""
         if output_json:
             msgs = list(iter_chat_history(chat_id, limit=limit))
@@ -122,6 +123,9 @@ def register_chat(main_group: click.Group) -> None:
                 t = msg["time"]
                 s = msg["sender"]
                 line = Text("  ")
+                if show_id:
+                    line.append(f"[{msg['id']}]", style="dim")
+                    line.append(" ")
                 line.append(f"[{t}]", style="dim")
                 line.append(s, style="bold green")
                 line.append(": ")
@@ -131,7 +135,9 @@ def register_chat(main_group: click.Group) -> None:
             for msg in iter_chat_history(chat_id, limit=limit):
                 t = msg["time"]
                 s = msg["sender"]
-                echo(f"  {f_meta(f'[{t}]')}{f_name(s)}: {msg['content']}")
+                msg_id = msg["id"]
+                id_prefix = f"{f_dim(f'[{msg_id}]')} " if show_id else ""
+                echo(f"  {id_prefix}{f_meta(f'[{t}]')}{f_name(s)}: {msg['content']}")
 
     @chat.command("send")
     @click.argument("user_id")

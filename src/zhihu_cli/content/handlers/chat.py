@@ -141,7 +141,7 @@ def _parse_messages_page(
         else:
             content = _sanitize_html(msg.get("text", ""))
         time_str = fmt_time(msg.get("created_time"))
-        page_msgs.append({"sender": sender, "content": content, "time": time_str})
+        page_msgs.append({"sender": sender, "content": content, "time": time_str, "id": msg.get("id")})
 
     last_id = messages[-1].get("id")
     return page_msgs, last_id, (receiver_name, sender_name)
