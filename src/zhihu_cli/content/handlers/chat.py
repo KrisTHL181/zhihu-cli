@@ -7,10 +7,18 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 if TYPE_CHECKING:
     from typing import Any
 
+    from rich.text import Text
+
 import click
 from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import fmt_time
+from zhihu_cli.content.handlers.chat_commands import ChatCommandRegistry
+from zhihu_cli.content.handlers.chat_commands_builtin import (
+    _apply_unsend_suggestion,
+    _show_unsend_suggestions,
+    register_builtin_commands,
+)
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.upload_image import upload_image
 from zhihu_cli.content.handlers.waterfall import stream_handler
@@ -142,7 +150,16 @@ def _parse_messages_page(
         else:
             content = _sanitize_html(msg.get("text", ""))
         time_str = fmt_time(msg.get("created_time"))
-        page_msgs.append({"sender": sender, "content": content, "time": time_str, "id": msg.get("id")})
+        page_msgs.append(
+            {
+                "sender": sender,
+                "content": content,
+                "time": time_str,
+                "id": msg.get("id"),
+                "created_time": msg.get("created_time", 0),
+                "is_canceled": msg.get("is_canceled", False),
+            }
+        )
 
     last_id = messages[-1].get("id")
     return page_msgs, last_id, (receiver_name, sender_name)
@@ -269,7 +286,7 @@ def _fmt_chat_line(sender: str, content: str, ts: int | float | None) -> str:
     return f"  {time_part}{sender_part}: {content}"
 
 
-def _fmt_chat_line_rich(sender: str, content: str, ts: int | float | str | None):
+def _fmt_chat_line_rich(sender: str, content: str | Text, ts: int | float | str | None):
     """Format a single chat line as a Rich :class:`~rich.text.Text` object.
 
     Uses ``Text`` instead of a raw markup string so that *sender* and
@@ -277,7 +294,8 @@ def _fmt_chat_line_rich(sender: str, content: str, ts: int | float | str | None)
     markup-significant characters are displayed literally without escaping.
 
     :param sender: Display name of the message sender.
-    :param content: Message body (plain text, may contain brackets).
+    :param content: Message body (plain text, may contain brackets), or a
+        pre-styled :class:`~rich.text.Text` object.
     :param ts: Unix timestamp (int/float), pre-formatted time string, or None.
     :returns: A :class:`~rich.text.Text` renderable ready for ``RichLog.write``.
     """
@@ -367,6 +385,7 @@ def interactive_chat(
         """Textual TUI for an interactive Zhihu chat session."""
 
         BINDINGS = [
+            Binding("tab", "complete_command", "补全", show=False),
             Binding("ctrl+q", "quit_app", "退出"),
             Binding("ctrl+c", "quit_app", "退出", show=False),
             Binding("ctrl+d", "quit_app", "退出", show=False),
@@ -420,7 +439,14 @@ def interactive_chat(
             self.title = f"Chat @ {partner_name}"
             log = self.query_one("#messages", RichLog)
             for msg in history_msgs:
-                log.write(_fmt_chat_line_rich(msg["sender"], msg["content"], msg.get("time", "")))
+                if msg.get("is_canceled"):
+                    from rich.text import Text
+
+                    canceled = Text("[已撤回] ", style="dim italic")
+                    canceled.append(msg["content"], style="dim italic")
+                    log.write(_fmt_chat_line_rich(msg["sender"], canceled, msg.get("time", "")))
+                else:
+                    log.write(_fmt_chat_line_rich(msg["sender"], msg["content"], msg.get("time", "")))
             if history_msgs:
                 log.write("[dim]  ── history loaded ──[/dim]")
 
@@ -433,6 +459,18 @@ def interactive_chat(
             self._terminal_has_focus: bool = True  # assume focused on start
             self._history: list[str] = []
             self._history_idx: int = 0
+
+            # Command system
+            self._cmd_registry = ChatCommandRegistry()
+            register_builtin_commands(self._cmd_registry)
+            # Track sent messages with IDs (for /unsend recall).
+            # Seed with own messages from history so they are undoable too.
+            self._sent_messages: list[dict[str, Any]] = []
+            for msg in history_msgs:
+                if msg.get("id") and msg["sender"] == my_name and not msg.get("is_canceled"):
+                    self._sent_messages.append(
+                        {"text": msg["content"], "id": msg["id"], "time": msg.get("created_time", 0)}
+                    )
 
             # Start MQTT background task
             self._mqtt_task = asyncio.create_task(self._mqtt_worker())
@@ -459,12 +497,49 @@ def interactive_chat(
 
             if not text:
                 return
-            if text in ("/quit", "/exit", "/q"):
-                self.exit()
+
+            # ── Slash-command dispatch ──────────────────────────
+            if text.startswith("/"):
+                # If suggestions popup is visible, don't interfere
+                if hasattr(self, "_suggest_widget") and self._suggest_widget is not None:
+                    return
+
+                cmd_text = text[1:]  # strip leading /
+                matched_name, command, candidates = self._cmd_registry.match(cmd_text)
+
+                if command is not None:
+                    # Exact or unique prefix match — extract args
+                    parts = cmd_text.split(maxsplit=1)
+                    token = parts[0]
+                    cmd_args = parts[1] if len(parts) > 1 else ""
+                    if matched_name != token:
+                        # Unique prefix match: args are after the typed token
+                        cmd_args = cmd_text[len(token) :].strip()
+                    self._history.append(text)
+                    self._history_idx = len(self._history)
+                    try:
+                        command.handler(self, cmd_args)
+                    except Exception as exc:
+                        log = self.query_one("#messages", RichLog)
+                        log.write(f"  [bold red]命令执行失败:[/bold red] {exc}")
+                elif candidates:
+                    log = self.query_one("#messages", RichLog)
+                    log.write(f"  [bold yellow]多个匹配:[/bold yellow] {' | '.join('/' + c for c in candidates)}")
+                else:
+                    log = self.query_one("#messages", RichLog)
+                    token = cmd_text.split()[0] if cmd_text.strip() else cmd_text
+                    log.write(f"  [bold red]未知命令:[/bold red] /{token} — 输入 [bold]/help[/bold] 查看可用命令")
                 return
 
+            # ── Normal message send ────────────────────────────
             self._history.append(text)
             self._history_idx = len(self._history)
+
+            # Pre-track on main thread so /unsend can find it immediately.
+            # The worker thread fills in the real message ID later.
+            send_time = _time.time()
+            sent_entry: dict[str, Any] = {"text": text, "id": None, "time": send_time}
+            self._sent_messages.append(sent_entry)
 
             # Capture the RichLog.write bound method on the main thread so the
             # worker thread never touches the Textual DOM directly.
@@ -473,11 +548,27 @@ def interactive_chat(
             def _send() -> None:
                 """Send the message in a worker thread (blocking HTTP call)."""
                 try:
-                    send_text_message(self._chat_id, text)
+                    resp = send_text_message(self._chat_id, text)
                     now = _time.time()
+                    # Patch in the real message ID on the main thread
+                    msg_id = resp.get("info", {}).get("id")
+
+                    def _patch_id() -> None:
+                        sent_entry["id"] = msg_id
+                        sent_entry["time"] = now
+
+                    if msg_id:
+                        self.call_from_thread(_patch_id)
                     formatted = _fmt_chat_line_rich(self._my_name, text, now)
                     self.call_from_thread(_write, formatted)
                 except Exception as exc:
+                    # Remove the placeholder on failure
+
+                    def _remove_placeholder() -> None:
+                        if sent_entry in self._sent_messages:
+                            self._sent_messages.remove(sent_entry)
+
+                    self.call_from_thread(_remove_placeholder)
                     self.call_from_thread(
                         _write,
                         f"  [bold red]Failed to send:[/bold red] {exc}",
@@ -509,6 +600,44 @@ def interactive_chat(
             else:
                 inp.value = ""
             inp.cursor_position = len(inp.value)
+
+        def action_complete_command(self) -> None:
+            """Handle Tab key — show autocomplete for slash commands."""
+            inp = self.query_one("#input", Input)
+            text = inp.value.strip()
+
+            if not text.startswith("/"):
+                return
+
+            # If suggestions are already visible, let the ListView handle Tab
+            if hasattr(self, "_suggest_widget") and self._suggest_widget is not None:
+                return
+
+            cmd_text = text[1:]
+            matched_name, command, candidates = self._cmd_registry.match(cmd_text)
+
+            if candidates and len(candidates) == 1:
+                # Unique prefix match — auto-complete the command name
+                inp.value = f"/{candidates[0]} "
+                inp.cursor_position = len(inp.value)
+            elif candidates:
+                # Multiple matches — show hint
+                log = self.query_one("#messages", RichLog)
+                log.write(f"  [dim]{' | '.join('/' + c for c in candidates)}[/dim]")
+            elif command is not None and command.name == "unsend":
+                # Exact match for /unsend — show suggestion popup
+                _show_unsend_suggestions(self)
+
+        def on_option_list_option_selected(self, event: Any) -> None:
+            """Handle selection from the command suggestion popup."""
+            ol = getattr(event, "option_list", None)
+            if ol is None or getattr(ol, "id", None) != "cmd-suggestions":
+                return
+            event.stop()
+            idx: int = getattr(event, "option_index", getattr(event, "index", -1))
+            if idx >= 0:
+                _apply_unsend_suggestion(self, idx)
+                self.query_one("#input", Input).focus()
 
         async def _mqtt_worker(self) -> None:
             """Bridge MQTT messages into the UI via post_message."""
