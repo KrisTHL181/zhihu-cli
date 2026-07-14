@@ -24,6 +24,7 @@ diagnosable output when the daemon misbehaves.
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import signal
 import sys
@@ -403,6 +404,10 @@ class DaemonServer:
         # uses a sentinel internally; passing None explicitly can cause
         # issues on some versions).
         safe_kwargs = {k: v for k, v in kwargs.items() if not (k == "timeout" and v is None)}
+
+        # Decode base64-encoded binary body from the wire.
+        if "data_base64" in safe_kwargs:
+            safe_kwargs["data"] = base64.b64decode(safe_kwargs.pop("data_base64"))
 
         # Apply a default timeout so one hung request doesn't block the
         # shared session forever.

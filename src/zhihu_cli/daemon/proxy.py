@@ -348,8 +348,20 @@ class DaemonProxySession:
     # ── internal helpers ───────────────────────────────────────────────
 
     def _serialize_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Filter *kwargs* to only the keys safe for wire transport."""
-        return {k: v for k, v in kwargs.items() if k in _WIRE_KWARGS}
+        """Filter *kwargs* to only the keys safe for wire transport.
+
+        Bytes values (e.g. ``data`` for image uploads) are base64-encoded
+        under a ``data_base64`` key so they survive JSON serialisation.
+        """
+        wire: dict[str, Any] = {}
+        for k, v in kwargs.items():
+            if k not in _WIRE_KWARGS:
+                continue
+            if k == "data" and isinstance(v, bytes):
+                wire["data_base64"] = base64.b64encode(v).decode("ascii")
+            else:
+                wire[k] = v
+        return wire
 
     def _process_response(
         self,
