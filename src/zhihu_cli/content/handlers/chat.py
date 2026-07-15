@@ -169,7 +169,23 @@ def _parse_messages_page(
 
     page_msgs = []
     for msg in messages:
-        if msg.get("type") != "message":
+        msg_type = msg.get("type")
+        if msg_type == "risk_tip":
+            text = _sanitize_html(msg.get("text", ""))
+            time_str = fmt_time(msg.get("created_time"))
+            page_msgs.append(
+                {
+                    "sender": "",
+                    "content": text,
+                    "time": time_str,
+                    "id": msg.get("id"),
+                    "created_time": msg.get("created_time", 0),
+                    "is_canceled": False,
+                    "is_risk_tip": True,
+                }
+            )
+            continue
+        if msg_type != "message":
             continue
 
         sender = sender_name if msg.get("user_type") == "sender" else receiver_name
@@ -474,6 +490,16 @@ def interactive_chat(
                     canceled = Text("[已撤回] ", style="dim italic")
                     canceled.append(msg["content"], style="dim italic")
                     log.write(_fmt_chat_line_rich(msg["sender"], canceled, msg.get("time", "")))
+                elif msg.get("is_risk_tip"):
+                    from rich.text import Text
+
+                    t = msg.get("time", "")
+                    line = Text("  ")
+                    if t:
+                        line.append(f"[{t}]", style="dim")
+                    line.append(" [风险提示] ", style="dim italic")
+                    line.append(msg["content"], style="dim italic")
+                    log.write(line)
                 else:
                     log.write(_fmt_chat_line_rich(msg["sender"], msg["content"], msg.get("time", "")))
             if history_msgs:
@@ -702,6 +728,20 @@ def interactive_chat(
                 msg_id = meta.get("id") or data.get("id") or ""
                 img_url = _inject_message_id(img_url, msg_id)
                 text = f"![]({img_url})" if img_url else "[图片]"
+            elif content_type == "risk_tip":
+                text = content.get("text", "")
+                from rich.text import Text
+
+                line = Text("  ")
+                if ts is not None:
+                    line.append(f"[{fmt_time(ts)}]", style="dim")
+                line.append(" [风险提示] ", style="dim italic")
+                line.append(text, style="dim italic")
+                self.query_one("#messages", RichLog).write(line)
+                # Desktop notification for risk_tip
+                if self._notifier is not None and not self._terminal_has_focus:
+                    asyncio.create_task(self._notifier.send(title="风险提示", message=text[:200]))
+                return
             else:
                 text = content.get("text", "")
 
