@@ -511,7 +511,7 @@ def interactive_chat(
             self._chat_id = chat_id
             self._my_name = my_name
             self._partner_name = partner_name
-            self._terminal_has_focus: bool = True  # assume focused on start
+            self._terminal_has_focus: bool = False  # It will update on blur/focus events
             self._history: list[str] = []
             self._history_idx: int = 0
 
