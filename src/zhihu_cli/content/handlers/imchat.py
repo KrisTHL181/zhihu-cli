@@ -10,6 +10,7 @@ import click
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.chat import _inject_message_id
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 
 NOTIFICATION_TOPIC: str = "zhihu/notification/badge/web/v1/{USER_HASH}/"
@@ -163,6 +164,8 @@ class ZhihuMessageListener:
         if content_type == "image":
             img = content.get("image") or {}
             img_url = img.get("url", "") if isinstance(img, dict) else ""
+            msg_id = meta.get("id") or data.get("id") or ""
+            img_url = _inject_message_id(img_url, msg_id)
             text = f"![]({img_url})" if img_url else "[图片]"
         else:
             text = content.get("text", "")

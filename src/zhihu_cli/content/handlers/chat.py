@@ -26,17 +26,43 @@ from zhihu_cli.content.utils.html2markdown import ZhihuLinkConverter, replace_wi
 from zhihu_cli.output import warning
 
 
-def _format_image_message(image_data: dict[str, Any] | None) -> str:
+def _inject_message_id(url: str, message_id: str | None) -> str:
+    """Inject ``&message_id=...`` into a ``pic-private.zhihu.com`` image URL.
+
+    Private Zhihu image URLs require a ``message_id`` query parameter to
+    be viewable; without it the CDN returns 403.  This helper appends the
+    parameter when the URL domain matches and the ID is provided.
+
+    :param url: The image URL (may already contain query params).
+    :param message_id: The message ID to inject (ignored if ``None`` or empty).
+    :returns: The URL with ``&message_id=...`` appended, or unchanged if
+        the domain doesn't match or the parameter is already present.
+    """
+    if not message_id or "pic-private.zhihu.com" not in url:
+        return url
+    if "message_id=" in url:
+        return url  # already injected
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}message_id={message_id}"
+
+
+def _format_image_message(image_data: dict[str, Any] | None, message_id: str | None = None) -> str:
     """Extract image URL from a chat message's ``image`` field.
 
     For ``content_type=1`` (image) messages the Zhihu API returns an
     ``image`` dict with ``url``, ``height`` and ``width`` keys.
+
+    :param image_data: The ``image`` sub-dict from the API response.
+    :param message_id: Optional message ID — injected into
+        ``pic-private.zhihu.com`` URLs via :func:`_inject_message_id`
+        so the image is viewable.
     """
     if not isinstance(image_data, dict):
         return "[]"
     url = image_data.get("url", "")
     if not url:
         return "[]"
+    url = _inject_message_id(url, message_id)
     return f"![]({url})"
 
 
@@ -149,7 +175,7 @@ def _parse_messages_page(
         sender = sender_name if msg.get("user_type") == "sender" else receiver_name
         content_type = msg.get("content_type", 0)
         if content_type == 1:  # image
-            content = _format_image_message(msg.get("image"))
+            content = _format_image_message(msg.get("image"), msg.get("id"))
         else:
             content = _sanitize_html(msg.get("text", ""))
         time_str = fmt_time(msg.get("created_time"))
@@ -672,6 +698,9 @@ def interactive_chat(
             if content_type == "image":
                 img = content.get("image") or {}
                 img_url: str = img.get("url", "") if isinstance(img, dict) else ""
+                # Inject message_id so pic-private.zhihu.com URLs are viewable.
+                msg_id = meta.get("id") or data.get("id") or ""
+                img_url = _inject_message_id(img_url, msg_id)
                 text = f"![]({img_url})" if img_url else "[图片]"
             else:
                 text = content.get("text", "")
