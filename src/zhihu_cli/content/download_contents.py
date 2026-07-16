@@ -37,12 +37,15 @@ _HTML_IMG_RE = re.compile(r'<img[^>]*\ssrc="([^"]+)"[^>]*>')
 _ZHIMG_HOST_RE = re.compile(r"\.zhimg\.com$", re.IGNORECASE)
 
 
-def download_media_files(markdown: str, output_dir: str) -> tuple[str, int]:
+def download_media_files(markdown: str, output_dir: str, progress_callback: object = None) -> tuple[str, int]:
     """Download media files referenced in *markdown* and rewrite URLs to local paths.
 
     Files are saved to ``<output_dir>/media/``.  Image alt-text is preferred as
     the filename stem; when unavailable a hash of the URL is used.  The session
     singleton is reused so Zhihu CDN images are fetched with auth cookies.
+
+    If *progress_callback* is provided, it is called after each successful
+    download as ``callback(current: int, total: int)``.
 
     Returns ``(updated_markdown, downloaded_count)``.
     """
@@ -121,6 +124,8 @@ def download_media_files(markdown: str, output_dir: str) -> tuple[str, int]:
         rel_path = os.path.join("media", candidate)
         url_to_local[url] = rel_path
         downloaded += 1
+        if progress_callback is not None:
+            progress_callback(downloaded, len(pairs))  # type: ignore[call-arg]
 
     if not url_to_local:
         return markdown, 0

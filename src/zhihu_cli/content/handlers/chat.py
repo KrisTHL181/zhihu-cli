@@ -319,6 +319,120 @@ def send_image_message(their_id: str, file_path: str) -> dict[str, Any]:
     return data
 
 
+def export_chat_history(
+    chat_id: str,
+    output_dir: str,
+    limit: int = 0,
+) -> str:
+    """Export chat history to a markdown file with images downloaded locally.
+
+    Fetches all messages in the conversation, builds a markdown document
+    with YAML frontmatter, downloads referenced images to a ``media/``
+    subdirectory, and rewrites image URLs to local paths.  Regular links
+    in message text are preserved verbatim (only ``![alt](url)`` image
+    references are downloaded).
+
+    Progress is printed to stderr so ``--json`` stdout remains clean.
+
+    :param chat_id: The other user's ID (``sender_id`` API parameter).
+    :param output_dir: Directory to save the exported ``.md`` file and
+        ``media/`` subdirectory.
+    :param limit: Max messages to export (0 = all pages).
+    :returns: Absolute path to the saved markdown file.
+    """
+    import os
+    import re
+    import sys
+    from datetime import datetime
+
+    import click
+
+    from zhihu_cli.content.download_contents import (
+        build_yaml_frontmatter,
+        download_media_files,
+        get_safe_filename,
+        sanitize_filename,
+    )
+
+    # 1. Fetch all messages (resolve partner names from the first API page).
+    click.echo("  Fetching messages...", err=True)
+    partner_info: list[str] = []
+    msgs = list(iter_chat_history(chat_id, limit=limit, partner_info=partner_info))
+    click.echo(f"    {len(msgs)} messages fetched", err=True)
+
+    if len(partner_info) >= 2:
+        partner_name: str = partner_info[0]
+        my_name: str = partner_info[1]
+    else:
+        partner_name = chat_id
+        my_name = "Me"
+
+    # 2. Build a markdown document — one block per message, separated by
+    #    a blank line.  Multi-line message content is preserved as-is.
+    lines: list[str] = []
+    for msg in msgs:
+        t = msg["time"]
+        s = msg["sender"]
+        content = msg["content"]
+        if msg.get("is_canceled"):
+            lines.append(f"**[{t}] {s}**: ~~{content}~~ *(已撤回)*")
+        elif msg.get("is_risk_tip"):
+            lines.append(f"**[{t}]** *[风险提示]* {content}")
+        else:
+            lines.append(f"**[{t}] {s}**: {content}")
+
+    markdown = "\n\n".join(lines)
+
+    # 3. Download images referenced as ![](url) → local media/ directory.
+    #    Regular [text](url) links are left untouched.
+    img_urls: set[str] = set()
+    for m in re.finditer(r"!\[([^\]]*)\]\(([^)\s]+)\)", markdown):
+        img_urls.add(m.group(2))
+
+    if img_urls:
+        with click.progressbar(
+            length=len(img_urls),
+            label="  Downloading images",
+            file=sys.stderr,
+            show_pos=True,
+        ) as bar:
+
+            def _update(current: int, total: int) -> None:
+                bar.update(1)
+
+            markdown, media_count = download_media_files(markdown, output_dir, progress_callback=_update)
+        click.echo(f"    {media_count}/{len(img_urls)} images downloaded", err=True)
+    else:
+        markdown, media_count = download_media_files(markdown, output_dir)
+
+    # 4. Build YAML frontmatter and save.
+    now = datetime.now().strftime("%Y-%m-%d")
+    metadata: dict[str, str | int] = {
+        "title": f"Chat with {partner_name}",
+        "partner": partner_name,
+        "me": my_name,
+        "chat_id": chat_id,
+        "exported": now,
+        "message_count": len(msgs),
+    }
+    if media_count:
+        metadata["media_files"] = media_count
+
+    title = sanitize_filename(f"chat_{partner_name}")
+    filename = get_safe_filename(f"{title}_{now}", ext=".md", max_bytes=240)
+    filepath = os.path.join(output_dir, filename)
+
+    file_content = build_yaml_frontmatter(metadata) + markdown
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(file_content)
+
+    click.echo(f"  Saved to {filepath}", err=True)
+
+    return filepath
+
+
 def _fmt_chat_line(sender: str, content: str, ts: int | float | None) -> str:
     """Format a single chat line in chat-history style: ``[time]sender: content``.
 

@@ -185,6 +185,39 @@ def register_chat(main_group: click.Group) -> None:
             msg_id = resp.get("info", {}).get("id", "?")
             echo(f"  {f_green('Image sent')}  id={f_dim(msg_id)}")
 
+    @chat.command("export")
+    @click.argument("chat_id")
+    @click.option("--limit", "-n", type=int, default=0, help="Max messages to export (0 = all)")
+    @click.option(
+        "--output-dir",
+        "-o",
+        default=None,
+        help="Output directory (default: ~/.zhihu-cli/downloads/chats)",
+    )
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output result as JSON")
+    def chat_export(chat_id: str, limit: int, output_dir: str | None, output_json: bool) -> None:
+        """Export chat history to a markdown file with images downloaded locally.
+
+        Fetches the full conversation with CHAT_ID, builds a markdown document
+        with YAML frontmatter, downloads all referenced images to a media/
+        subdirectory, and rewrites image URLs to local relative paths.  Regular
+        links in message text are left unchanged.
+        """
+        from pathlib import Path
+
+        from zhihu_cli.content.handlers.chat import export_chat_history
+
+        if output_dir is None:
+            output_dir = str(Path.home() / ".zhihu-cli" / "downloads" / "chats")
+
+        filepath = export_chat_history(chat_id, output_dir, limit=limit)
+
+        if output_json:
+            print_json({"filepath": filepath, "chat_id": chat_id})
+        else:
+            echo(f"  {f_green('Exported')} chat with {f_name(chat_id)}")
+            echo(f"  {f_label('→')} {f_dim(filepath)}")
+
     @chat.command("interactive")
     @click.argument("user_id")
     @click.option("--sender", "-s", default=None, help="MQTT filter override (defaults to user_id)")
