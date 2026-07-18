@@ -89,28 +89,65 @@ def _cmd_unsend(app: Any, args: str) -> bool:
 
 
 def _cmd_postimg(app: Any, args: str) -> bool:
-    """Upload and send an image file.
+    """Upload and send an image.
 
-    *args* must be a file path to an image on disk.
+    *args* can be a local file path or an image URL (``http://`` / ``https://``).
+    URL images are downloaded to a temporary file first.
 
     :param app: The :class:`~textual.app.App` instance.
-    :param args: File path string (everything after ``/postimg``).
+    :param args: File path or URL string (everything after ``/postimg``).
     :returns: ``True`` when the upload is initiated, ``False`` when *args*
         is empty (usage info displayed).
     """
     if not args or not args.strip():
         log = app.query_one("#messages", RichLog)
-        log.write("  [bold yellow]用法:[/bold yellow] /postimg <图片路径>")
+        log.write("  [bold yellow]用法:[/bold yellow] /postimg <图片路径或URL>")
         return False
 
-    file_path = str(Path(args.strip()).expanduser().resolve())
+    args = args.strip()
     log = app.query_one("#messages", RichLog)
+
+    # Detect URL vs local path
+    _tmp_file: str | None = None
+    if args.startswith(("http://", "https://")):
+        import os
+        import tempfile
+        from urllib.parse import urlparse
+
+        try:
+            from zhihu_cli.content.handlers.requests import session
+
+            parsed = urlparse(args)
+            ext = os.path.splitext(parsed.path)[1].lower()
+            if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
+                ext = ".jpg"
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            tmp_path: str = tmp.name
+            tmp.close()
+
+            resp = session.get(args, timeout=30)
+            resp.raise_for_status()
+            data = resp.content
+
+            with open(tmp_path, "wb") as f:
+                f.write(data)
+
+            file_path = str(Path(tmp_path).resolve())
+            _tmp_file = file_path
+            log.write(f"  [dim]图片已下载: {len(data)} bytes[/dim]")
+        except Exception as exc:
+            log.write(f"  [bold red]下载图片失败:[/bold red] {exc}")
+            return False
+    else:
+        file_path = str(Path(args).expanduser().resolve())
 
     def _do_send_image() -> None:
         import os
 
         if not os.path.isfile(file_path):
             app.call_from_thread(log.write, f"  [bold red]文件不存在:[/bold red] {file_path}")
+            _cleanup_tmp()
             return
         try:
             from zhihu_cli.content.handlers.chat import send_image_message
@@ -128,6 +165,18 @@ def _cmd_postimg(app: Any, args: str) -> bool:
             )
         except Exception as exc:
             app.call_from_thread(log.write, f"  [bold red]发送图片失败:[/bold red] {exc}")
+        finally:
+            _cleanup_tmp()
+
+    def _cleanup_tmp() -> None:
+        """Remove the temporary file if one was created from a URL download."""
+        if _tmp_file:
+            try:
+                import os as _os
+
+                _os.unlink(_tmp_file)
+            except OSError:
+                pass
 
     app.run_worker(_do_send_image, thread=True)
     return True
@@ -219,4 +268,4 @@ def register_builtin_commands(registry: ChatCommandRegistry) -> None:
     registry.register("q", "退出聊天会话 (同 /quit, /exit)", _cmd_quit)
     registry.register("help", "显示所有可用命令", _cmd_help)
     registry.register("unsend", "撤回消息 — /unsend 选择最近消息, /unsend <id> 直接撤回", _cmd_unsend)
-    registry.register("postimg", "发送图片 — /postimg <图片路径>", _cmd_postimg)
+    registry.register("postimg", "发送图片 — /postimg <图片路径或URL链接>", _cmd_postimg)
