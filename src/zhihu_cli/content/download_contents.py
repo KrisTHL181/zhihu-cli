@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from zhihu_cli.content.handlers.article import fetch_article_item
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
@@ -489,39 +490,31 @@ class ContentDownloader:
         """Fetch and convert a single article. Returns (metadata, markdown_content)."""
         if not self.headers:
             raise RuntimeError("Headers not loaded")
-        html_content = fetch_page_html(url)
+        article = fetch_article_item(url)
 
-        entities = get_page_state(html_content)
-        articles = entities.get("articles", {})
-        if articles:
-            article = next(iter(articles.values()))
+        # ── metadata from structured entity data ──────────────
+        title = article.get("title", "untitled")
+        title = html.unescape(title).strip().replace("/", "_")
 
-            # ── metadata from structured entity data ──────────────
-            title = article.get("title", "untitled")
-            title = html.unescape(title).strip().replace("/", "_")
+        author_info = article.get("author", {}) or {}
+        author = author_info.get("name", "unknown")
+        author = html.unescape(author).strip().replace("/", "_")
 
-            author_info = article.get("author", {}) or {}
-            author = author_info.get("name", "unknown")
-            author = html.unescape(author).strip().replace("/", "_")
+        created = ""
+        created_ts = article.get("created")
+        if created_ts:
+            try:
+                if isinstance(created_ts, (int, float)) and created_ts > 1e12:
+                    created_ts = created_ts / 1000
+                created = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
+            except (ValueError, OSError):
+                pass
 
-            created = ""
-            created_ts = article.get("created")
-            if created_ts:
-                try:
-                    if isinstance(created_ts, (int, float)) and created_ts > 1e12:
-                        created_ts = created_ts / 1000
-                    created = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
-                except (ValueError, OSError):
-                    pass
+        metadata = {"title": title, "author": author, "created": created}
 
-            metadata = {"title": title, "author": author, "created": created}
-
-            # Use the article content from the entity directly (cleaner
-            # than parsing the full page HTML — fewer lingering HTML
-            # entities, and matches what scrape_article() does).
-            content_html = article.get("content", "")
-            markdown_content = self.md_converter.convert(content_html, url)
-            return metadata, markdown_content
+        content_html = article.get("content", "")
+        markdown_content = self.md_converter.convert(content_html, url)
+        return metadata, markdown_content
 
     def download_articles(self, urls: list[str], delay: float = 1.0) -> list[dict]:
         """Download article pages and convert to Markdown.
