@@ -1,3 +1,4 @@
+import json
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -40,7 +41,16 @@ def stream_handler(
         resp.raise_for_status()
         data = resp.json()
 
-        paging = data.get("paging", {})
+        paging_raw = data.get("paging", {})
+        # Some endpoints (e.g. next-content-render) return paging as a
+        # JSON-encoded string rather than a dict — normalise it here.
+        if isinstance(paging_raw, str):
+            try:
+                paging = json.loads(paging_raw)
+            except (json.JSONDecodeError, TypeError):
+                paging = {}
+        else:
+            paging = paging_raw
         # Capture totals from the first page that reports a non-zero value.
         if api_totals == 0:
             api_totals = paging.get("totals", 0) or 0
