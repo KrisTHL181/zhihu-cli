@@ -38,12 +38,19 @@ ZHIHU_PIN_PATTERN = r"https?://(?:www\.)?zhihu\.com/pin/([^/?#]+)"
 ZHIHU_ZVIDEO_PATTERN = r"https?://(?:www\.)?zhihu\.com/zvideo/(\d+)"
 ZHIHU_COLLECTION_PATTERN = r"https?://(?:www\.)?zhihu\.com/collection/(\d+)"
 ZHIHU_CONSULT_CONVERSATION_PATTERN = r"https?://(?:www\.)?zhihu\.com/consult/conversation/(\d+)(?:/answer)?"
+ZHIHU_PAID_COLUMN_SECTION_PATTERN = r"https?://(?:www\.)?zhihu\.com/market/paid_column/(\d+)/section/(\d+)"
 
 
 def get_type_and_id(url: str) -> tuple[str | None, str | None]:
     """
     Returns (type, id).
-    type: 'articles', 'questions', 'answers', 'pins', 'zvideos', or None.
+
+    type: ``"articles"``, ``"questions"``, ``"answers"``, ``"pins"``,
+    ``"zvideos"``, ``"collections"``, ``"consult_conversations"``,
+    ``"paid_column_section"``, or ``None``.
+
+    For ``"answers"`` the id is ``"question_id/answer_id"`` (composite).
+    For ``"paid_column_section"`` the id is ``"column_id/section_id"``.
     """
     match = re.search(ZHIHU_ARTICLE_PATTERN, url)
     if match:
@@ -79,6 +86,11 @@ def get_type_and_id(url: str) -> tuple[str | None, str | None]:
     match = re.search(ZHIHU_CONSULT_CONVERSATION_PATTERN, url)
     if match:
         return ("consult_conversations", match.group(1))
+
+    match = re.search(ZHIHU_PAID_COLUMN_SECTION_PATTERN, url)
+    if match:
+        # Composite ID: "column_id/section_id" (analogous to answers)
+        return ("paid_column_section", f"{match.group(1)}/{match.group(2)}")
 
     return (None, None)
 

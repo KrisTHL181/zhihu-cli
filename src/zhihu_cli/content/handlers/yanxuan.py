@@ -2,6 +2,9 @@
 
 Fetches paginated text segments from Zhihu's next-content-render API
 and assembles them for terminal reading.
+
+Also supports parsing paid-column section pages
+(``/market/paid_column/{id}/section/{id}``) via SSR state extraction.
 """
 
 from __future__ import annotations
@@ -12,9 +15,14 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 NEXT_CONTENT_RENDER = "https://api.zhihu.com/next-content-render"
+
+#: Matches paid-column section URLs:
+#: ``https://www.zhihu.com/market/paid_column/<column_id>/section/<section_id>``
+PAID_COLUMN_SECTION_RE = re.compile(r"https?://(?:www\.)?zhihu\.com/market/paid_column/(\d+)/section/(\d+)")
 
 
 def extract_url_token(input_str: str) -> str:
@@ -24,9 +32,16 @@ def extract_url_token(input_str: str) -> str:
     - Raw answer ID: ``"2541691985"``
     - Composite ID:   ``"question_id/2541691985"``
     - Full URL:       ``"https://www.zhihu.com/question/xxx/answer/2541691985"``
+    - Paid column:    ``"https://www.zhihu.com/market/paid_column/<id>/section/<id>"``
     """
     # If it looks like a URL, parse it
     if input_str.startswith("http://") or input_str.startswith("https://"):
+        # Paid column section URL
+        pc_match = PAID_COLUMN_SECTION_RE.search(input_str)
+        if pc_match:
+            # Use section_id as the url_token
+            return pc_match.group(2)
+
         # /question/<qid>/answer/<aid>
         m = re.search(r"/answer/(\d+)", input_str)
         if m:
@@ -47,6 +62,11 @@ def extract_url_token(input_str: str) -> str:
         return input_str.split("/")[1]
 
     return input_str
+
+
+def is_paid_column_section_url(url: str) -> bool:
+    """Check if *url* is a paid-column section page URL."""
+    return bool(PAID_COLUMN_SECTION_RE.search(url))
 
 
 def _extract_card_meta(card_segment: dict[str, Any]) -> dict[str, str]:
@@ -105,6 +125,156 @@ def _segment_marks(seg: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(block, dict):
         return block.get("marks", [])
     return []
+
+
+# ── SSR page parsing (paid column sections) ──────────────────────────────────
+
+
+def _extract_ssr_state(html: str) -> dict[str, Any]:
+    """Extract the SSR Redux state JSON from a manuscript/paid-column page.
+
+    The state is embedded as a flat JSON object inside the HTML.  We locate
+    it by scanning for the ``__connectedAutoFetch`` key which is unique to
+    the manuscript SSR payload.
+
+    :param html: Raw HTML of the manuscript page.
+    :returns: Parsed SSR state dict.
+    :raises ValueError: If the SSR state cannot be found or parsed.
+    """
+    pos = html.find("__connectedAutoFetch")
+    if pos < 0:
+        raise ValueError("Cannot find SSR state marker '__connectedAutoFetch' in page HTML")
+
+    # Walk backwards to find the opening brace of the outermost JSON object
+    depth = 0
+    start = pos
+    for i in range(pos, -1, -1):
+        if html[i] == "}":
+            depth += 1
+        elif html[i] == "{":
+            depth -= 1
+            if depth < 0:
+                start = i
+                break
+
+    # Walk forwards to find the matching closing brace
+    depth = 0
+    end = pos
+    for i in range(start, len(html)):
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    state_json = html[start:end]
+    try:
+        return json.loads(state_json)  # type: ignore[no-any-return]
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse SSR state JSON: {e}") from e
+
+
+def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Parse manuscript content from a paid-column section SSR state.
+
+    Extracts metadata (title, author, brand) and segment list from the
+    ``__connectedAutoFetch.manuscript.data.manuscriptData`` subtree.
+
+    .. note::
+
+       The manuscript text is **font-scrambled** (a custom substitution
+       cipher where glyphs are swapped via an obfuscated font file).
+       Descrambling requires decoding the ``font.base64`` / ``pFont.base64``
+       fields — this is not yet implemented.  Returned segments contain
+       the scrambled text as-is.
+
+    :param state: Parsed SSR state dict.
+    :returns: Tuple of ``(meta, segments)`` — same shape as
+              :func:`fetch_yanxuan_segments`.
+    """
+    ms = state["__connectedAutoFetch"]["manuscript"]
+    md = ms["data"]["manuscriptData"]
+
+    # ── metadata ──────────────────────────────────────────────────────────
+    pc = md.get("paid_column", {})
+    authors = pc.get("authors", [])
+    author_name = authors[0].get("name", "") if authors else ""
+
+    meta: dict[str, str] = {
+        "title": md.get("recommend_title") or md.get("title", ""),
+        "brand": "盐选专栏",
+        "column_title": pc.get("title", ""),
+    }
+    if author_name:
+        meta["author"] = author_name
+    section_type = md.get("section_type", "")
+    if section_type:
+        meta["section_type"] = section_type
+    meta["like_count"] = str(md.get("like_count", 0))
+
+    # ── segments ──────────────────────────────────────────────────────────
+    segments: list[dict[str, Any]] = []
+    ptags = md.get("pTagList", [])
+
+    for i, p_html in enumerate(ptags):
+        # Strip HTML tags to get the (possibly scrambled) plain text
+        text = re.sub(r"<[^>]+>", "", p_html).strip()
+        # Skip the vip yxcode watermark paragraph
+        if text.startswith("备案号:") or text.startswith("备案号："):
+            continue
+        if text:
+            segments.append(
+                {
+                    "id": str(i),
+                    "type": "paragraph",
+                    "text": text,
+                    "marks": [],
+                }
+            )
+
+    return meta, segments
+
+
+def _fetch_paid_column_section_page(url: str) -> str:
+    """Fetch the full HTML of a paid-column section page.
+
+    Uses the global :data:`session` so authentication headers and ZSE
+    signing are applied automatically.
+
+    :param url: The full paid-column section URL.
+    :returns: Raw HTML string.
+    :raises requests.HTTPError: If the page cannot be fetched.
+    """
+    resp = session.get(url, headers={"User-Agent": session.headers.get("User-Agent", "")})
+    resp.raise_for_status()
+    return resp.text
+
+
+def fetch_paid_column_section_segments(
+    url: str,
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Fetch and parse a paid-column section page into segments.
+
+    This is the SSR-based equivalent of :func:`fetch_yanxuan_segments`
+    for URLs matching ``/market/paid_column/*/section/*``.  It fetches
+    the page HTML, extracts the SSR Redux state, and parses the embedded
+    manuscript data.
+
+    :param url: Full URL of the paid-column section page.
+    :returns: Tuple of ``(meta, segments)`` with the same shape as
+              :func:`fetch_yanxuan_segments`.
+    :raises ValueError: If the URL does not match the expected pattern.
+    :raises requests.HTTPError: If the page fetch fails.
+    """
+    match = PAID_COLUMN_SECTION_RE.search(url)
+    if not match:
+        raise ValueError(f"URL does not match paid column section pattern: {url}")
+
+    html = _fetch_paid_column_section_page(url)
+    state = _extract_ssr_state(html)
+    return _parse_manuscript_from_ssr(state)
 
 
 def fetch_yanxuan_segments(

@@ -29,7 +29,13 @@ from zhihu_cli.content.handlers.question import scrape_answer_page, scrape_answe
 from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.segment_comments import fetch_segment_comments
 from zhihu_cli.content.handlers.upvoter import fetch_upvoters
-from zhihu_cli.content.handlers.yanxuan import extract_url_token, fetch_yanxuan_segments, segments_to_text
+from zhihu_cli.content.handlers.yanxuan import (
+    extract_url_token,
+    fetch_paid_column_section_segments,
+    fetch_yanxuan_segments,
+    is_paid_column_section_url,
+    segments_to_text,
+)
 from zhihu_cli.output import (
     blank,
     echo,
@@ -637,17 +643,25 @@ def register_browse(main_group):
         """Read Zhihu Yanxuan (盐选) premium content in the terminal.
 
         URL_OR_ID can be a full answer URL, a composite question_id/answer_id,
-        or a raw answer ID (url_token).
+        a raw answer ID (url_token), or a paid-column section URL
+        (``/market/paid_column/*/section/*``).
         """
         set_json_mode(output_json)
-        url_token = extract_url_token(url_or_id)
 
-        meta, segments = fetch_yanxuan_segments(
-            url_token,
-            offset=offset,
-            max_segments=max_segments,
-            max_pages=max_pages,
-        )
+        # Paid column section URLs use SSR page parsing
+        if is_paid_column_section_url(url_or_id):
+            meta, segments = fetch_paid_column_section_segments(url_or_id)
+            # Honour max_segments as a cap on returned segments
+            if max_segments is not None and len(segments) > max_segments:
+                segments = segments[:max_segments]
+        else:
+            url_token = extract_url_token(url_or_id)
+            meta, segments = fetch_yanxuan_segments(
+                url_token,
+                offset=offset,
+                max_segments=max_segments,
+                max_pages=max_pages,
+            )
 
         if output_json:
             print_json({"meta": meta, "segments": segments})
