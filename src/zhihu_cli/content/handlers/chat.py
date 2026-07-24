@@ -273,6 +273,50 @@ def unsend_message(message_id: str) -> dict[str, Any]:
     return data
 
 
+def mark_inbox_read(
+    threads: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Mark inbox threads as read by accessing each conversation.
+
+    Calling :func:`iter_chat_history` on a conversation triggers Zhihu to
+    mark its messages as read on the server side.  This function fetches
+    just one message per thread — enough to flip the unread flag without
+    pulling the full history.
+
+    :param threads: Inbox thread dicts (as returned by :func:`get_inbox`).
+        If ``None``, all threads with ``unread_count > 0`` are fetched
+        automatically.
+    :returns: A tuple of ``(marked, skipped)`` — *marked* is the list of
+        thread dicts that were successfully processed, *skipped* is the
+        count of threads that failed (e.g. empty conversation or API error).
+    """
+    if threads is None:
+        threads, _ = get_inbox(unread_only=True)
+        threads = [m for m in threads if m.get("id") and m["unread_count"] > 0]
+
+    if not threads:
+        return [], 0
+
+    marked: list[dict[str, Any]] = []
+    skipped = 0
+    for t in threads:
+        tid = t.get("id")
+        if not tid:
+            skipped += 1
+            continue
+        try:
+            # Fetch just 1 message — Zhihu marks the conversation as read.
+            msgs = list(iter_chat_history(tid, limit=1))
+            if msgs:
+                marked.append(t)
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+
+    return marked, skipped
+
+
 def send_text_message(their_id: str, content: str) -> dict[str, Any]:
     resp = session.post(
         "https://www.zhihu.com/api/v4/chat", json={"content_type": 0, "text": content, "receiver_id": their_id}

@@ -14,6 +14,7 @@ from zhihu_cli.content.handlers.chat import (
     get_inbox,
     interactive_chat,
     iter_chat_history,
+    mark_inbox_read,
     send_image_message,
     send_text_message,
     unsend_message,
@@ -99,6 +100,69 @@ def register_chat(main_group: click.Group) -> None:
                 f"    {f_label('id=')}{msg['id']}  {f_label('token=')}{msg['url_token']}  {f_label('time=')}{f_meta(msg['updated_time'])}"
             )
             blank()
+
+    @chat.command("clear")
+    @click.option("--dry-run", is_flag=True, default=False, help="Show what would be marked without doing it")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output result as JSON")
+    def chat_clear(dry_run: bool, output_json: bool) -> None:
+        """Mark all unread inbox threads as read.
+
+        Fetches the inbox for unread threads, then accesses each
+        conversation briefly so Zhihu automatically flips the unread flag.
+        """
+        if dry_run:
+            messages, total_unread = get_inbox(unread_only=True)
+            if output_json:
+                print_json(
+                    {
+                        "dry_run": True,
+                        "unread_threads": len(messages),
+                        "total_unread": total_unread,
+                        "threads": messages,
+                    }
+                )
+            else:
+                if not messages:
+                    info("No unread threads.")
+                    return
+                echo(
+                    f"  {f_label('Would mark')} {f_num(len(messages))} {f_label('threads as read')} ({f_num(total_unread)} {f_dim('total unread messages')})"
+                )
+                blank()
+                for msg in messages:
+                    echo(
+                        f"  {f_tag(f'{msg["unread_count"]} unread')} {f_name(msg['from'])}  {f_dim(f'id={msg["id"]}')}"
+                    )
+                blank()
+            return
+
+        messages, _ = get_inbox(unread_only=True)
+        threads = [m for m in messages if m.get("id") and m["unread_count"] > 0]
+
+        if not threads:
+            if output_json:
+                print_json({"marked": [], "skipped": 0, "message": "No unread threads."})
+            else:
+                info("No unread threads — inbox is already clean.")
+            return
+
+        if not output_json:
+            info(f"Marking {len(threads)} thread(s) as read...")
+        marked, skipped = mark_inbox_read(threads)
+
+        if output_json:
+            print_json({"marked": marked, "skipped": skipped})
+        else:
+            if skipped:
+                echo(f"  {f_green('Done')} — marked {f_num(len(marked))} as read, {f_dim(f'{skipped} skipped')}")
+            else:
+                echo(f"  {f_green('Done')} — marked {f_num(len(marked))} as read")
+            if marked:
+                blank()
+                for msg in marked:
+                    echo(
+                        f"  {f_tag(f'{msg["unread_count"]} unread')} {f_name(msg['from'])}  {f_dim(f'id={msg["id"]}')}"
+                    )
 
     @chat.command("history")
     @click.argument("chat_id")
