@@ -374,6 +374,27 @@ def register_tools(main_group):
 
         plot_content_metrics(no_pv=no_pv, no_show=no_show)
 
+    @tools_creator.command("stats")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    @click.option("--aggr", is_flag=True, default=False, help="Force aggregated format (only use --aggr files)")
+    def creator_stats(output_json: bool, aggr: bool) -> None:
+        """Compute descriptive statistics from all content_metrics/*.json files.
+
+        Scans every metrics file in ~/.zhihu-cli/exports/content_metrics/,
+        auto-detects daily vs. aggregated (--aggr) format, and prints
+        comprehensive statistics: per-metric summaries, daily aggregate
+        stats, per-type breakdowns, and top-performing content.
+
+        Use --aggr to force the aggregated view (only reads files fetched
+        with 'zhihu tools creator metrics --aggr').  Without --aggr,
+        daily time-series files are preferred when both formats are present.
+
+        Use --json for machine-readable output.
+        """
+        from zhihu_cli.creator_tools.stats_content_metrics import compute_and_display_stats
+
+        compute_and_display_stats(output_json=output_json, aggr=aggr)
+
     @tools_creator_income.command("income")
     @click.option("--start-date", default=None, help="Start date (YYYY-MM-DD), default: 30 days ago")
     @click.option("--end-date", default=None, help="End date (YYYY-MM-DD), default: today")
