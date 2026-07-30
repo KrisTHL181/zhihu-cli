@@ -78,12 +78,17 @@ def parse_frontmatter_field(filepath: Path, field: str) -> str | None:
     return None
 
 
-def generate_filename(author: str, title: str, created: str) -> str:
-    """Generate Hall-of-Flames-style filename: {YYYY-MM-DD}_{author}_{title}.md"""
+def generate_filename(author: str, title: str, created: str, article_id: str | None = None) -> str:
+    """Generate Hall-of-Flames-style filename: {YYYY-MM-DD}_{author}_{title}.md
+
+    When *article_id* is provided, it is appended to prevent collisions when
+    the same author publishes same-titled articles on the same day.
+    """
     safe_author = sanitize_filename(author)
     safe_title = sanitize_filename(title)
     date_str = created if created else "unknown"
-    full_name = f"{date_str}_{safe_author}_{safe_title}"
+    id_part = f"_{article_id}" if article_id else ""
+    full_name = f"{date_str}_{safe_author}_{safe_title}{id_part}"
     return get_safe_filename(full_name, ext=".md", max_bytes=240)
 
 
@@ -381,7 +386,8 @@ class CrankMonitor:
                 except Exception as e:
                     print(f"      [classify] failed: {e}", file=sys.stderr)
 
-            filename = generate_filename(author, title, created)
+            article_id = extract_article_id(art_url)
+            filename = generate_filename(author, title, created, article_id=article_id)
             filepath = target_dir / filename
 
             meta: dict[str, str] = {
@@ -429,7 +435,10 @@ class CrankMonitor:
                 print(f"      [error] Sample download failed: {e}", file=sys.stderr)
                 continue
             title = metadata.get("title") or art.get("title") or "untitled"
-            filename = generate_filename(author_name, title, (metadata.get("created_time") or "")[:10] or "unknown")
+            article_id = extract_article_id(art_url)
+            filename = generate_filename(
+                author_name, title, (metadata.get("created_time") or "")[:10] or "unknown", article_id=article_id
+            )
             samples.append((filename, markdown))
             wait(1.0)
 
