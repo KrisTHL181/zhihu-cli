@@ -139,11 +139,20 @@ class CrankMonitor:
         with open(self.registry_path, "w", encoding="utf-8") as f:
             json.dump(self.registry, f, ensure_ascii=False, indent=2)
 
-    def upsert_author(self, name: str, zhihu_token: str, series_dir: str, since: str | None = None) -> None:
+    def upsert_author(
+        self, name: str, zhihu_token: str, series_dir: str, since: str | None = None, aliases: list[str] | None = None
+    ) -> None:
         """Add a new author or update an existing one in the registry.
 
         Unlike ``bootstrap_registry``, this fills in *zhihu_token* immediately
         so the author is ready for ``crank fetch`` without manual editing.
+
+        :param name: Display name of the author.
+        :param zhihu_token: Primary Zhihu URL token.
+        :param series_dir: Directory name under ``papers/`` for this author's series.
+        :param since: Only fetch articles created on or after this date.
+        :param aliases: Additional Zhihu URL tokens (alt accounts / sock puppets)
+                        that also belong to this author.
         """
         self.load_registry()
         for a in self.registry["authors"]:
@@ -154,6 +163,8 @@ class CrankMonitor:
                     a["since"] = since
                 elif "since" in a:
                     del a["since"]
+                if aliases is not None:
+                    a["aliases"] = aliases
                 self.save_registry()
                 print(f"Updated author in registry: {name} (token: {zhihu_token})")
                 return
@@ -165,6 +176,8 @@ class CrankMonitor:
         }
         if since:
             entry["since"] = since
+        if aliases:
+            entry["aliases"] = aliases
         self.registry["authors"].append(entry)
         self.save_registry()
         print(f"Added author to registry: {name} (token: {zhihu_token})")
@@ -176,12 +189,24 @@ class CrankMonitor:
         if not authors:
             print("No authors in registry. Run 'zhihu crank bootstrap' or 'zhihu crank archive' first.")
             return
-        print("\t".join(["Name", "Token", "Series", "Since", "Enabled"]))
-        print("-" * 100)
+        print("\t".join(["Name", "Token", "Aliases", "Series", "Since", "Enabled"]))
+        print("-" * 120)
         for a in authors:
             enabled = "yes" if a.get("enabled", True) else "no"
             since = a.get("since", "-")
-            print("\t".join([a["name"], a.get("zhihu_token", ""), a.get("series_dir", ""), since, enabled]))
+            aliases = ", ".join(a.get("aliases", [])) or "-"
+            print(
+                "\t".join(
+                    [
+                        a["name"],
+                        a.get("zhihu_token", ""),
+                        aliases,
+                        a.get("series_dir", ""),
+                        since,
+                        enabled,
+                    ]
+                )
+            )
 
     def remove_author(self, name: str) -> bool:
         """Remove an author from the registry by name.
@@ -197,6 +222,86 @@ class CrankMonitor:
                 return True
         print(f"Author not found in registry: {name}", file=sys.stderr)
         return False
+
+    # ── alias management ─────────────────────────────────────────────────
+
+    def add_alias(self, name: str, alias_token: str) -> bool:
+        """Add an alias token to an existing author.
+
+        :param name: Author display name in the registry.
+        :param alias_token: The additional Zhihu URL token to add as an alias.
+        :returns: True if the alias was added, False if the author wasn't found
+                  or the alias already exists.
+        """
+        alias_token = alias_token.strip()
+        self.load_registry()
+        for a in self.registry["authors"]:
+            if a["name"] == name:
+                existing_aliases: list[str] = a.get("aliases", [])
+                primary = a.get("zhihu_token", "")
+                if alias_token == primary:
+                    print(f"Alias '{alias_token}' is already the primary token for {name}.", file=sys.stderr)
+                    return False
+                if alias_token in existing_aliases:
+                    print(f"Alias '{alias_token}' already exists for {name}.", file=sys.stderr)
+                    return False
+                existing_aliases.append(alias_token)
+                a["aliases"] = existing_aliases
+                self.save_registry()
+                print(f"Added alias '{alias_token}' to author: {name}")
+                return True
+        print(f"Author not found in registry: {name}", file=sys.stderr)
+        return False
+
+    def remove_alias(self, name: str, alias_token: str) -> bool:
+        """Remove an alias token from an author.
+
+        :param name: Author display name in the registry.
+        :param alias_token: The alias token to remove.
+        :returns: True if the alias was removed, False otherwise.
+        """
+        alias_token = alias_token.strip()
+        self.load_registry()
+        for a in self.registry["authors"]:
+            if a["name"] == name:
+                existing_aliases: list[str] = a.get("aliases", [])
+                if alias_token not in existing_aliases:
+                    print(f"Alias '{alias_token}' not found for {name}.", file=sys.stderr)
+                    return False
+                existing_aliases.remove(alias_token)
+                if existing_aliases:
+                    a["aliases"] = existing_aliases
+                elif "aliases" in a:
+                    del a["aliases"]
+                self.save_registry()
+                print(f"Removed alias '{alias_token}' from author: {name}")
+                return True
+        print(f"Author not found in registry: {name}", file=sys.stderr)
+        return False
+
+    def list_aliases(self, name: str | None = None) -> None:
+        """Print aliases for one or all authors.
+
+        :param name: If given, only show aliases for this author.
+        """
+        self.load_registry()
+        authors = self.registry.get("authors", [])
+        shown = 0
+        for a in authors:
+            if name and a["name"] != name:
+                continue
+            shown += 1
+            primary = a.get("zhihu_token", "")
+            aliases = a.get("aliases", [])
+            print(f"{a['name']}:")
+            print(f"  primary: {primary or '(none)'}")
+            if aliases:
+                for i, alias in enumerate(aliases, 1):
+                    print(f"  alias {i}: {alias}")
+            else:
+                print("  (no aliases)")
+        if shown == 0 and name:
+            print(f"Author not found in registry: {name}", file=sys.stderr)
 
     def bootstrap_registry(self) -> int:
         """Scan serial papers directories and build initial registry entries.
@@ -271,13 +376,32 @@ class CrankMonitor:
 
     # ── per-author operations ───────────────────────────────────────────
 
+    def _get_all_tokens(self, author_entry: dict[str, Any]) -> list[str]:
+        """Return all tokens for an author: primary token + aliases.
+
+        Empty strings and duplicates are filtered out.
+        """
+        tokens: list[str] = []
+        primary = author_entry.get("zhihu_token", "")
+        if primary:
+            tokens.append(primary)
+        for alias in author_entry.get("aliases", []):
+            alias = alias.strip()
+            if alias and alias not in tokens:
+                tokens.append(alias)
+        return tokens
+
     def check_author(self, author_entry: dict[str, Any]) -> list[dict[str, Any]]:
         """Fetch article list and return only articles NOT already downloaded.
 
+        Fetches from all tokens (primary + aliases) and deduplicates by
+        article ID so that alt accounts' articles all land in the same
+        series directory.
+
         Returns a list of raw article dicts from the API.
         """
-        token = author_entry.get("zhihu_token", "")
-        if not token:
+        tokens = self._get_all_tokens(author_entry)
+        if not tokens:
             print(f"  [skip] {author_entry['name']}: no zhihu_token set")
             return []
 
@@ -286,11 +410,35 @@ class CrankMonitor:
         if series_dir:
             existing_ids = self._get_existing_article_ids(series_dir)
 
-        print(f"  Fetching article list for {author_entry['name']} (token={token})...")
-        try:
-            all_articles = fetch_article_list(token)
-        except Exception as e:
-            print(f"  [error] Failed to fetch articles for {author_entry['name']}: {e}", file=sys.stderr)
+        # Fetch from all tokens and merge
+        all_articles: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()  # deduplicate across tokens within this run
+
+        for i, token in enumerate(tokens):
+            label = "primary" if i == 0 else f"alias #{i}"
+            print(f"  Fetching article list for {author_entry['name']} ({label}, token={token})...")
+            try:
+                articles = fetch_article_list(token)
+            except Exception as e:
+                print(f"  [error] Failed to fetch articles for token {token}: {e}", file=sys.stderr)
+                continue
+
+            # Dedup across tokens within this run
+            for art in articles:
+                art_url = art.get("url", "")
+                aid = extract_article_id(art_url) if art_url else None
+                if aid and aid not in seen_ids:
+                    seen_ids.add(aid)
+                    all_articles.append(art)
+                elif not aid:
+                    all_articles.append(art)
+
+            print(f"    → {len(articles)} articles (running total: {len(all_articles)})")
+
+        if len(tokens) > 1:
+            print(f"  Combined: {len(all_articles)} unique articles across {len(tokens)} tokens")
+
+        if not all_articles:
             return []
 
         # Apply since filter if author has one
@@ -735,8 +883,67 @@ def register_commands(main_group: click.Group) -> None:
 
         zhihu_token = _click.prompt("Zhihu URL token (e.g. mersenne-20)", type=str).strip()
 
+        # Optionally add aliases (alt account tokens)
+        aliases: list[str] = []
+        while True:
+            alias = _click.prompt(
+                "Alias token — alt account (enter to skip)",
+                type=str,
+                default="",
+                show_default=False,
+            ).strip()
+            if not alias:
+                break
+            if alias == zhihu_token:
+                _click.echo("Alias token must be different from the primary token.", err=True)
+                continue
+            if alias in aliases:
+                _click.echo("Alias already added.", err=True)
+                continue
+            aliases.append(alias)
+            _click.echo(f"  Added alias: {alias}")
+
         mon = CrankMonitor()
-        mon.upsert_author(name, zhihu_token, series_dir)
+        mon.upsert_author(name, zhihu_token, series_dir, aliases=aliases if aliases else None)
+        if aliases:
+            _click.echo(f"Registered {name} with {len(aliases)} alias(es).")
+
+    # ── alias subcommand group ───────────────────────────────────────────
+
+    @crank_group.group(name="alias")
+    def crank_alias_group() -> None:
+        """Manage alias tokens (alt accounts) for crank authors."""
+
+    @crank_alias_group.command("add")
+    @_click.option("--author", "-a", "author_name", required=True, help="Author display name")
+    @_click.argument("token")
+    def crank_alias_add(author_name: str, token: str) -> None:
+        """Add an alias token (alt account) to an author.
+
+        All articles from the alias token will be fetched into the same
+        series directory as the primary token.
+
+        \b
+        Example:
+            zhihu crank alias add -a "段王爷" duan-wang-ye-2
+        """
+        mon = CrankMonitor()
+        mon.add_alias(author_name, token)
+
+    @crank_alias_group.command("remove")
+    @_click.option("--author", "-a", "author_name", required=True, help="Author display name")
+    @_click.argument("token")
+    def crank_alias_remove(author_name: str, token: str) -> None:
+        """Remove an alias token from an author."""
+        mon = CrankMonitor()
+        mon.remove_alias(author_name, token)
+
+    @crank_alias_group.command("list")
+    @_click.option("--author", "-a", "author_name", default=None, help="Only show aliases for a specific author")
+    def crank_alias_list(author_name: str | None) -> None:
+        """List alias tokens for authors in the registry."""
+        mon = CrankMonitor()
+        mon.list_aliases(author_name)
 
     # ── classify subcommand group ──────────────────────────────────────
 
