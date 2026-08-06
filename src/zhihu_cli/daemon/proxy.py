@@ -62,6 +62,53 @@ _WIRE_KWARGS = frozenset(
 )
 
 
+class _StreamResponse:
+    """Wraps a real curl_cffi streaming response for ``stream=True`` requests.
+
+    Created by :meth:`DaemonProxySession._stream_direct` when a caller
+    passes ``stream=True`` — the daemon protocol cannot relay real-time
+    chunks, so we bypass the daemon and create a temporary direct session.
+
+    Provides the subset of :class:`curl_cffi.requests.Response` that
+    streaming callers need: :meth:`iter_lines`, :meth:`raise_for_status`,
+    ``status_code``, ``headers``, and :meth:`close` (which also closes
+    the underlying session).
+    """
+
+    def __init__(self, resp: Any, session: Any) -> None:
+        self._resp = resp
+        self._session = session
+        self.status_code: int = resp.status_code
+        self.headers: dict[str, str] = dict(resp.headers)
+        self.url: str = str(getattr(resp, "url", ""))
+        self.reason: str = getattr(resp, "reason", "OK")
+
+    def iter_lines(self, decode_unicode: bool = False) -> Any:
+        """Delegate to the real curl_cffi response's :meth:`iter_lines`."""
+        return self._resp.iter_lines(decode_unicode=decode_unicode)
+
+    def raise_for_status(self) -> None:
+        """Raise :class:`HTTPError` if the status code is >= 400."""
+        if self.status_code >= 400:
+            from curl_cffi.requests.exceptions import HTTPError
+
+            raise HTTPError(f"{self.status_code} {self.reason}", response=self)
+
+    def close(self) -> None:
+        """Close the underlying response and the temporary direct session."""
+        try:
+            self._resp.close()
+        except Exception:
+            pass
+        try:
+            self._session.close()
+        except Exception:
+            pass
+
+    def __repr__(self) -> str:
+        return f"<_StreamResponse [{self.status_code}]>"
+
+
 class DaemonProxyResponse:
     """A response object that duck-types :class:`curl_cffi.requests.Response`.
 
@@ -304,27 +351,27 @@ class DaemonProxySession:
 
     # ── HTTP verb shortcuts ────────────────────────────────────────────
 
-    def get(self, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def get(self, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         return self.request("GET", url, **kwargs)
 
-    def post(self, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def post(self, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         return self.request("POST", url, **kwargs)
 
-    def put(self, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def put(self, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         return self.request("PUT", url, **kwargs)
 
-    def delete(self, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def delete(self, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         return self.request("DELETE", url, **kwargs)
 
-    def head(self, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def head(self, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         return self.request("HEAD", url, **kwargs)
 
-    def options(self, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def options(self, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         return self.request("OPTIONS", url, **kwargs)
 
     # ── main request method ────────────────────────────────────────────
 
-    def request(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse:
+    def request(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
         """Execute an HTTP request through the daemon.
 
         :param method: HTTP method (GET, POST, PUT, DELETE, …).
@@ -346,9 +393,13 @@ class DaemonProxySession:
         kwargs.pop("skip_app_headers", None)
 
         # ── streaming fallback ──
+        # The daemon protocol cannot relay real-time chunks, so we bypass
+        # the daemon entirely and create a temporary direct session for
+        # streaming requests (SSE chat, video downloads, etc.).
+        # NOTE: we keep stream=True in the kwargs — the direct session
+        # needs it to enable curl_cffi's internal queue/curl handle.
         if kwargs.get("stream", False):
-            streamless = {k: v for k, v in kwargs.items() if k != "stream"}
-            return self._fallback_direct(method, url, **streamless)
+            return self._stream_direct(method, url, **kwargs)
 
         wire_kwargs = self._serialize_kwargs(kwargs)
         msg = build_http_request(method, url, wire_kwargs)
@@ -406,8 +457,8 @@ class DaemonProxySession:
         raise DaemonProtocolError(f"Unexpected response type: {resp_type}")
 
     def _fallback_direct(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse:
-        """Create a temporary direct :class:`ZhihuSession` for streaming
-        requests (video downloads, etc.).
+        """Create a temporary direct :class:`ZhihuSession` for non-streaming
+        fallback requests.
         """
         from zhihu_cli.content.handlers._session_core import _build_direct_session
 
@@ -429,6 +480,20 @@ class DaemonProxySession:
                 direct.close()
             except Exception:
                 pass
+
+    def _stream_direct(self, method: str, url: str, **kwargs: Any) -> _StreamResponse:
+        """Create a temporary direct :class:`ZhihuSession` for a streaming
+        request (SSE chat, video downloads, etc.).
+
+        Returns a :class:`_StreamResponse` that wraps the real curl_cffi
+        response — callers use ``iter_lines()`` to consume the stream and
+        MUST call ``.close()`` when done to release the underlying session.
+        """
+        from zhihu_cli.content.handlers._session_core import _build_direct_session
+
+        direct = _build_direct_session()
+        resp = direct.request(method, url, **kwargs)
+        return _StreamResponse(resp, direct)
 
     def _handle_captcha_via_daemon(
         self,
