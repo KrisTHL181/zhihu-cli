@@ -3,6 +3,7 @@
 import click
 
 from zhihu_cli.commands.agora import register_agora
+from zhihu_cli.commands.ai import register_ai
 from zhihu_cli.commands.auth import register_auth
 from zhihu_cli.commands.browse import register_browse
 from zhihu_cli.commands.chat import register_chat
@@ -36,6 +37,7 @@ def main() -> None:
 # ── register built-in command groups ───────────────────────────────────────
 
 register_agora(main)
+register_ai(main)
 register_auth(main)
 register_browse(main)
 register_chat(main)
