@@ -88,11 +88,18 @@ class _StreamResponse:
         return self._resp.iter_lines(decode_unicode=decode_unicode)
 
     def raise_for_status(self) -> None:
-        """Raise :class:`HTTPError` if the status code is >= 400."""
+        """Raise :class:`HTTPError` if the status code is >= 400.
+
+        The exception message includes the server reply body (truncated)
+        so callers see *why* the request failed, not just the status code.
+        """
         if self.status_code >= 400:
             from curl_cffi.requests.exceptions import HTTPError
 
-            raise HTTPError(f"{self.status_code} {self.reason}", response=self)
+            body = self.text.strip() or "(empty body)"
+            if len(body) > 500:
+                body = body[:500] + "…"
+            raise HTTPError(f"{self.status_code} {self.reason}: {body}", response=self)
 
     def close(self) -> None:
         """Close the underlying response and the temporary direct session."""
@@ -148,11 +155,23 @@ class DaemonProxyResponse:
         return json.loads(self._body_bytes, **kwargs)
 
     def raise_for_status(self) -> None:
-        """Raise :class:`HTTPError` if the status code is >= 400."""
+        """Raise :class:`HTTPError` if the status code is >= 400.
+
+        The exception message includes the server reply body (truncated)
+        so callers see *why* the request failed, not just the status code.
+        """
         if self.status_code >= 400:
             from curl_cffi.requests.exceptions import HTTPError
 
-            raise HTTPError(f"{self.status_code} {self.reason}", response=self)
+            try:
+                body = self._resp.text.strip()
+            except Exception:
+                body = ""
+            if not body:
+                body = "(empty body)"
+            if len(body) > 500:
+                body = body[:500] + "…"
+            raise HTTPError(f"{self.status_code} {self.reason}: {body}", response=self)
 
     def iter_content(self, chunk_size: int = 8192) -> Any:
         """Yield the body in chunks (for streaming compatibility).
