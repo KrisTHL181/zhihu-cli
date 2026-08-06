@@ -95,6 +95,14 @@ def register_ai(main_group):
             else:
                 # ── AI answer ────────────────────────────────────────────
                 echo(f"  {f_green('知乎直答')}  {f_meta(send_time)}")
+
+                # ── Thinking ─────────────────────────────────────────────
+                thinking = turn.get("thinking", "")
+                if thinking:
+                    echo(f"  {f_dim('Thinking...')}")
+                    echo(f"  {f_dim(thinking)}")
+                    blank()
+
                 if content:
                     echo(f"  {content}")
                 else:
@@ -218,6 +226,10 @@ def register_ai(main_group):
             if output_json:
                 print_json(result)
                 return
+            if result.get("thinking"):
+                echo(f"  {f_dim('Thinking...')}")
+                echo(f"  {f_dim(result['thinking'])}")
+                blank()
             echo(f"  {f_green('知乎直答')}")
             echo(f"  {result['answer']}")
             if result.get("session_id"):
@@ -226,10 +238,12 @@ def register_ai(main_group):
 
         # ── Streaming mode ────────────────────────────────────────────────
         answer_parts: list[str] = []
+        thinking_parts: list[str] = []
         session_id: str = session
         sources: list[dict] = []
         followups: list[dict] = []
         first_chunk = True
+        thinking_started = False
 
         for event in chat_stream(
             message=message,
@@ -243,14 +257,29 @@ def register_ai(main_group):
             if etype == "init":
                 session_id = event["data"]["session_id"]
 
+            elif etype == "think_chunk":
+                chunk = event["data"]["thinking"]
+                if chunk:
+                    if not output_json:
+                        if not thinking_started:
+                            echo(f"  {f_dim('Thinking...')}")
+                            thinking_started = True
+                        click.echo(f_dim(chunk), nl=False)
+                    thinking_parts.append(chunk)
+
             elif etype == "answer_chunk":
                 chunk = event["data"]["summary"]
                 if chunk:
-                    if first_chunk:
-                        echo(f"  {f_green('知乎直答')}")
-                        blank()
-                        first_chunk = False
-                    click.echo(chunk, nl=False)
+                    if not output_json:
+                        if thinking_started:
+                            blank()
+                            blank()
+                            thinking_started = False
+                        if first_chunk:
+                            echo(f"  {f_green('知乎直答')}")
+                            blank()
+                            first_chunk = False
+                        click.echo(chunk, nl=False)
                     answer_parts.append(chunk)
 
             elif etype == "cards":
@@ -263,15 +292,17 @@ def register_ai(main_group):
                 pass  # stream finished, print summary below
 
         # ── Post-stream summary ───────────────────────────────────────────
-        if not first_chunk:
-            blank()
-            blank()
+        if not output_json:
+            if not first_chunk:
+                blank()
+                blank()
 
         if output_json:
             print_json(
                 {
                     "session_id": session_id,
                     "answer": "".join(answer_parts),
+                    "thinking": "".join(thinking_parts),
                     "sources": sources,
                     "followups": followups,
                 }

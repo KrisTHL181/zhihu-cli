@@ -126,6 +126,7 @@ def _parse_session_turn(item: dict[str, Any]) -> dict[str, Any]:
 
     messages = item.get("messages", [])
     answer_text = ""
+    thinking_text = ""
     sources: list[dict[str, Any]] = []
     followups: list[str] = []
     cost_time_ms: int | None = None
@@ -135,7 +136,9 @@ def _parse_session_turn(item: dict[str, Any]) -> dict[str, Any]:
             event_name = ev.get("event", "")
             event_data = ev.get("data") or {}
 
-            if event_name == "Answer" and isinstance(event_data, dict):
+            if event_name == "Think" and isinstance(event_data, dict):
+                thinking_text = event_data.get("thinking", "")
+            elif event_name == "Answer" and isinstance(event_data, dict):
                 answer_text = _strip_cite_tags(event_data.get("summary", ""))
             elif event_name == "Cards" and isinstance(event_data, list):
                 for card in event_data:
@@ -164,6 +167,7 @@ def _parse_session_turn(item: dict[str, Any]) -> dict[str, Any]:
         "type": "user" if is_user else "ai",
         "send_time": item.get("send_time", 0),
         "content": answer_text,
+        "thinking": thinking_text,
         "sources": sources,
         "followups": followups,
         "cost_time_ms": cost_time_ms,
@@ -331,6 +335,14 @@ def _classify_sse_event(raw: dict[str, Any]) -> dict[str, Any]:
             "event": "end",
             "data": raw.get("data", {}),
         }
+    elif event_name == "Think":
+        think_data = raw.get("data", {})
+        return {
+            "event": "think_chunk",
+            "data": {
+                "thinking": think_data.get("thinking", ""),
+            },
+        }
     elif event_name == "RecommendQueries":
         return {
             "event": "followups",
@@ -386,6 +398,7 @@ def chat_complete(
     result: dict[str, Any] = {
         "session_id": session_id,
         "answer": "",
+        "thinking": "",
         "sources": [],
         "followups": [],
     }
@@ -401,6 +414,8 @@ def chat_complete(
         if etype == "init":
             result["session_id"] = event["data"]["session_id"]
             result["message_id"] = event["data"]["message_id"]
+        elif etype == "think_chunk":
+            result["thinking"] += event["data"]["thinking"]
         elif etype == "cards":
             result["sources"] = event["data"]
         elif etype == "answer_chunk":
