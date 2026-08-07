@@ -1,28 +1,60 @@
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
+from zhihu_cli.content.handlers.requests import fetch_json, fetch_page_html, get_page_state, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.html2markdown import converter
 
-NEXT_URL_API = "https://www.zhihu.com/api/v4/questions/{question_id}/feeds?include=data%5B%2A%5D.is_normal%2Ccontent%2Cvoteup_count%2Ccomment_count%2Cfavlists_count%2Ccreated_time%2Cauthor.name%2Cauthor.follower_count&limit=5&offset=0&order=default&platform=desktop"
+ANSWER_FEEDS_URL = (
+    "https://api.zhihu.com/questions/{question_id}/feeds"
+    "?include=content,big_card_summary,media_detail,reaction_instruction,is_author,is_thanked,"
+    "voting,is_favorited,label_info,content_text_length,reactions"
+    "&order=default&show_detail=1"
+)
+
+QUESTION_API_URL = (
+    "https://api.zhihu.com/questions/{question_id}"
+    "?include=detail,answer_count,comment_count,follower_count,author,"
+    "voteup_count,voting,can_vote,visit_count,relationship"
+)
+_QUESTION_PATH_RE = re.compile(r"/(?:question|questions)/(\d+)/?$")
+
+
+def extract_question_id(question_url: str) -> str:
+    """Extract a numeric question ID from a Zhihu question URL or raw ID."""
+    candidate = question_url.strip()
+    if candidate.isdigit():
+        return candidate
+
+    match = _QUESTION_PATH_RE.search(urlparse(candidate).path)
+    if match:
+        return match.group(1)
+
+    raise ValueError(f"Could not extract a Zhihu question ID from {question_url!r}")
 
 
 def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
     author = item.get("author", {})
+    question_id = item.get("id", "")
+    url = item.get("url", "")
+    if question_id and (not url or urlparse(url).netloc == "api.zhihu.com"):
+        url = f"https://www.zhihu.com/question/{question_id}"
 
     return {
-        "id": item["id"],
+        "id": question_id,
         "title": item.get("title", ""),
-        "url": item.get("url", ""),
+        "url": url,
         "created_time": fmt_time(item.get("created", 0)),
-        "updated_time": fmt_time(item.get("updatedTime", 0)),
-        "answer_count": item.get("answerCount", 0),
-        "comment_count": item.get("commentCount", 0),
-        "visit_count": item.get("visitCount", 0),
-        "follower_count": item.get("followerCount", 0),
+        "updated_time": fmt_time(item.get("updated_time", item.get("updatedTime", 0))),
+        "answer_count": item.get("answer_count", item.get("answerCount", 0)),
+        "comment_count": item.get("comment_count", item.get("commentCount", 0)),
+        "visit_count": item.get("visit_count", item.get("visitCount", 0)),
+        "follower_count": item.get("follower_count", item.get("followerCount", 0)),
+        "voteup_count": item.get("voteup_count", item.get("voteupCount", 0)),
         "author": {
             "name": author.get("name", "anonymous"),
             "headline": author.get("headline", ""),
@@ -30,14 +62,25 @@ def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def scrape_question_data(question_url: str) -> tuple[dict[str, Any], str]:
-    entities = get_page_state(fetch_page_html(question_url))
-    item = entities.get("questions", {})
-    if not item:
-        raise ValueError(f"No {item} data found in entities")
+def fetch_question_item(question_url: str) -> dict[str, Any]:
+    """Fetch raw question data from the JSON API."""
+    question_id = extract_question_id(question_url)
+    api_url = QUESTION_API_URL.format(question_id=question_id)
 
-    item_data = next(iter(item.values()))
-    return parse_question_metadata(item_data), converter.convert(item_data.get("detail"))
+    item = fetch_json(api_url)
+    if not isinstance(item, dict):
+        raise ValueError("Question API returned a non-object response")
+    if "error" in item:
+        raise ValueError(f"Question API returned an error: {item.get('error')}")
+    if "title" not in item:
+        raise ValueError("Question API response does not contain question data")
+    return item
+
+
+def scrape_question_data(question_url: str) -> tuple[dict[str, Any], str]:
+    """Fetch a question's metadata and detail (as Markdown)."""
+    item_data = fetch_question_item(question_url)
+    return parse_question_metadata(item_data), converter.convert(item_data.get("detail") or "")
 
 
 def scrape_answers(
@@ -55,12 +98,14 @@ def scrape_answers(
     :param max_items: optional cap on the total number of answers yielded
         (stops pagination early when reached).
     """
-    url = NEXT_URL_API.replace("{question_id}", question_data["id"])
+    url = ANSWER_FEEDS_URL.replace("{question_id}", question_data["id"])
 
     def parse_ans(data):
         for item in data.get("data", []):
             # /feeds endpoint wraps answers in a "target" field
             ans = item.get("target", item)
+            if not isinstance(ans, dict) or not ans.get("id"):
+                continue
             content = ans.get("content", "")
             if not raw:
                 content = converter.convert(content)
@@ -70,7 +115,7 @@ def scrape_answers(
                 "vote": ans.get("voteup_count", 0),
                 "comment": ans.get("comment_count", 0),
                 "favorite": ans.get("favlists_count", 0),
-                "created_time": ans.get("created_time", 0),
+                "created_time": int(ans.get("created_time", 0) or 0),
                 "content": content,
             }
 
