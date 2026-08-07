@@ -141,6 +141,12 @@ class DaemonServer:
             sess.headers.update(hdrs)
             if ua:
                 sess.headers["User-Agent"] = ua
+            # Inject the mobile-app identity headers (mirrors
+            # requests._inject_app_headers for the direct session).  Without
+            # ``x-app-za`` the server treats requests as a generic web client
+            # and returns a reduced feed (e.g. excludes paid / 盐选 answers).
+            sess.headers["x-app-version"] = cache_manager.get_app_version()
+            sess.headers["x-app-za"] = cache_manager.get_app_za()
             # Daemon never handles captcha interactively (no TTY).
             # Captcha detection is done manually in _handle_http_request().
             sess.captcha_handler = "ignore"
