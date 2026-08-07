@@ -70,6 +70,8 @@ def register_browse(main_group):
     @browse.command("question")
     @click.argument("url")
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
+    @click.option("--limit", type=int, default=20, help="Answers per page")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total answers to fetch")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--sort",
@@ -78,11 +80,13 @@ def register_browse(main_group):
         default="default",
         help="Sort answers by criteria",
     )
-    def browse_question(url: str, reading_mode: bool, output_json: bool, sort_by: str) -> None:
+    def browse_question(
+        url: str, reading_mode: bool, limit: int, max_items: int | None, output_json: bool, sort_by: str
+    ) -> None:
         """Browse a Zhihu question and all its answers."""
         q_meta, q_detail_md = scrape_question_data(url)
 
-        answers = list(scrape_answers(q_meta))
+        answers = list(scrape_answers(q_meta, limit=limit, max_items=max_items))
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "upvotes": "vote", "favorites": "favorite", "comments": "comment"}
             answers = _sort_items(answers, _SORT_MAP[sort_by])
@@ -277,6 +281,8 @@ def register_browse(main_group):
 
     @browse.command("comments")
     @click.argument("url")
+    @click.option("--limit", type=int, default=20, help="Comments per page")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total root comments to fetch")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--sort",
@@ -285,7 +291,7 @@ def register_browse(main_group):
         default="default",
         help="Sort comments by criteria",
     )
-    def browse_comments(url: str, output_json: bool, sort_by: str) -> None:
+    def browse_comments(url: str, limit: int, max_items: int | None, output_json: bool, sort_by: str) -> None:
         """Print the comment tree for any Zhihu item."""
         item_type, item_id = _parse_item_url(url)
         if item_type == "answers":
@@ -293,7 +299,7 @@ def register_browse(main_group):
 
         from zhihu_cli.content.handlers.comments import fetch_root_comments
 
-        comments = list(fetch_root_comments(item_type, item_id))
+        comments = list(fetch_root_comments(item_type, item_id, limit=limit, max_items=max_items))
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "likes": "like_count", "dislikes": "dislike_count"}
             comments = _sort_items(comments, _SORT_MAP[sort_by])
@@ -330,10 +336,7 @@ def register_browse(main_group):
         answer_id = _resolve_answer_id(item_id)
 
         info(f"Fetching segment comments for answer {answer_id} ...")
-        comments = list(fetch_segment_comments(answer_id))
-
-        if max_items is not None and len(comments) > max_items:
-            comments = comments[:max_items]
+        comments = list(fetch_segment_comments(answer_id, limit=limit, max_items=max_items))
 
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "likes": "like_count"}

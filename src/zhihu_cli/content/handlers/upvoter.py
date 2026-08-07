@@ -67,10 +67,5 @@ def fetch_upvoters(
     if api_template is None:
         raise ValueError(f"Unsupported item type for upvoters: {item_type}")
 
-    url = f"{api_template.format(item_id=item_id)}?limit={limit}&offset=0"
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_upvoters):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    url = f"{api_template.format(item_id=item_id)}?offset=0"
+    return list(stream_handler(url, _parse_upvoters, limit=limit, max_items=max_items))

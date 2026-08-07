@@ -128,24 +128,21 @@ def _parse_feed_items(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
             yield parsed
 
 
-def stream_recommend_feed(limit: int = 20) -> Iterable[dict[str, Any]]:
-    url = f"https://www.zhihu.com/api/v3/feed/topstory/recommend?limit={limit}&desktop=true"
-    return stream_handler(url, _parse_feed_items)
+def stream_recommend_feed(limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+    url = "https://www.zhihu.com/api/v3/feed/topstory/recommend?desktop=true"
+    return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items)
 
 
-def stream_follow_feed(limit: int = 20) -> Iterable[dict[str, Any]]:
-    url = f"https://www.zhihu.com/api/v3/moments?limit={limit}&desktop=true"
-    return stream_handler(url, _parse_feed_items)
+def stream_follow_feed(limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+    url = "https://www.zhihu.com/api/v3/moments?desktop=true"
+    return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items)
 
 
 def fetch_feed(feed_type: str = "recommend", limit: int = 20, max_items: int | None = 20) -> list[dict[str, Any]]:
-    stream = stream_recommend_feed(limit) if feed_type == "recommend" else stream_follow_feed(limit)
-    items: list[dict[str, Any]] = []
-    for item in stream:
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    stream = (
+        stream_recommend_feed(limit, max_items) if feed_type == "recommend" else stream_follow_feed(limit, max_items)
+    )
+    return list(stream)
 
 
 def fetch_feed_with_markdown(

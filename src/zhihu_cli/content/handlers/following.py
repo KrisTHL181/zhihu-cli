@@ -46,14 +46,9 @@ def fetch_followees(
         "?include=data%5B*%5D.answer_count%2Carticles_count%2Cgender"
         "%2Cfollower_count%2Cis_followed%2Cis_following"
         "%2Cbadge%5B%3F(type%3Dbest_answerer)%5D.topics"
-        f"&offset=0&limit={limit}"
+        "&offset=0"
     )
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_followees):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_followees, limit=limit, max_items=max_items))
 
 
 # ── followers (关注者/粉丝) ────────────────────────────────────────────────────
@@ -70,14 +65,9 @@ def fetch_followers(
         "?include=data%5B*%5D.answer_count%2Carticles_count%2Cgender"
         "%2Cfollower_count%2Cis_followed%2Cis_following"
         "%2Cbadge%5B%3F(type%3Dbest_answerer)%5D.topics"
-        f"&offset=0&limit={limit}"
+        "&offset=0"
     )
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_followees):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_followees, limit=limit, max_items=max_items))
 
 
 # ── following topics (关注的话题) ──────────────────────────────────────────────
@@ -111,16 +101,11 @@ def fetch_following_topics(
     limit: int = 20,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
-    url = f"{TOPIC_FOLLOWING_API.format(token=url_token)}?include=data%5B*%5D.topic.introduction&offset=0&limit={limit}"
-    items: list[dict[str, Any]] = []
+    url = f"{TOPIC_FOLLOWING_API.format(token=url_token)}?include=data%5B*%5D.topic.introduction&offset=0"
     try:
-        for item in stream_handler(url, _parse_following_topics):
-            items.append(item)
-            if max_items is not None and len(items) >= max_items:
-                break
+        return list(stream_handler(url, _parse_following_topics, limit=limit, max_items=max_items))
     except Exception:
-        pass
-    return items
+        return []
 
 
 # ── following questions (关注的问题) ───────────────────────────────────────────
@@ -151,16 +136,11 @@ def fetch_following_questions(
     limit: int = 20,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
-    url = f"{MEMBER_API.format(token=url_token)}/following-questions?offset=0&limit={limit}"
-    items: list[dict[str, Any]] = []
+    url = f"{MEMBER_API.format(token=url_token)}/following-questions?offset=0"
     try:
-        for item in stream_handler(url, _parse_following_questions):
-            items.append(item)
-            if max_items is not None and len(items) >= max_items:
-                break
+        return list(stream_handler(url, _parse_following_questions, limit=limit, max_items=max_items))
     except Exception:
-        pass
-    return items
+        return []
 
 
 # ── following columns (关注的专栏) ─────────────────────────────────────────────
@@ -193,16 +173,11 @@ def fetch_following_columns(
     limit: int = 20,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
-    url = f"{MEMBER_API.format(token=url_token)}/following-columns?offset=0&limit={limit}"
-    items: list[dict[str, Any]] = []
+    url = f"{MEMBER_API.format(token=url_token)}/following-columns?offset=0"
     try:
-        for item in stream_handler(url, _parse_following_columns):
-            items.append(item)
-            if max_items is not None and len(items) >= max_items:
-                break
+        return list(stream_handler(url, _parse_following_columns, limit=limit, max_items=max_items))
     except Exception:
-        pass
-    return items
+        return []
 
 
 # ── following collections (关注的收藏夹) ──────────────────────────────────────
@@ -242,14 +217,9 @@ def fetch_following_collections(
         f"{MEMBER_API.format(token=url_token)}/following-favlists"
         "?include=data%5B*%5D.updated_time%2Canswer_count%2Cfollower_count"
         "%2Ccreator%2Cdescription%2Cis_following%2Ccomment_count%2Ccreated_time"
-        f"&offset=0&limit={limit}"
+        "&offset=0"
     )
-    items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_following_collections):
-            items.append(item)
-            if max_items is not None and len(items) >= max_items:
-                break
+        return list(stream_handler(url, _parse_following_collections, limit=limit, max_items=max_items))
     except Exception:
-        pass
-    return items
+        return []

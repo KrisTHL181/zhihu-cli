@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
@@ -40,12 +40,20 @@ def scrape_question_data(question_url: str) -> tuple[dict[str, Any], str]:
     return parse_question_metadata(item_data), converter.convert(item_data.get("detail"))
 
 
-def scrape_answers(question_data: dict[str, Any], raw: bool = False) -> Generator[dict[str, Any], None, None]:
+def scrape_answers(
+    question_data: dict[str, Any],
+    raw: bool = False,
+    limit: int = 5,
+    max_items: int | None = None,
+) -> Iterable[dict[str, Any]]:
     """Yield answers for a question, one dict per answer.
 
     :param question_data: dict with at least an ``"id"`` key (the question ID).
     :param raw: when True, return raw HTML in the ``"content"`` field
         instead of converting to Markdown.
+    :param limit: number of answers requested per API page.
+    :param max_items: optional cap on the total number of answers yielded
+        (stops pagination early when reached).
     """
     url = NEXT_URL_API.replace("{question_id}", question_data["id"])
 
@@ -66,7 +74,7 @@ def scrape_answers(question_data: dict[str, Any], raw: bool = False) -> Generato
                 "content": content,
             }
 
-    return stream_handler(url, parse_ans)
+    return stream_handler(url, parse_ans, limit=limit, max_items=max_items)
 
 
 def upvote_answer(answer_id: str) -> dict[str, Any]:

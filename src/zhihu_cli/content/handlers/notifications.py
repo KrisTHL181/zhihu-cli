@@ -6,7 +6,7 @@ from typing import Any
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
-NOTIFICATIONS_URL = "https://www.zhihu.com/api/v4/notifications/v2/default?limit=20"
+NOTIFICATIONS_URL = "https://www.zhihu.com/api/v4/notifications/v2/default"
 
 
 def _strip_html(text: str) -> str:
@@ -51,13 +51,4 @@ def _parse_notifications(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 def fetch_notifications(limit: int = 20, max_items: int | None = None) -> list[dict[str, Any]]:
     """Fetch Zhihu notifications with pagination."""
-    stream = stream_handler(
-        NOTIFICATIONS_URL,
-        _parse_notifications,
-    )
-    items: list[dict[str, Any]] = []
-    for item in stream:
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(NOTIFICATIONS_URL, _parse_notifications, limit=limit, max_items=max_items))

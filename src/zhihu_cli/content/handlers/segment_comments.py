@@ -23,10 +23,13 @@ SEGMENT_COMMENT_API = (
 )
 
 
-def fetch_segment_comments(answer_id: str) -> Iterable[dict[str, Any]]:
+def fetch_segment_comments(answer_id: str, limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
     """Fetch segment comments for an answer, enriched with per-segment context.
 
     :param answer_id: The answer ID (url_token / numeric ID).
+    :param limit: number of comments requested per API page.
+    :param max_items: optional cap on the total number of comments yielded
+        (stops pagination early when reached).
     :yields: Dicts with keys from the comment plus ``segment_text``,
         ``segment_is_removed``, ``segment_reaction``, and
         ``segment_position``.
@@ -85,4 +88,4 @@ def fetch_segment_comments(answer_id: str) -> Iterable[dict[str, Any]]:
                 "segment_reaction": segment_reaction,
             }
 
-    return stream_handler(initial_url, parser)
+    return stream_handler(initial_url, parser, limit=limit, max_items=max_items)

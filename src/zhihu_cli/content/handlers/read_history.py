@@ -44,16 +44,10 @@ def _parse_history_items(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
             yield parsed
 
 
-def stream_read_history(limit: int = 20) -> Iterable[dict[str, Any]]:
-    url = f"https://www.zhihu.com/api/v4/unify-consumption/read_history?limit={limit}&offset=0"
-    return stream_handler(url, _parse_history_items)
+def stream_read_history(limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+    url = "https://www.zhihu.com/api/v4/unify-consumption/read_history?offset=0"
+    return stream_handler(url, _parse_history_items, limit=limit, max_items=max_items)
 
 
 def fetch_read_history(limit: int = 20, max_items: int | None = 20) -> list[dict[str, Any]]:
-    stream = stream_read_history(limit)
-    items: list[dict[str, Any]] = []
-    for item in stream:
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_read_history(limit, max_items))

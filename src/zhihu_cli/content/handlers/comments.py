@@ -129,11 +129,11 @@ def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | No
     return stream_handler(initial_url, child_parser)
 
 
-def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]]:
+def fetch_root_comments(
+    item_type: str, item_id: str, limit: int = 20, max_items: int | None = None
+) -> Iterable[dict[str, Any]]:
     segment = _URL_SEGMENT.get(item_type, item_type)
-    initial_url = (
-        f"https://www.zhihu.com/api/v4/comment_v5/{segment}/{item_id}/root_comment?order_by=score&limit=20&offset="
-    )
+    initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{segment}/{item_id}/root_comment?order_by=score&offset="
 
     def root_parser(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
         for comment in data.get("data", []):
@@ -167,7 +167,7 @@ def fetch_root_comments(item_type: str, item_id: str) -> Iterable[dict[str, Any]
 
             yield root
 
-    return stream_handler(initial_url, root_parser)
+    return stream_handler(initial_url, root_parser, limit=limit, max_items=max_items)
 
 
 def fetch_comments(item_type: str, item_id: str) -> list[dict[str, Any]]:
