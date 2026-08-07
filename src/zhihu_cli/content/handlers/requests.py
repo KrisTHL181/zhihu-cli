@@ -72,7 +72,18 @@ def __getattr__(name: str) -> Any:
 def fetch_page_html(url: str) -> str:
     """Fetch a Zhihu page as HTML (uses the global session)."""
     url = url.replace("http://", "https://")
-    return _get_session().get(url).text
+    response = _get_session().get(url)
+    if response.status_code == 403 and "zh-zse-ck" in response.text:
+        raise RuntimeError(f"Zhihu returned an HTML zh-zse-ck risk-control challenge for {url}")
+    response.raise_for_status()
+    return response.text
+
+
+def fetch_json(url: str) -> Any:
+    """Fetch a URL and decode its JSON response."""
+    response = _get_session().get(url)
+    response.raise_for_status()
+    return response.json()
 
 
 def get_page_state(html_text: str, key: str = "entities") -> dict[str, Any]:
