@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
+from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 
 MEMBER_API = "https://www.zhihu.com/api/v4/members/{token}"
@@ -34,43 +34,61 @@ def unblock(user_id: str) -> None:
 
 # ── member profile ──────────────────────────────────────────────────────────
 
+# ``include`` fields requested from the member profile API. ``gender``, the
+# counts and the relational flags are only returned when explicitly listed.
+_MEMBER_PROFILE_INCLUDE = (
+    "gender,headline,description,educations,business,locations,employments,"
+    "is_following,is_followed,follower_count,following_count,answer_count,"
+    "articles_count,pins_count,question_count,voteup_count,thanked_count,"
+    "cover_url,ip_info"
+)
+
 
 def fetch_member_profile(url_token: str) -> dict[str, Any] | None:
-    """Fetch a member's public profile info (via HTML js-initialData)."""
+    """Fetch a member's public profile info (via the v4 members API).
+
+    :param url_token: The user's url_token (e.g. ``"zhangsan"``).
+    :returns: A flat dict of profile fields, or ``None`` on failure.
+    """
+    url = f"https://www.zhihu.com/api/v4/members/{url_token}?include={_MEMBER_PROFILE_INCLUDE}"
     try:
-        entities = get_page_state(fetch_page_html(f"https://www.zhihu.com/people/{url_token}"))
+        resp = session.get(url)
+        resp.raise_for_status()
+        user = resp.json()
     except Exception:
         return None
 
-    users = entities.get("users", {})
-    # Find the user entry by url_token (keys can be id or url_token)
-    user_data = users.get(url_token)
-    if user_data is None:
-        for v in users.values():
-            if isinstance(v, dict) and v.get("urlToken") == url_token:
-                user_data = v
-                break
-    if user_data is None:
-        return None
-
-    user_hash = user_data.get("id", "")
+    def _topic_names(items: Any) -> list[str]:
+        """Collapse a list of {school|company: {name, ...}} into plain names."""
+        if not isinstance(items, list):
+            return []
+        return [(t.get("school") or t.get("company") or {}).get("name", "") for t in items if isinstance(t, dict)]
 
     return {
-        "id": user_hash,
-        "name": user_data.get("name", ""),
-        "url_token": user_data.get("urlToken", url_token),
-        "headline": user_data.get("headline", ""),
-        "avatar_url": (user_data.get("avatarUrlTemplate") or "").replace("{size}", "xl"),
-        "gender": user_data.get("gender", -1),
-        "follower_count": user_data.get("followerCount", 0),
-        "following_count": user_data.get("followingCount", 0),
-        "answer_count": user_data.get("answerCount", 0),
-        "articles_count": user_data.get("articlesCount", 0),
-        "pins_count": user_data.get("pinsCount", 0),
-        "question_count": user_data.get("questionCount", 0),
-        "voteup_count": user_data.get("voteupCount", 0),
-        "thanked_count": user_data.get("thankedCount", 0),
-        "description": user_data.get("description", ""),
+        "id": user.get("id", ""),
+        "name": user.get("name", ""),
+        "url_token": user.get("url_token", url_token),
+        "headline": user.get("headline", ""),
+        "avatar_url": user.get("avatar_url", ""),
+        "gender": user.get("gender", -1),
+        "follower_count": user.get("follower_count", 0),
+        "following_count": user.get("following_count", 0),
+        "answer_count": user.get("answer_count", 0),
+        "articles_count": user.get("articles_count", 0),
+        "pins_count": user.get("pins_count", 0),
+        "question_count": user.get("question_count", 0),
+        "voteup_count": user.get("voteup_count", 0),
+        "thanked_count": user.get("thanked_count", 0),
+        "description": user.get("description", ""),
+        # extra fields only available from the API
+        "is_following": user.get("is_following", False),
+        "is_followed": user.get("is_followed", False),
+        "cover_url": user.get("cover_url", ""),
+        "ip_info": user.get("ip_info", ""),
+        "business": (user.get("business") or {}).get("name", ""),
+        "educations": _topic_names(user.get("educations")),
+        "employments": _topic_names(user.get("employments")),
+        "locations": _topic_names(user.get("locations")),
     }
 
 

@@ -91,6 +91,24 @@ def _print_activity_item(item: dict) -> None:
     blank()
 
 
+def _echo_profile_extras(profile: dict) -> None:
+    """Echo the extra profile attributes only available from the API."""
+    attrs = []
+    following = profile.get("is_following")
+    if following is not None:
+        attrs.append(f"following: {'yes' if following else 'no'}")
+    if ip := profile.get("ip_info"):
+        attrs.append(ip)
+    if business := profile.get("business"):
+        attrs.append(business)
+    if school := ", ".join(profile.get("educations", [])):
+        attrs.append(school)
+    if company := ", ".join(profile.get("employments", [])):
+        attrs.append(company)
+    if attrs:
+        echo(f"  {f_label('About:')} {f_dim('  ·  '.join(attrs))}")
+
+
 def _show_profile_rich(profile: dict) -> None:
     """Display a user profile using Rich if available, otherwise plain text."""
     try:
@@ -140,6 +158,7 @@ def _show_profile_rich(profile: dict) -> None:
         user_hash = profile.get("id", "")
         if user_hash:
             echo(f"  {f_label('User Hash:')} {f_dim(user_hash)}")
+        _echo_profile_extras(profile)
         blank()
     except ImportError:
         echo(f"\n{f_bold(profile.get('name', 'Unknown'))}")
