@@ -164,10 +164,10 @@ class DaemonProxyResponse:
         if self.status_code >= 400:
             from curl_cffi.requests.exceptions import HTTPError
 
-            try:
-                body = self._resp.text.strip()
-            except Exception:
-                body = ""
+            # DaemonProxyResponse stores the body as bytes (_body_bytes);
+            # use the decoded ``text`` property so real bodies (e.g. Zhihu's
+            # HTML 500 page) surface instead of a misleading "(empty body)".
+            body = self.text.strip()
             if not body:
                 body = "(empty body)"
             if len(body) > 500:
