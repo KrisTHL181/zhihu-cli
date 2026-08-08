@@ -58,6 +58,7 @@ _WIRE_KWARGS = frozenset(
         "verify",
         "max_redirects",
         "proxies",
+        "skip_app_headers",
     }
 )
 
@@ -408,8 +409,9 @@ class DaemonProxySession:
         :raises DaemonNotRunningError: if the daemon is unavailable.
         :raises DaemonConnectionError: if the IPC connection fails.
         """
-        # Pop client-only kwargs before serialisation / fallback
-        kwargs.pop("skip_app_headers", None)
+        # ``skip_app_headers`` stays in kwargs — it lives in ``_WIRE_KWARGS``
+        # so ``_serialize_kwargs`` forwards it and the daemon strips the
+        # app-identity headers for this request.
 
         # ── streaming fallback ──
         # The daemon protocol cannot relay real-time chunks, so we bypass

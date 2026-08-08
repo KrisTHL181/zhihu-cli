@@ -415,6 +415,12 @@ class DaemonServer:
         # issues on some versions).
         safe_kwargs = {k: v for k, v in kwargs.items() if not (k == "timeout" and v is None)}
 
+        # The articles list endpoint (/members/{token}/articles) returns 500
+        # when the x-app-za=OS=Android app-identity header is present.  Honor
+        # a request-level skip_app_headers flag by removing the app headers
+        # from the shared session for the duration of this request only.
+        skip_app = bool(safe_kwargs.pop("skip_app_headers", False))
+
         # Decode base64-encoded binary body from the wire.
         if "data_base64" in safe_kwargs:
             safe_kwargs["data"] = base64.b64decode(safe_kwargs.pop("data_base64"))
@@ -427,7 +433,20 @@ class DaemonServer:
         with self._session_lock:
             if self._session is None:
                 raise RuntimeError("Session not initialised")
-            resp = self._session.request(method, url, **safe_kwargs)
+            saved_version = None
+            saved_za = None
+            if skip_app:
+                # Temporarily drop the app-identity headers (restored below)
+                # so endpoints that reject x-app-za (articles list) work.
+                saved_version = self._session.headers.pop("x-app-version", None)
+                saved_za = self._session.headers.pop("x-app-za", None)
+            try:
+                resp = self._session.request(method, url, **safe_kwargs)
+            finally:
+                if saved_version is not None:
+                    self._session.headers["x-app-version"] = saved_version
+                if saved_za is not None:
+                    self._session.headers["x-app-za"] = saved_za
             # Harvest auth cookies while the lock is still held — this
             # avoids a second lock acquisition in _build_response().
             cookies: dict[str, str] = {}

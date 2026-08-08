@@ -36,6 +36,7 @@ def stream_handler(
     delay: float = 1.0,
     limit: int | None = None,
     max_items: int | None = None,
+    skip_app_headers: bool = False,
 ) -> Iterable[Any]:
     """Paginate a Zhihu API endpoint, yielding parsed items one by one.
 
@@ -51,6 +52,10 @@ def stream_handler(
         max_items: Optional cap on the total number of items yielded.  When
             reached, pagination stops early without issuing the incomplete-
             stream warning.
+        skip_app_headers: When :data:`True`, omit the ``x-app-za`` /
+            ``x-app-version`` app-identity headers.  Needed for endpoints
+            (e.g. the articles list) that return 500 when ``x-app-za`` is
+            present.  Works through both the daemon proxy and direct session.
     """
     current_url = initial_url
     if limit is not None:
@@ -61,7 +66,7 @@ def stream_handler(
     stopped_by_limit = False
 
     while current_url and (max_items is None or yielded_count < max_items):
-        resp = session.get(current_url)
+        resp = session.get(current_url, skip_app_headers=skip_app_headers)
         resp.raise_for_status()
         data = resp.json()
 

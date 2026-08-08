@@ -72,7 +72,9 @@ def fetch_article_list(user_token: str) -> list[dict[str, Any]]:
         yield from data.get("data", [])
 
     print(f"Fetching article list for user: {user_token}")
-    items = list(stream_handler(initial_url, parser))
+    # The articles list endpoint returns 500 when the x-app-za=OS=Android
+    # app-identity header is present, so skip it for this fetch.
+    items = list(stream_handler(initial_url, parser, skip_app_headers=True))
     print(f"Fetched {len(items)} articles total.")
     return items
 
