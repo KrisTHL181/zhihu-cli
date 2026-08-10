@@ -4,6 +4,8 @@
 
 **The terminal is your new Zhihu HQ.**
 
+*A feature-complete, automation-ready Zhihu CLI & Developer Toolkit.*
+
 ```
 browse · download · search · publish · analyze — all from the command line.
 ```
@@ -28,12 +30,7 @@ browse · download · search · publish · analyze — all from the command line
 
 ```bash
 # Install
-pip install -e .
-
-# Optional extras
-pip install -e ".[nlp]"          # word clouds, clustering
-pip install -e ".[creator]"      # income charts, trends
-pip install -e ".[classifier]"   # ML-powered content classification
+pip install zhihu-toolkit
 ```
 
 ### 1. Authenticate
