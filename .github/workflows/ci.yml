@@ -28,8 +28,21 @@ jobs:
           python-version: "3.13"
       - run: pip install build
       - run: python -m build
-      # 数据文件必须打进 wheel，否则 import zhihu_cli 会崩
-      - name: Smoke-test packaged data files
+      # 数据文件必须打进 wheel，否则装出来的包 import 即崩（用 zipfile 直接查，
+      # 不 import 包本身——那会拉重依赖，还测不准）
+      - name: Verify data files are in the wheel
         run: |
-          pip install --no-deps dist/*.whl
-          python -c "from zhihu_cli.prompts import AGORA_VOTE_SYSTEM_PROMPT; from zhihu_cli.nlp_tools import STOP_WORDS; print('data files OK')"
+          python - <<'EOF'
+          import glob, os, zipfile
+          w = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(w).namelist())
+          # 期望包内路径 = 本地 src/zhihu_cli/{prompts,nlp_tools} 下实际的 *.txt，
+          # 不硬编码文件名，加/改/删数据文件无需动这里
+          expected = set()
+          for sub in ("prompts", "nlp_tools"):
+              for src in glob.glob(f"src/zhihu_cli/{sub}/*.txt"):
+                  expected.add(f"zhihu_cli/{sub}/{os.path.basename(src)}")
+          missing = expected - names
+          assert not missing, f"wheel 缺失数据文件: {missing}"
+          print(f"data files OK ({len(names)} 个文件)")
+          EOF
