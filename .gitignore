@@ -8,6 +8,8 @@ content_metrics
 .cache
 
 *egg-info
+dist
+build
 .claude
 CLAUDE.md
 .swp

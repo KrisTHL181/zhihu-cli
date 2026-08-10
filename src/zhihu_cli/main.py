@@ -26,7 +26,7 @@ from zhihu_cli.extensions import discover_extensions
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="zhihu")
+@click.version_option(package_name="zhihu-toolkit", prog_name="zhihu")
 def main() -> None:
     """zhihu — Zhihu scraping, automation, and analysis toolkit.
 
