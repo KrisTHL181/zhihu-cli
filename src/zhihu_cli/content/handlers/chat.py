@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from rich.text import Text
 
 import click
-from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.chat_commands import ChatCommandRegistry
@@ -76,6 +75,8 @@ def _sanitize_html(raw: str) -> str:
     """
     if not raw or not raw.strip():
         return raw
+    from lxml import html as lxml_html
+
     doc = lxml_html.fromstring(raw)
 
     # Process <img> tags first so their Markdown survives text_content().

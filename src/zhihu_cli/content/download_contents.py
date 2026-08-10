@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import html
 import mimetypes
 import os
@@ -9,8 +8,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
-
-import yaml
 
 from zhihu_cli.content.handlers.article import fetch_article_item
 from zhihu_cli.content.handlers.cache_manager import cache_manager
@@ -265,6 +262,8 @@ def get_safe_filename(long_title: str, ext: str = ".md", max_bytes: int = 240) -
 
 def build_yaml_frontmatter(metadata: dict[str, str]) -> str:
     """Build a YAML frontmatter block from a metadata dict."""
+    import yaml  # deferred: only needed when writing download files
+
     body = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).strip()
     return f"---\n{body}\n---\n\n"
 
@@ -704,6 +703,8 @@ class ContentDownloader:
 
 
 def main() -> None:
+    import argparse  # only needed when this module is run as a standalone script
+
     parser = argparse.ArgumentParser(description="Zhihu content downloader (HTML → Markdown)")
 
     parser.add_argument(

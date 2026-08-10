@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import difflib
 import re
 from copy import deepcopy
-from typing import Any
-
-from lxml import html as lxml_html
+from typing import TYPE_CHECKING, Any
 
 from zhihu_cli.content.handlers.requests import session
+
+if TYPE_CHECKING:
+    from lxml.html import HtmlElement
 
 LOG_URL = "https://www.zhihu.com/question/{question_id}/log"
 
@@ -15,7 +18,7 @@ def _has_diff_tags(detail_div) -> bool:
     return bool(detail_div.cssselect("ins, del"))
 
 
-def _convert_blocks_to_newlines(element: lxml_html.HtmlElement) -> lxml_html.HtmlElement:
+def _convert_blocks_to_newlines(element: HtmlElement) -> HtmlElement:
     """Replace <p> and <br> tags with newline text nodes so line-level diffs work.
 
     Returns a deep copy with block elements converted to newlines.
@@ -40,7 +43,7 @@ def _convert_blocks_to_newlines(element: lxml_html.HtmlElement) -> lxml_html.Htm
     return clone
 
 
-def _extract_diff_texts(detail_div: lxml_html.HtmlElement) -> tuple[str, str]:
+def _extract_diff_texts(detail_div: HtmlElement) -> tuple[str, str]:
     """Extract old and new text from a detail div with ins/del diff markup.
 
     :param detail_div: the ``div.zg-item-log-detail`` element containing diff markup
@@ -128,6 +131,8 @@ def fetch_question_log(question_id: str, diff_style: str = "wikidiff") -> list[d
     """
     resp = session.get(LOG_URL.format(question_id=question_id))
     resp.raise_for_status()
+
+    from lxml import html as lxml_html
 
     doc = lxml_html.fromstring(resp.text)
     entries = []

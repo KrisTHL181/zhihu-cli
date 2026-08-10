@@ -1,7 +1,5 @@
 """Listen command group — real-time MQTT event listening."""
 
-import asyncio
-
 import click
 
 from zhihu_cli.content.handlers.people import get_my_url_token
@@ -34,6 +32,8 @@ def register_listen(main_group):
         info("Connecting to Zhihu MQTT (notifications)...")
         listener = ZhihuMessageListener(url_token, NOTIFICATION_TOPIC, incognito=incognito)
         echo("Listening for notifications — press Ctrl+C to stop.")
+        import asyncio
+
         try:
             asyncio.run(listener.listen(output_json=output_json))
         except KeyboardInterrupt:
@@ -57,6 +57,8 @@ def register_listen(main_group):
             echo(f"Listening for messages from {sender} — press Ctrl+C to stop.")
         else:
             echo("Listening for messages — press Ctrl+C to stop.")
+        import asyncio
+
         try:
             asyncio.run(listener.listen(output_json=output_json))
         except KeyboardInterrupt:

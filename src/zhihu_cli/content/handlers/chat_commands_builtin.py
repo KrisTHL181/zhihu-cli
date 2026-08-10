@@ -4,9 +4,22 @@ import time as _time
 from pathlib import Path
 from typing import Any
 
-from textual.widgets import Input, RichLog
-
 from zhihu_cli.content.handlers.chat_commands import ChatCommandRegistry
+
+
+def _textual_widgets() -> tuple[Any, Any]:
+    """Import the ``Input`` and ``RichLog`` widget classes on first use.
+
+    ``textual`` is a heavy (~150 ms) framework that is only needed while the
+    interactive chat TUI is actually running. Deferring the import keeps it out
+    of CLI startup for every other command.
+
+    :returns: The ``Input`` and ``RichLog`` widget classes.
+    """
+    from textual.widgets import Input, RichLog
+
+    return Input, RichLog
+
 
 # ── Command handlers ──────────────────────────────────────────────────
 
@@ -30,6 +43,7 @@ def _cmd_help(app: Any, args: str) -> bool:  # noqa: ARG001
     :returns: Always ``True``.
     """
     registry: ChatCommandRegistry = app._cmd_registry  # type: ignore[attr-defined]
+    _, RichLog = _textual_widgets()
     log = app.query_one("#messages", RichLog)
     log.write("[bold cyan]可用命令:[/bold cyan]")
     for name, cmd in sorted(registry.list_all().items()):
@@ -54,6 +68,7 @@ def _cmd_unsend(app: Any, args: str) -> bool:
         return True
 
     message_id = args.strip()
+    _, RichLog = _textual_widgets()
     log = app.query_one("#messages", RichLog)
 
     # Find the recalled message text for the ✗ line
@@ -100,11 +115,13 @@ def _cmd_postimg(app: Any, args: str) -> bool:
         is empty (usage info displayed).
     """
     if not args or not args.strip():
+        _, RichLog = _textual_widgets()
         log = app.query_one("#messages", RichLog)
         log.write("  [bold yellow]用法:[/bold yellow] /postimg <图片路径或URL>")
         return False
 
     args = args.strip()
+    _, RichLog = _textual_widgets()
     log = app.query_one("#messages", RichLog)
 
     # Detect URL vs local path
@@ -194,6 +211,8 @@ def _show_unsend_suggestions(app: Any) -> None:
     """
     from textual.widgets import OptionList
 
+    Input, _ = _textual_widgets()
+
     now = _time.time()
 
     recent = [m for m in app._sent_messages if now - m.get("time", 0) < 120 and m.get("id") is not None]  # type: ignore[attr-defined]
@@ -241,6 +260,7 @@ def _apply_unsend_suggestion(app: Any, index: int) -> None:
     :param app: The :class:`~textual.app.App` instance.
     :param index: The index into :attr:`_suggest_data` to apply.
     """
+    Input, _ = _textual_widgets()
     inp = app.query_one("#input", Input)
     data = app._suggest_data  # type: ignore[attr-defined]
     if 0 <= index < len(data):

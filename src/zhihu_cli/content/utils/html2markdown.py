@@ -9,10 +9,28 @@ import re
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
-from lxml import html as lxml_html
-
 if TYPE_CHECKING:
+    from typing import Any
+
     from lxml.html import HtmlElement
+
+_lxml_html = None
+
+
+def _get_lxml_html() -> "Any":
+    """Import and cache the ``lxml.html`` module on first use.
+
+    ``lxml`` is a heavy C-extension dependency; importing it eagerly would add
+    ~30 ms to every CLI invocation. It is only needed when HTML is actually
+    parsed, so defer it until first conversion.
+
+    :returns: The ``lxml.html`` module.
+    """
+    global _lxml_html
+    if _lxml_html is None:
+        from lxml import html as _lxml_html
+    return _lxml_html
+
 
 _eeimg_re = re.compile(r"eeimg|equation")
 
@@ -120,7 +138,7 @@ class ZhihuMarkdownConverter:
 
         content = re.sub(pattern, lambda match: f"$${match.group(1)}$$", content)
 
-        doc = lxml_html.fromstring(content)
+        doc = _get_lxml_html().fromstring(content)
 
         # self:: axis covers the root element when content is a single img fragment
         for img in doc.xpath(".//img[@eeimg='1'] | self::img[@eeimg='1']"):
@@ -136,7 +154,7 @@ class ZhihuMarkdownConverter:
                 if img is doc:
                     return f"\n$$\n{latex_content}\n$$\n"
                 replace_with_text(img, f"\n$$\n{latex_content}\n$$\n")
-        return lxml_html.tostring(doc, encoding="unicode")
+        return _get_lxml_html().tostring(doc, encoding="unicode")
 
     # ── top-level entry point ────────────────────────────────────────────
 
@@ -151,7 +169,7 @@ class ZhihuMarkdownConverter:
         if not html_content:
             return ""
 
-        doc = lxml_html.fromstring(html_content)
+        doc = _get_lxml_html().fromstring(html_content)
 
         # Remove useless elements
         for element in doc.xpath(".//script") + doc.xpath(".//style"):
@@ -476,7 +494,7 @@ def calculate_text_length(html_content: str) -> int:
     if not html_content:
         return 0
 
-    doc = lxml_html.fromstring(html_content)
+    doc = _get_lxml_html().fromstring(html_content)
 
     # self:: covers root element for single-img fragments
     for img in doc.xpath(".//img | self::img"):
