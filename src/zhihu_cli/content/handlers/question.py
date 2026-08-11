@@ -98,7 +98,7 @@ def scrape_answers(
     :param max_items: optional cap on the total number of answers yielded
         (stops pagination early when reached).
     """
-    url = ANSWER_FEEDS_URL.replace("{question_id}", question_data["id"])
+    url = ANSWER_FEEDS_URL.replace("{question_id}", str(question_data["id"]))
 
     def parse_ans(data):
         for item in data.get("data", []):
