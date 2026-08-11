@@ -177,6 +177,28 @@ def register_auth(main_group) -> None:
         cache_manager.save_headers({})
         success("Headers cache cleared.")
 
+    _LOGOUT_PROFILE = "_logout_"
+
+    @auth.command("logout")
+    def auth_logout() -> None:
+        """Log out — switch to an unauthenticated session (hidden profile).
+
+        Switches the active profile to a hidden profile with no stored
+        credentials. Use 'zhihu auth login' or 'zhihu auth paste' to log back in.
+        """
+        active = cache_manager.get_active_profile()
+        if active == _LOGOUT_PROFILE:
+            info("Already logged out.")
+            return
+
+        # Ensure the hidden logout profile exists with empty headers
+        if _LOGOUT_PROFILE not in cache_manager.list_profiles():
+            cache_manager.save_headers({}, profile_name=_LOGOUT_PROFILE)
+
+        cache_manager.switch_profile(_LOGOUT_PROFILE)
+        reload_session()
+        echo("Logged out. Use 'zhihu auth login' or 'zhihu auth paste' to log back in.")
+
     @auth.command("captcha")
     @click.option("--url", "-u", "test_url", default=None, help="URL to test for captcha (default: hot list API)")
     @click.option("--open-browser/--no-browser", default=True, help="Auto-open browser for verification")

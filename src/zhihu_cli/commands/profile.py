@@ -102,25 +102,3 @@ def register_profile(main_group):
             echo(active)
         else:
             error("No active profile set.")
-
-    _LOGOUT_PROFILE = "_logout_"
-
-    @profile.command("logout")
-    def profile_logout() -> None:
-        """Switch to an unauthenticated session (hidden profile).
-
-        Switches the active profile to a hidden profile with no stored
-        credentials. Use 'zhihu profile switch <name>' to log back in.
-        """
-        active = cache_manager.get_active_profile()
-        if active == _LOGOUT_PROFILE:
-            info("Already logged out.")
-            return
-
-        # Ensure the hidden logout profile exists with empty headers
-        if _LOGOUT_PROFILE not in cache_manager.list_profiles():
-            cache_manager.save_headers({}, profile_name=_LOGOUT_PROFILE)
-
-        cache_manager.switch_profile(_LOGOUT_PROFILE)
-        reload_session()
-        echo("Logged out. Use 'zhihu profile switch <name>' to log back in.")
