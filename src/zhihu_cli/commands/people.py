@@ -7,6 +7,7 @@ from zhihu_cli.content.handlers.people import (
     fetch_member_activities,
     fetch_member_answers,
     fetch_member_articles,
+    fetch_member_error_message,
     fetch_member_pins,
     fetch_member_profile,
     fetch_member_questions,
@@ -229,7 +230,11 @@ def register_people(main_group):
         info(f"Fetching profile for {token}...")
         profile = fetch_member_profile(token)
         if profile is None:
-            error(f"Could not fetch profile for '{token}'. Check the token and try again.")
+            reason = fetch_member_error_message(token)
+            if reason:
+                error(f"Profile unavailable: {reason}")
+            else:
+                error(f"Could not fetch profile for '{token}'. Check the token and try again.")
             raise SystemExit(1)
 
         if output_json:

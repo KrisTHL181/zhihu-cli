@@ -92,6 +92,24 @@ def fetch_member_profile(url_token: str) -> dict[str, Any] | None:
     }
 
 
+def fetch_member_error_message(url_token: str) -> str | None:
+    """Return the platform's error message when a member profile is unavailable.
+
+    Restricted or banned accounts (``UserRegulateError``) return HTTP 410 with
+    an ``error.message`` body, e.g. ``由于严重违反知乎社区管理规定，该账号已被「停用」。``.
+    Other failures (e.g. HTTP 404) may carry an ``error.message`` as well.
+    Returns the message, or ``None`` when the profile is fetchable normally.
+    """
+    url = f"https://www.zhihu.com/api/v4/members/{url_token}"
+    try:
+        resp = session.get(url)
+        if resp.status_code < 400:
+            return None
+        return resp.json().get("error", {}).get("message") or None
+    except Exception:
+        return None
+
+
 # ── answer list ─────────────────────────────────────────────────────────────
 
 
