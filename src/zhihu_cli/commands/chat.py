@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from rich.text import Text
 
 from zhihu_cli.content.handlers.chat import (
@@ -66,6 +68,36 @@ def _render_chat_content(text: str) -> Text:
     # Append any trailing plain text
     result.append(text[pos:])
     return result
+
+
+def _print_bot_event(event: dict[str, Any], output_json: bool) -> None:
+    """Render one chat-bot event dict as styled output or JSON.
+
+    :param event: Event dict produced by ``run_bot`` (``type`` is one of
+        ``"started"``, ``"reply"``, ``"error"``).
+    :param output_json: If True, print the raw event as JSON instead.
+    """
+    if output_json:
+        print_json(event)
+        return
+
+    etype = event.get("type")
+    if etype == "started":
+        senders = event.get("senders") or ["*"]
+        mode = " (dry-run — replies will not be sent)" if event.get("dry_run") else ""
+        info(f"Bot listening — replying to: {', '.join(senders)}{mode}. Press Ctrl+C to stop.")
+    elif etype == "reply":
+        echo(f"  {f_dim('←')} {f_name(event['sender'])}: {event['message']}")
+        marker = f"  {f_green('→')}" if not event.get("dry_run") else f"  {f_tag('dry')} {f_green('→')}"
+        echo(f"{marker} {f_name(event['sender'])}: {event['reply']}")
+    elif etype == "error":
+        prefix = event.get("sender") or "bot"
+        message = event.get("message") or ""
+        reason = event.get("reason", "")
+        if message:
+            error(f"[{prefix}] {message} — {reason}")
+        else:
+            error(f"[{prefix}] {reason}")
 
 
 def register_chat(main_group: click.Group) -> None:
@@ -313,3 +345,77 @@ def register_chat(main_group: click.Group) -> None:
         mqtt_filter = sender if sender else user_id
         info(f"Connecting to Zhihu MQTT (messages from {mqtt_filter})...")
         interactive_chat(user_id, url_token, mqtt_filter, desktop_notify=desktop_notify)
+
+    @chat.command("bot")
+    @click.option(
+        "--system-prompt-file",
+        "-p",
+        "prompt_file",
+        required=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=str),
+        help="Path to a UTF-8 text file containing the bot's system prompt",
+    )
+    @click.option(
+        "--sender",
+        "-s",
+        "senders",
+        multiple=True,
+        help="Only auto-reply to this sender (repeatable; default: all senders)",
+    )
+    @click.option(
+        "--history",
+        "-n",
+        "history_limit",
+        type=int,
+        default=20,
+        show_default=True,
+        help="Recent messages to include as LLM context (0 = all)",
+    )
+    @click.option("--model", default=None, help="LLM model override (default: zhihu config llm / LLM_MODEL)")
+    @click.option("--api-base", default=None, help="LLM API base override (default: zhihu config llm / LLM_API_BASE)")
+    @click.option("--api-key", default=None, help="LLM API key override (default: zhihu config llm / LLM_API_KEY)")
+    @click.option("--dry-run", is_flag=True, default=False, help="Generate replies but do not send them")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output structured JSON events")
+    def chat_bot(
+        prompt_file: str,
+        senders: tuple[str, ...],
+        history_limit: int,
+        model: str | None,
+        api_base: str | None,
+        api_key: str | None,
+        dry_run: bool,
+        output_json: bool,
+    ) -> None:
+        """Run an LLM-powered auto-reply bot for incoming private messages.
+
+        Watches real-time chat messages, builds a context from the recent
+        conversation history, asks the configured LLM for a reply using the
+        system prompt in SYSTEM_PROMPT_FILE, and sends it back automatically.
+        Runs until interrupted (Ctrl+C).
+        """
+        from pathlib import Path
+
+        from zhihu_cli.content.handlers.chat_bot import run_bot
+
+        try:
+            system_prompt = Path(prompt_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise click.UsageError(f"Cannot read system prompt file '{prompt_file}': {exc}")
+        if not system_prompt:
+            raise click.UsageError(f"System prompt file '{prompt_file}' is empty.")
+
+        url_token = get_my_url_token()
+        if not url_token:
+            raise click.UsageError("Cannot auto-detect your url_token. Please authenticate first (zhihu auth login).")
+
+        run_bot(
+            url_token=url_token,
+            system_prompt=system_prompt,
+            senders=senders,
+            history_limit=history_limit,
+            api_base=api_base,
+            api_key=api_key,
+            model=model,
+            dry_run=dry_run,
+            on_event=lambda ev: _print_bot_event(ev, output_json=output_json),
+        )
