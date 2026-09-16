@@ -324,20 +324,27 @@ def save_pin(url: str, metadata: dict[str, str], markdown: str, output_dir: str,
 
 
 def _resolve_author(question_data: dict, answer_data: dict, users: dict[str, dict]) -> str:
-    """Resolve author name from entity data (question > answer > users)."""
-    # Try question author
+    """Resolve author name from entity data (answer > question > users).
+
+    The answer author is checked first: the question entity carries its own
+    ``author`` (the asker), so preferring it would label an answer with the
+    name of whoever asked the question.
+    """
+    # Try answer author as dict
+    ans_author = answer_data.get("author", "")
+    if isinstance(ans_author, dict) and ans_author.get("name"):
+        return ans_author["name"]
+
+    # Try answer author as string (user ID reference)
+    if isinstance(ans_author, str):
+        user = users.get(ans_author)
+        if isinstance(user, dict) and user.get("name"):
+            return user["name"]
+
+    # Fall back to question author
     author = question_data.get("author", {})
     if isinstance(author, dict) and author.get("name"):
         return author["name"]
-
-    # Try answer author as string (user ID reference)
-    ans_author = answer_data.get("author", "")
-    if isinstance(ans_author, str) and ans_author in users:
-        return users[ans_author].get("name", "unknown")
-
-    # Try answer author as dict
-    if isinstance(ans_author, dict) and ans_author.get("name"):
-        return ans_author["name"]
 
     return "unknown"
 
