@@ -49,10 +49,35 @@ def load_llm_config() -> dict[str, str]:
     return {}
 
 
-def save_llm_config(api_base: str, api_key: str, model: str) -> None:
-    """Persist LLM config to disk cache."""
+def llm_supports_vision(cfg: dict[str, str] | None = None) -> bool:
+    """Report whether the cached LLM config declares multimodal image support.
+
+    The flag is stored as the string ``"true"``/``"false"`` rather than a JSON
+    boolean, because :func:`load_llm_config` keeps only non-empty strings.
+
+    :param cfg: Pre-loaded config; loaded from disk when omitted.
+    :returns: True when the configured model is declared to accept image input.
+    """
+    cfg = load_llm_config() if cfg is None else cfg
+    return str(cfg.get("vision", "")).strip().lower() in {"true", "on", "1", "yes"}
+
+
+def save_llm_config(api_base: str, api_key: str, model: str, *, vision: bool | None = None) -> None:
+    """Persist LLM config to disk cache.
+
+    :param vision: Whether the model accepts image input. ``None`` keeps the
+        currently cached value so callers that only touch the three credential
+        fields don't clobber it.
+    """
     os.makedirs(CRANK_DIR, exist_ok=True)
-    data = {"api_base": api_base, "api_key": api_key, "model": model}
+    if vision is None:
+        vision = llm_supports_vision()
+    data = {
+        "api_base": api_base,
+        "api_key": api_key,
+        "model": model,
+        "vision": "true" if vision else "false",
+    }
     with open(LLM_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 

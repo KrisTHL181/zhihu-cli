@@ -10,9 +10,12 @@ from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.agora import (
     VALID_VOTES,
     VOTE_LABELS,
+    comment_to_markdown,
+    extract_comment_image_urls,
     fetch_agora_me,
     fetch_comment_detail,
     fetch_court_page,
+    fetch_images_as_data_urls,
     fetch_reviews,
     vote_discussion,
 )
@@ -302,12 +305,20 @@ def register_agora(main_group):
         default=False,
         help="Output one JSON object per vote as JSON lines.",
     )
+    @click.option(
+        "--no-image",
+        "no_image",
+        is_flag=True,
+        default=False,
+        help="Never send comment images, even when the model is configured as multimodal.",
+    )
     def agora_ai(
         discussion_id: str | None,
         model: str | None,
         api_base: str | None,
         api_key: str | None,
         output_json: bool,
+        no_image: bool,
     ) -> None:
         """Use AI to automatically vote on agora discussions (AI 自动投票).
 
@@ -317,6 +328,10 @@ def register_agora(main_group):
         discussion, lets the LLM decide the vote, casts it, and repeats
         until all pending discussions are exhausted.
 
+        Comment images are sent to the model when the configured LLM is
+        declared multimodal via ``zhihu config llm set --vision``; otherwise
+        only the text is sent. Use ``--no-image`` to force text-only.
+
         Requires LLM config via ``zhihu config llm set`` or the
         ``LLM_API_BASE`` / ``LLM_API_KEY`` / ``LLM_MODEL`` env vars.
 
@@ -325,6 +340,7 @@ def register_agora(main_group):
           zhihu agora ai                    # auto-vote all pending
           zhihu agora ai <discussion_id>     # vote on a specific one
           zhihu agora ai --json             # JSON-lines output for piping
+          zhihu agora ai --no-image         # force text-only prompts
         """
         set_json_mode(output_json)
         # Pre-load LLM config once (fail fast if not configured)
@@ -344,9 +360,11 @@ def register_agora(main_group):
         if _preflight is None:
             raise SystemExit(1)
 
+        allow_images = not no_image
+
         if discussion_id:
             # ── single-discussion mode ──────────────────────────────────
-            _ai_vote_one(discussion_id, model, api_base, api_key, output_json)
+            _ai_vote_one(discussion_id, model, api_base, api_key, output_json, allow_images)
         else:
             # ── loop-until-exhausted mode ───────────────────────────────
             voted_count = 0
@@ -381,21 +399,26 @@ def register_agora(main_group):
                     info(f"Already voted on {disc_id}, skipping.")
                     continue
 
-                _ai_vote_one_disc(disc, disc_id, model, api_base, api_key, output_json)
+                _ai_vote_one_disc(disc, disc_id, model, api_base, api_key, output_json, allow_images)
                 voted_count += 1
 
 
 # ── AI voting helpers ────────────────────────────────────────────────────────
 
 
-def _build_agora_vote_prompt(discussion: dict) -> str:
+def _build_agora_vote_prompt(discussion: dict, *, image_count: int = 0) -> str:
     """Build the user prompt for LLM voting from a discussion dict.
 
     :param discussion: Parsed discussion dict.
+    :param image_count: How many of the comment's images accompany this prompt.
     :returns: Prompt string.
     """
     comment = discussion.get("comment", {})
-    comment_content = comment.get("content", "(no content)")
+    # Hand the model Markdown rather than raw HTML: tags and attributes such as
+    # ``class="comment_img" data-width="1260"`` are pure token noise, and the
+    # converter also decodes entities and unwraps link.zhihu.com redirects.
+    # Pictures collapse to a placeholder — see ``comment_to_markdown``.
+    comment_content = comment_to_markdown(comment.get("content", "")) or "(no content)"
 
     report_reason = discussion.get("report_reason", "")
     report_note = discussion.get("report_note", "")
@@ -405,6 +428,9 @@ def _build_agora_vote_prompt(discussion: dict) -> str:
 
     parts = ["## 被举报的评论\n"]
     parts.append(f"{comment_content}\n")
+
+    if image_count:
+        parts.append(f"## 评论附带的图片\n已随本条消息提供 {image_count} 张图片（见下方），请结合图片内容判断。\n")
 
     parts.append("## 举报理由\n")
     parts.append(f"{report_reason}\n")
@@ -425,13 +451,15 @@ def _resolve_llm_config(
     api_base: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
-) -> tuple[str, str, str] | None:
+) -> tuple[str, str, str, bool] | None:
     """Resolve LLM config from args, env, and cached file.
 
-    :returns: ``(api_base, api_key, model)`` or ``None`` if api_key is missing.
+    :returns: ``(api_base, api_key, model, vision)`` or ``None`` if api_key is
+        missing. ``vision`` reports whether the model is declared to accept
+        image input (``LLM_VISION`` env var, else the cached config).
     """
     try:
-        from zhihu_cli.extensions.crank.archiver import load_llm_config
+        from zhihu_cli.extensions.crank.archiver import llm_supports_vision, load_llm_config
     except ImportError:
         error("Cannot import LLM config loader (crank extension not available).")
         return None
@@ -442,6 +470,12 @@ def _resolve_llm_config(
     _api_key = api_key or os.environ.get("LLM_API_KEY") or cached.get("api_key", "")
     _model = model or os.environ.get("LLM_MODEL") or cached.get("model", "gpt-4o-mini")
 
+    _vision_env = os.environ.get("LLM_VISION")
+    if _vision_env is None:
+        _vision = llm_supports_vision(cached)
+    else:
+        _vision = _vision_env.strip().lower() in {"1", "true", "yes", "on"}
+
     if not _api_key:
         error(
             "LLM API key not configured. Set it via:\n"
@@ -450,7 +484,7 @@ def _resolve_llm_config(
         )
         return None
 
-    return _api_base, _api_key, _model
+    return _api_base, _api_key, _model, _vision
 
 
 def _call_llm_for_vote(
@@ -459,28 +493,46 @@ def _call_llm_for_vote(
     api_base: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
+    allow_images: bool = True,
     dry_run: bool = False,
-) -> str | None:
+) -> tuple[str, int] | None:
     """Send discussion content to LLM and get a vote recommendation.
+
+    When the configured model is declared multimodal and *allow_images* is
+    set, images embedded in the reported comment are downloaded and attached
+    to the message; otherwise the prompt stays text-only.
 
     :param discussion: Parsed discussion dict.
     :param api_base: Optional API endpoint override.
     :param api_key: Optional API key override.
     :param model: Optional model name override.
+    :param allow_images: Whether comment images may be attached at all.
     :param dry_run: If True, only validate config without calling the LLM.
-    :returns: Vote label (affirmative/abstain/dissenting) or None on failure.
+    :returns: ``(vote, image_count)`` or None on failure. The vote label is
+        one of affirmative/abstain/dissenting.
     """
     resolved = _resolve_llm_config(api_base=api_base, api_key=api_key, model=model)
     if resolved is None:
         return None
 
-    _api_base, _api_key, _model = resolved
+    _api_base, _api_key, _model, _vision = resolved
 
     if dry_run:
         # Config is valid — signal success without an actual LLM call.
-        return "affirmative"  # any non-None value works
+        return "affirmative", 0  # any non-None value works
 
-    prompt = _build_agora_vote_prompt(discussion)
+    image_data_urls: list[str] = []
+    if allow_images and _vision:
+        image_urls = extract_comment_image_urls(discussion.get("comment", {}).get("content", ""))
+        if image_urls:
+            image_data_urls = fetch_images_as_data_urls(image_urls)
+
+    prompt = _build_agora_vote_prompt(discussion, image_count=len(image_data_urls))
+
+    user_content: str | list[dict] = prompt
+    if image_data_urls:
+        user_content = [{"type": "text", "text": prompt}]
+        user_content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_data_urls)
 
     try:
         from openai import OpenAI  # type: ignore[import-untyped]
@@ -495,7 +547,7 @@ def _call_llm_for_vote(
             model=_model,
             messages=[
                 {"role": "system", "content": AGORA_VOTE_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.3,
             max_tokens=16,
@@ -508,7 +560,7 @@ def _call_llm_for_vote(
         vote = raw.strip().lower()
         for v in VALID_VOTES:
             if v in vote:
-                return v
+                return v, len(image_data_urls)
         error(f"LLM returned unrecognized vote: {vote!r}")
         return None
     except Exception as e:
@@ -522,10 +574,12 @@ def _ai_vote_one(
     api_base: str | None,
     api_key: str | None,
     output_json: bool,
+    allow_images: bool = True,
 ) -> None:
     """Fetch a specific discussion, call the LLM, and cast the vote.
 
     :param discussion_id: The agora discussion ID.
+    :param allow_images: Whether comment images may be sent to the model.
     """
     try:
         data = fetch_court_page(discussion_id=discussion_id)
@@ -538,7 +592,7 @@ def _ai_vote_one(
         return
 
     disc_id = disc.get("id", discussion_id)
-    _ai_vote_one_disc(disc, disc_id, model, api_base, api_key, output_json)
+    _ai_vote_one_disc(disc, disc_id, model, api_base, api_key, output_json, allow_images)
 
 
 def _ai_vote_one_disc(
@@ -548,11 +602,13 @@ def _ai_vote_one_disc(
     api_base: str | None,
     api_key: str | None,
     output_json: bool,
+    allow_images: bool = True,
 ) -> None:
     """Call the LLM on *disc* and cast the vote.
 
     :param disc: Parsed discussion dict.
     :param disc_id: Discussion ID string.
+    :param allow_images: Whether comment images may be sent to the model.
     """
     comment = disc.get("comment", {})
     content = comment.get("content", "(no content)")
@@ -568,17 +624,19 @@ def _ai_vote_one_disc(
             echo(f"  {f_label('所在内容:')} {f_bold(origin_title)}")
         echo(f"  {f_dim('正在调用 AI 分析...')}")
 
-    vote = _call_llm_for_vote(
+    voted = _call_llm_for_vote(
         disc,
         api_base=api_base,
         api_key=api_key,
         model=model,
+        allow_images=allow_images,
     )
 
-    if not vote:
+    if not voted:
         error("AI voting failed — skipping this discussion.")
         return
 
+    vote, images_sent = voted
     label = VOTE_LABELS.get(vote, vote)
 
     # Cast the vote
@@ -594,6 +652,7 @@ def _ai_vote_one_disc(
         "origin_title": origin_title,
         "ai_vote": vote,
         "ai_vote_label": VOTE_LABELS.get(vote, vote),
+        "comment_images_sent": images_sent,
         "affirmative_count": vote_result["affirmative_count"],
         "dissenting_count": vote_result["dissenting_count"],
         "blind_test_wrong": vote_result["blind_test_wrong"],
@@ -606,6 +665,8 @@ def _ai_vote_one_disc(
 
     blank()
     success(f"已投票: {label}")
+    if images_sent:
+        echo(f"  {f_label('评论图片:')} {f_num(images_sent)} 张已随请求发送")
     echo(f"  {f_label('赞同 (affirmative):')} {f_num(vote_result['affirmative_count'])}")
     echo(f"  {f_label('反对 (dissenting):')}  {f_num(vote_result['dissenting_count'])}")
     if vote_result["blind_test_wrong"]:

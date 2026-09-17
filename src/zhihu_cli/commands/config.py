@@ -233,11 +233,19 @@ def register_config(main_group: click.Group) -> None:
     @click.option("--api-base", required=True, help="LLM API endpoint URL.")
     @click.option("--api-key", required=True, help="API key for authentication.")
     @click.option("--model", required=True, help="Model name to use.")
-    def config_llm_set(api_base: str, api_key: str, model: str) -> None:
+    @click.option(
+        "--vision/--no-vision",
+        default=None,
+        help="Declare whether the model accepts image input (default: keep current setting).",
+    )
+    def config_llm_set(api_base: str, api_key: str, model: str, vision: bool | None) -> None:
         """Cache LLM credentials for the crank archiver.
 
         \033[2mExample:\033[0m
           zhihu config llm set --api-base https://api.openai.com/v1 --api-key sk-xxx --model gpt-4
+
+        Pass \033[2m--vision\033[0m when the model accepts images, so that
+        \033[2mzhihu agora ai\033[0m sends pictures embedded in reported comments.
         """
         try:
             from zhihu_cli.extensions.crank.archiver import save_llm_config
@@ -245,8 +253,11 @@ def register_config(main_group: click.Group) -> None:
             error("crank extension is not available (missing dependencies).")
             raise SystemExit(1)
 
-        save_llm_config(api_base, api_key, model)
-        success(f"LLM config saved:\n  {f_label('api_base:')} {api_base}\n  {f_label('model:')} {model}")
+        save_llm_config(api_base, api_key, model, vision=vision)
+        lines = [f"  {f_label('api_base:')} {api_base}", f"  {f_label('model:')} {model}"]
+        if vision is not None:
+            lines.append(f"  {f_label('vision:')} {str(vision).lower()}")
+        success("LLM config saved:\n" + "\n".join(lines))
 
     @config_crank_llm.command("show")
     def config_llm_show() -> None:

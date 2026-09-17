@@ -13,11 +13,19 @@ Endpoints:
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterable
+from html import unescape
 from typing import Any
 
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
 from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.utils.html2markdown import (
+    ZhihuLinkConverter,
+    converter,
+    image_src,
+    replace_with_text,
+)
 
 AGORA_BASE = "https://www.zhihu.com/api/v4/agora"
 COURT_PAGE = "https://www.zhihu.com/appview/court/discussion"
@@ -292,6 +300,210 @@ def fetch_comment_detail(discussion_id: str) -> dict[str, Any]:
     resp = session.get(url)
     resp.raise_for_status()
     return _parse_comment_detail(resp.json())
+
+
+# ── comment images ─────────────────────────────────────────────────────────
+
+#: Class Zhihu puts on the anchor that wraps a picture inside a comment.
+COMMENT_IMG_CLASS = "comment_img"
+#: Stands in for an embedded picture in the Markdown handed to an LLM.
+COMMENT_IMAGE_PLACEHOLDER = "[图片]"
+#: Upper bound on how many images a single comment contributes to an LLM call.
+MAX_COMMENT_IMAGES = 4
+#: Images larger than this are skipped rather than ballooning the prompt.
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+_IMAGE_MIME_BY_EXT: tuple[tuple[str, str], ...] = (
+    (".png", "image/png"),
+    (".gif", "image/gif"),
+    (".webp", "image/webp"),
+    (".bmp", "image/bmp"),
+    (".jpeg", "image/jpeg"),
+    (".jpg", "image/jpeg"),
+)
+
+
+_lxml_html_mod = None
+
+
+def _lxml_html():
+    """Import and cache the ``lxml.html`` module on first use.
+
+    ``lxml`` is a heavy C-extension dependency, so it is pulled in lazily
+    rather than at module import time.
+
+    :returns: The ``lxml.html`` module.
+    """
+    global _lxml_html_mod
+    if _lxml_html_mod is None:
+        from lxml import html as _lxml_html_mod
+    return _lxml_html_mod
+
+
+def _comment_html_root(content_html: str):
+    """Parse a comment body into an lxml tree, or return None if unparseable.
+
+    :param content_html: Raw ``content`` field of a comment.
+    :returns: Root element, or None when there is no markup to walk.
+    """
+    if not content_html:
+        return None
+    text = content_html
+    if "<" not in text and "&lt;" in text:
+        # Some endpoints hand back an escaped body; recover the real markup.
+        text = unescape(text)
+    if "<" not in text:
+        return None
+    try:
+        return _lxml_html().fromstring(text)
+    except Exception:
+        return None
+
+
+def comment_to_markdown(content_html: str, *, image_placeholder: str = COMMENT_IMAGE_PLACEHOLDER) -> str:
+    """Render a comment body as Markdown, collapsing embedded pictures.
+
+    Every picture becomes *image_placeholder* instead of a Markdown image or
+    link. A consumer that receives the picture itself finds the CDN URL
+    redundant, and one that does not gains nothing from a bare URL — while
+    the placeholder still marks where the picture sat and how many there are.
+
+    :param content_html: Raw ``content`` field of a comment.
+    :param image_placeholder: Text substituted for each embedded picture.
+    :returns: Markdown text, or the raw body when it cannot be parsed.
+    """
+    root = _comment_html_root(content_html)
+    if root is None:
+        return content_html
+
+    lxml_html = _lxml_html()
+    # Wrap the fragment so it always has a parent: ``replace_with_text`` is a
+    # no-op on a parentless element, and a comment that is nothing but an
+    # image parses with that image as the root.
+    wrapper = lxml_html.Element("div")
+    wrapper.append(root)
+
+    # Snapshot first: replacing an anchor detaches the <img> nested inside it.
+    for element in list(wrapper.iter()):
+        if element is wrapper or element.getparent() is None:
+            continue  # the wrapper, or already removed by an earlier replacement
+        kind = _image_kind(element)
+        if kind == "picture":
+            replace_with_text(element, image_placeholder)
+        elif kind == "emoticon":
+            # Keep the name: ``[doge]`` is a sentiment cue a moderator reads.
+            replace_with_text(element, element.get("alt") or image_placeholder)
+
+    converted = converter.convert(lxml_html.tostring(wrapper, encoding="unicode"))
+    return converted.strip() or content_html
+
+
+def _image_kind(element) -> str | None:
+    """Classify an image-bearing element as a picture, emoticon, or formula.
+
+    Zhihu marks three unrelated things up with image elements, and only a
+    real picture is worth downloading or collapsing to a placeholder:
+    emoticons carry their name in ``alt``, and formulas are left for the
+    Markdown converter to render as LaTeX.
+
+    :param element: An lxml element from a comment body.
+    :returns: ``"picture"``, ``"emoticon"``, ``"formula"``, or None.
+    """
+    if not isinstance(element.tag, str):
+        return None
+    tag = element.tag.lower()
+    classes = (element.get("class") or "").split()
+    if tag == "a":
+        return "picture" if COMMENT_IMG_CLASS in classes else None
+    if tag != "img":
+        return None
+    if element.get("eeimg"):
+        return "formula"
+    alt = (element.get("alt") or "").strip()
+    # Zhihu's emoticon class, plus a fallback for markup that omits it: an
+    # alt of the form "[doge]" is an emoticon name, not a picture caption.
+    if "emoticon" in classes or (alt.startswith("[") and alt.endswith("]")):
+        return "emoticon"
+    return "picture"
+
+
+def extract_comment_image_urls(content_html: str) -> list[str]:
+    """Extract the image URLs embedded in a comment body.
+
+    Zhihu wraps comment pictures in an anchor rather than an ``<img>`` tag::
+
+        <a href="https://pic2.zhimg.com/v2-xxx_qhd.jpeg" class="comment_img">查看图片</a>
+
+    Plain ``<img>`` tags are picked up too, resolving the real URL through
+    :func:`~zhihu_cli.content.utils.html2markdown.image_src` so lazy-loaded
+    images yield the picture rather than its placeholder.
+
+    :param content_html: Raw ``content`` field of a comment.
+    :returns: Absolute image URLs in document order, de-duplicated.
+    """
+    root = _comment_html_root(content_html)
+    if root is None:
+        return []
+
+    urls: list[str] = []
+    for element in root.iter():
+        if _image_kind(element) != "picture":
+            continue  # skip emoticons and formulas
+        if element.tag.lower() == "a":
+            # Zhihu wraps comment pictures in an anchor rather than an <img>,
+            # so the Markdown converter renders them as links; pick up the
+            # href here instead.
+            url = element.get("href", "")
+        else:
+            url = image_src(element)
+        url = ZhihuLinkConverter.normalize_link(url.strip())
+        if url.startswith("http") and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _guess_image_mime(url: str, content_type: str) -> str:
+    """Pick an image MIME type, preferring the response header over the URL suffix."""
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if mime.startswith("image/"):
+        return mime
+    path = url.split("?")[0].lower()
+    for ext, guess in _IMAGE_MIME_BY_EXT:
+        if path.endswith(ext):
+            return guess
+    return "image/jpeg"
+
+
+def fetch_images_as_data_urls(
+    urls: Iterable[str],
+    *,
+    max_images: int = MAX_COMMENT_IMAGES,
+    max_bytes: int = MAX_IMAGE_BYTES,
+) -> list[str]:
+    """Download images and base64-encode them as ``data:`` URLs.
+
+    Images go through the shared authenticated :data:`session`, so the Zhihu
+    CDN sees the same cookies and headers as every other request. Downloads
+    that fail, come back empty, or exceed *max_bytes* are skipped.
+
+    :param urls: Image URLs, typically from :func:`extract_comment_image_urls`.
+    :param max_images: Maximum number of images to fetch.
+    :param max_bytes: Skip any image larger than this many bytes.
+    :returns: Data URLs suitable for a multimodal LLM message.
+    """
+    data_urls: list[str] = []
+    for url in list(urls)[:max_images]:
+        try:
+            resp = session.get(url, timeout=30)
+            resp.raise_for_status()
+            body = resp.content
+        except Exception:
+            continue
+        if not body or len(body) > max_bytes:
+            continue
+        mime = _guess_image_mime(url, resp.headers.get("content-type", ""))
+        data_urls.append(f"data:{mime};base64,{base64.b64encode(body).decode('ascii')}")
+    return data_urls
 
 
 # ── voting ─────────────────────────────────────────────────────────────────
