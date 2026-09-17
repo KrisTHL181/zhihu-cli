@@ -83,6 +83,26 @@ def _tag_name(element: "HtmlElement") -> str:
     return tag.lower() if isinstance(tag, str) else str(tag)
 
 
+def image_src(element: "HtmlElement") -> str:
+    """Return the real image URL carried by an ``<img>`` element.
+
+    Zhihu lazy-loads images: ``src`` often holds a placeholder while the
+    actual picture sits in a ``data-*`` attribute. Prefer the first absolute
+    candidate, since trusting ``src`` alone yields the placeholder.
+
+    Falls back to ``src`` unchanged when no absolute candidate exists, so
+    inline ``data:`` URIs and relative URLs keep their previous behaviour.
+
+    :param element: An lxml ``<img>`` element.
+    :returns: The image URL, or ``""`` when the element carries none.
+    """
+    for attr in ("data-original", "data-actualsrc", "data-src", "src"):
+        value = (element.get(attr) or "").strip()
+        if value.startswith("http"):
+            return value
+    return (element.get("src") or "").strip()
+
+
 # ── link converter ────────────────────────────────────────────────────────────
 
 
@@ -285,7 +305,7 @@ class ZhihuMarkdownConverter:
 
         # Images
         if tag == "img":
-            src = element.get("src", "")
+            src = image_src(element)
             alt = element.get("alt", "")
             src = self.link_converter.normalize_link(src)
             return f"![{alt}]({src})"
@@ -294,7 +314,7 @@ class ZhihuMarkdownConverter:
         if tag == "figure":
             img = element.find(".//img")
             if img is not None:
-                src = img.get("src", "")
+                src = image_src(img)
                 alt = img.get("alt", "")
                 src = self.link_converter.normalize_link(src)
                 md_img = f"![{alt}]({src})"
