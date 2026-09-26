@@ -58,6 +58,24 @@ from zhihu_cli.output import (
 )
 
 
+def _collapse_tag(ans: dict) -> str:
+    """Build the ``已被折叠 · <reason> · <by>`` label for a collapsed answer.
+
+    :returns: the label, or an empty string when the answer is not collapsed.
+    """
+    if not ans.get("is_collapsed"):
+        return ""
+
+    parts = ["已被折叠"]
+    reason = ans.get("collapse_reason") or ""
+    collapsed_by = ans.get("collapsed_by") or ""
+    if reason:
+        parts.append(reason)
+    if collapsed_by:
+        parts.append(collapsed_by)
+    return " · ".join(parts)
+
+
 def register_browse(main_group):
     """Register the browse command group and all its sub-commands."""
 
@@ -72,6 +90,7 @@ def register_browse(main_group):
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
     @click.option("--limit", type=int, default=20, help="Answers per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total answers to fetch")
+    @click.option("--collapsed", is_flag=True, default=False, help="Only show collapsed (折叠) answers")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--sort",
@@ -81,12 +100,22 @@ def register_browse(main_group):
         help="Sort answers by criteria",
     )
     def browse_question(
-        url: str, reading_mode: bool, limit: int, max_items: int | None, output_json: bool, sort_by: str
+        url: str,
+        reading_mode: bool,
+        limit: int,
+        max_items: int | None,
+        collapsed: bool,
+        output_json: bool,
+        sort_by: str,
     ) -> None:
-        """Browse a Zhihu question and all its answers."""
+        """Browse a Zhihu question and all its answers.
+
+        With --collapsed, only the answers Zhihu has folded away (折叠回答)
+        are listed, annotated with the reason each one was collapsed.
+        """
         q_meta, q_detail_md = scrape_question_data(url)
 
-        answers = list(scrape_answers(q_meta, limit=limit, max_items=max_items))
+        answers = list(scrape_answers(q_meta, limit=limit, max_items=max_items, collapsed=collapsed))
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "upvotes": "vote", "favorites": "favorite", "comments": "comment"}
             answers = _sort_items(answers, _SORT_MAP[sort_by])
@@ -95,10 +124,15 @@ def register_browse(main_group):
             print_json({"question": q_meta, "detail_md": q_detail_md, "answers": answers})
             return
 
+        if collapsed and not answers:
+            info("No collapsed answers for this question.")
+            return
+
         if reading_mode:
             try:
                 from rich.console import Console
                 from rich.markdown import Markdown
+                from rich.markup import escape
             except ImportError:
                 reading_mode = False
 
@@ -111,6 +145,9 @@ def register_browse(main_group):
                     console.print(
                         f"\n--- Answer #{i} (ID: {ans['id']}) by {ans['author']} (+{ans['vote']} votes, {ans['comment']} comments, {ans['favorite']} favorites) ---"
                     )
+                    tag = _collapse_tag(ans)
+                    if tag:
+                        console.print(f"[yellow]{escape(f'[{tag}]')}[/yellow]")
                     console.print(Markdown(ans["content"]))
         else:
             echo(question_md)
@@ -128,6 +165,9 @@ def register_browse(main_group):
                     f"{f_num(comment)} {f_meta('comments')}, "
                     f"{f_num(favorite)} {f_meta('favorites')}) ---"
                 )
+                tag = _collapse_tag(ans)
+                if tag:
+                    echo(f"  {f_tag(tag)}")
                 echo(ans["content"])
 
     @browse.command("answer")

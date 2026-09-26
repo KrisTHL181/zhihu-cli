@@ -12,9 +12,15 @@ from zhihu_cli.content.utils.html2markdown import converter
 ANSWER_FEEDS_URL = (
     "https://api.zhihu.com/questions/{question_id}/feeds"
     "?include=content,big_card_summary,media_detail,reaction_instruction,is_author,is_thanked,"
-    "voting,is_favorited,label_info,content_text_length,reactions"
+    "voting,is_favorited,label_info,content_text_length,reactions,"
+    "is_collapsed,collapse_reason,collapsed_by"
     "&order=default&show_detail=1"
 )
+
+# Appended to :data:`ANSWER_FEEDS_URL` to switch the feed from the default view
+# to the collapsed answers section.  Zhihu's ``paging.next`` URLs carry the
+# filter forward, so pagination needs no further handling.
+COLLAPSED_FILTER = "&filter=collapsed"
 
 QUESTION_API_URL = (
     "https://api.zhihu.com/questions/{question_id}"
@@ -88,6 +94,7 @@ def scrape_answers(
     raw: bool = False,
     limit: int = 5,
     max_items: int | None = None,
+    collapsed: bool = False,
 ) -> Iterable[dict[str, Any]]:
     """Yield answers for a question, one dict per answer.
 
@@ -97,8 +104,13 @@ def scrape_answers(
     :param limit: number of answers requested per API page.
     :param max_items: optional cap on the total number of answers yielded
         (stops pagination early when reached).
+    :param collapsed: when True, fetch the collapsed (折叠) answers section
+        instead of the default view.  Each yielded dict then also carries
+        ``"is_collapsed"``, ``"collapse_reason"`` and ``"collapsed_by"``.
     """
     url = ANSWER_FEEDS_URL.replace("{question_id}", str(question_data["id"]))
+    if collapsed:
+        url += COLLAPSED_FILTER
 
     def parse_ans(data):
         for item in data.get("data", []):
@@ -117,6 +129,9 @@ def scrape_answers(
                 "favorite": ans.get("favlists_count", 0),
                 "created_time": int(ans.get("created_time", 0) or 0),
                 "content": content,
+                "is_collapsed": bool(ans.get("is_collapsed", False)),
+                "collapse_reason": ans.get("collapse_reason") or "",
+                "collapsed_by": ans.get("collapsed_by") or "",
             }
 
     return stream_handler(url, parse_ans, limit=limit, max_items=max_items)
