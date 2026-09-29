@@ -7,6 +7,74 @@ from zhihu_cli.content.utils.html2markdown import calculate_text_length
 from zhihu_cli.content.utils.markdown2html import markdown2html
 
 PUBLISH_API: str = "https://www.zhihu.com/api/v4/content/publish"
+CONTENT_DRAFTS_API: str = "https://www.zhihu.com/api/v4/content/drafts"
+
+
+def _create_content_draft(action: str) -> str:
+    """Create an empty content draft and return its ``content_id``.
+
+    Pins must be published against a draft, and the draft has to exist
+    before the publish call carries the body.
+
+    :param action: Content type the draft is for, e.g. ``"pin"``.
+    :returns: The draft's ``content_id``, as a string.
+    :raises ValueError: If the response carries no ``content_id``.
+    """
+    resp = session.post(CONTENT_DRAFTS_API, json={"action": action})
+    resp.raise_for_status()
+    content_id = resp.json().get("data", {}).get("content_id", "")
+    if not content_id:
+        raise ValueError(f"Content draft created but no content_id returned (action={action!r})")
+    return str(content_id)
+
+
+def build_image_html(image_infos: list[dict[str, Any]]) -> str:
+    """Build the ``<img>`` tags Zhihu expects for already-uploaded images.
+
+    :param image_infos: Image dicts as returned by
+        :func:`~zhihu_cli.content.handlers.upload_image.upload_image`.
+    :returns: Concatenated ``<img>`` tags, ready to append to a content body.
+    """
+    return "".join(
+        f'<img src="{info["src"]}" data-caption="" data-size="normal"'
+        f' data-rawwidth="{info.get("width", 0)}" data-rawheight="{info.get("height", 0)}"'
+        f' data-watermark="{info.get("watermark", "watermark")}"'
+        f' data-original-src="{info.get("original_src", info["src"])}"'
+        f' data-watermark-src="{info.get("watermark_src", "")}"'
+        f' data-private-watermark-src=""/>'
+        for info in image_infos
+    )
+
+
+def extract_published_id(resp: dict[str, Any]) -> str:
+    """Pull the created content's ID out of a publish response.
+
+    ``content/publish`` sometimes nests the real payload inside
+    ``data.result`` as a JSON *string* rather than an object, so that is
+    unwrapped before looking for ``id``.
+
+    :param resp: Raw response dict from a publish call.
+    :returns: The content ID, or an empty string when the response has none.
+    """
+    payload: Any = resp
+    data = resp.get("data") if isinstance(resp, dict) else None
+    if isinstance(data, dict):
+        result = data.get("result")
+        if isinstance(result, dict):
+            payload = result
+        elif isinstance(result, str) and result:
+            try:
+                payload = json.loads(result)
+            except ValueError:
+                payload = resp
+
+    if isinstance(payload, dict):
+        item_id = payload.get("id")
+        if item_id:
+            return str(item_id)
+    if isinstance(data, dict) and data.get("id"):
+        return str(data["id"])
+    return ""
 
 
 def publish_answer(
@@ -263,4 +331,61 @@ def modify_article(
             },
         },
     )
+    return resp.json()
+
+
+def publish_pin(
+    title: str,
+    content: str,
+    *,
+    image_infos: list[dict[str, Any]] | None = None,
+    html: str | None = None,
+    text_length: int | None = None,
+) -> dict[str, Any]:
+    """Publish a new pin (想法).
+
+    :param title: Pin title. Zhihu stores it alongside the body but does not
+        render it on the pin page; the publish API still requires it.
+    :param content: Markdown body. May be empty for an image-only pin.
+    :param image_infos: Image dicts from
+        :func:`~zhihu_cli.content.handlers.upload_image.upload_image`. Each is
+        appended to the body and registered as pin media.
+    :param html: Pre-converted HTML body (avoids re-conversion).
+    :param text_length: Character count of the visible text. When omitted,
+        computed client-side via :func:`calculate_text_length`.
+    """
+    trace_id = ",".join([str(x) for x in generate_trace_context()])
+    if html is None:
+        html = markdown2html(content, scene="answer") if content.strip() else ""
+    if image_infos:
+        html += build_image_html(image_infos)
+    if text_length is None:
+        text_length = calculate_text_length(html)
+
+    data: dict[str, Any] = {
+        "publish": {"traceId": trace_id},
+        "commentsPermission": {"comment_permission": "all"},
+        "extra_info": {"view_permission": "all", "publisher": "pc"},
+        "draft": {"disabled": 1, "id": _create_content_draft("pin")},
+        "title": {"title": title},
+        "hybrid": {"html": html, "textLength": text_length},
+    }
+    if image_infos:
+        data["media"] = {
+            "medias": [
+                {
+                    "image": {
+                        "width": info.get("width", 0),
+                        "height": info.get("height", 0),
+                        "url": info["src"],
+                        "originalUrl": info.get("original_src", info["src"]),
+                        "watermark": info.get("watermark", "watermark"),
+                        "watermarkUrl": info.get("watermark_src", ""),
+                    }
+                }
+                for info in image_infos
+            ]
+        }
+
+    resp = session.post(PUBLISH_API, json={"action": "pin", "data": data})
     return resp.json()
