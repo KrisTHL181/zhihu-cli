@@ -80,6 +80,51 @@ def parse_pin_metadata(item: dict[str, Any], users: dict[str, Any] | None = None
     }
 
 
+def _link_card_markdown(block: dict[str, Any]) -> str:
+    """Render a repin's ``link_card`` block as a single Markdown link.
+
+    The card carries the title and URL of whatever was reposted. The title
+    is read through :func:`_pick` because API responses spell it
+    ``data_draft_title`` where page-state entities use ``dataDraftTitle``.
+
+    :param block: A ``link_card`` content block.
+    :returns: A Markdown link, or an empty string when the block has no URL.
+    """
+    url = block.get("url") or ""
+    if not url:
+        return ""
+    title = _pick(block, "data_draft_title", "dataDraftTitle") or ""
+    return f"[{title or url}]({url})"
+
+
+def _render_body(item: dict[str, Any]) -> str:
+    """Render a pin's body as Markdown.
+
+    A pin's ``content`` is a list of blocks rather than one document. Text
+    blocks carry HTML and go through the usual converter; a repin carries a
+    ``link_card`` block instead, which has no body of its own and becomes a
+    plain Markdown link to the reposted content. Image and poll blocks hold
+    no text and contribute nothing.
+
+    :param item: Pin entity, either from the page state or from the API.
+    :returns: The pin body as Markdown.
+    """
+    blocks = item.get("content")
+    if not isinstance(blocks, list):
+        return converter.convert(blocks or "")
+
+    html = "".join(block.get("content") or "" for block in blocks if block.get("type") == "text")
+    parts = [converter.convert(html)] if html else []
+
+    for block in blocks:
+        if block.get("type") == "link_card":
+            link = _link_card_markdown(block)
+            if link:
+                parts.append(link)
+
+    return "\n\n".join(part for part in parts if part)
+
+
 def scrape_pin(pin_url: str) -> tuple[dict[str, Any], str]:
     entities = get_page_state(fetch_page_html(pin_url))
     item = entities.get("pins", {})
@@ -87,8 +132,4 @@ def scrape_pin(pin_url: str) -> tuple[dict[str, Any], str]:
         raise ValueError("No pins data found in entities")
 
     item_data = next(iter(item.values()))
-
-    content = item_data.get("content", "")  # Pin content may be nested
-    if isinstance(content, list) and content:
-        content = content[0].get("content", "")
-    return parse_pin_metadata(item_data, entities.get("users", {})), converter.convert(content)
+    return parse_pin_metadata(item_data, entities.get("users", {})), _render_body(item_data)
