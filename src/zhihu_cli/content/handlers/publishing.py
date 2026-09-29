@@ -8,6 +8,7 @@ from zhihu_cli.content.utils.markdown2html import markdown2html
 
 PUBLISH_API: str = "https://www.zhihu.com/api/v4/content/publish"
 CONTENT_DRAFTS_API: str = "https://www.zhihu.com/api/v4/content/drafts"
+QUESTIONS_API: str = "https://www.zhihu.com/api/v4/questions"
 
 
 def _create_content_draft(action: str) -> str:
@@ -388,4 +389,55 @@ def publish_pin(
         }
 
     resp = session.post(PUBLISH_API, json={"action": "pin", "data": data})
+    return resp.json()
+
+
+def create_question(
+    title: str,
+    detail: str = "",
+    *,
+    topic_ids: list[str] | None = None,
+    image_infos: list[dict[str, Any]] | None = None,
+    html: str | None = None,
+) -> dict[str, Any]:
+    """Create a new question (提问).
+
+    Zhihu takes two different routes here: a plain question goes to the
+    ``questions`` endpoint, while a question with images has to go through
+    ``content/publish`` with an explicit HTML body.
+
+    :param title: Question title.
+    :param detail: Markdown question detail (补充说明). Optional.
+    :param topic_ids: Topic IDs to tag the question with.
+    :param image_infos: Image dicts from
+        :func:`~zhihu_cli.content.handlers.upload_image.upload_image`.
+    :param html: Pre-converted HTML detail (avoids re-conversion).
+    """
+    # The questions endpoint takes the same HTML shape its own API returns
+    # in the ``detail`` field, so both routes share one conversion.
+    if html is None:
+        html = markdown2html(detail, scene="answer") if detail.strip() else ""
+
+    if image_infos:
+        resp = session.post(
+            PUBLISH_API,
+            json={
+                "action": "question",
+                "data": {
+                    "title": {"title": title},
+                    "topic": {"topics": list(topic_ids) if topic_ids else []},
+                    "hybrid": {"html": html + build_image_html(image_infos), "textLength": calculate_text_length(html)},
+                    "extra_info": {"publisher": "pc"},
+                    "questionConfig": {"type": "0"},
+                    "draft": {"disabled": 1},
+                },
+            },
+        )
+        return resp.json()
+
+    payload: dict[str, Any] = {"title": title, "detail": html}
+    if topic_ids:
+        payload["topic_url_tokens"] = list(topic_ids)
+    resp = session.post(QUESTIONS_API, json=payload)
+    resp.raise_for_status()
     return resp.json()

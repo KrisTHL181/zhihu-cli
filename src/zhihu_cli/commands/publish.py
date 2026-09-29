@@ -4,6 +4,7 @@ import click
 
 from zhihu_cli.commands._helpers import _read_content
 from zhihu_cli.content.handlers.publishing import (
+    create_question,
     extract_published_id,
     modify_answer,
     modify_article,
@@ -17,6 +18,7 @@ from zhihu_cli.output import echo, error, f_green, f_url, print_json, success
 
 _PUBLISHED_URLS: dict[str, str] = {
     "pin": "https://www.zhihu.com/pin/",
+    "question": "https://www.zhihu.com/question/",
 }
 
 
@@ -48,7 +50,7 @@ def register_publish(main_group: click.Group) -> None:
 
     @main_group.group()
     def publish() -> None:
-        """Publish or modify Zhihu content: pins, answers, and articles."""
+        """Publish or modify Zhihu content: pins, questions, answers, and articles."""
 
     @publish.command("answer")
     @click.argument("question_id")
@@ -141,6 +143,45 @@ def register_publish(main_group: click.Group) -> None:
 
         resp = publish_pin(title.strip(), content, image_infos=image_infos or None)
         _report_published(resp, "pin", title.strip())
+
+    @publish.command("question")
+    @click.argument("title")
+    @click.option(
+        "--detail-file",
+        "-f",
+        "detail_file",
+        default=None,
+        help="Markdown file for the detail / 补充说明 (use '-' for stdin)",
+    )
+    @click.option("--topic", "-t", "topics", multiple=True, help="Topic ID (repeatable)")
+    @click.option("--image", "-i", "images", multiple=True, help="Image to attach (repeatable)")
+    def publish_question_cmd(
+        title: str, detail_file: str | None, topics: tuple[str, ...], images: tuple[str, ...]
+    ) -> None:
+        """Ask a new question (提问), optionally with topics and images.
+
+        The detail is optional and read as Markdown; unlike the other
+        publish commands nothing is read from stdin unless --detail-file
+        is given explicitly, so a bare title works.
+        """
+        if not title.strip():
+            error("Title cannot be empty.")
+            raise SystemExit(1)
+
+        try:
+            image_infos = _upload_images(images, source="question")
+        except (FileNotFoundError, RuntimeError) as e:
+            error(f"{e}")
+            raise SystemExit(1)
+
+        detail = _read_content(detail_file) if detail_file else ""
+        resp = create_question(
+            title.strip(),
+            detail,
+            topic_ids=list(topics) or None,
+            image_infos=image_infos or None,
+        )
+        _report_published(resp, "question", title.strip())
 
     @publish.command("upload-image")
     @click.argument("file_path")
