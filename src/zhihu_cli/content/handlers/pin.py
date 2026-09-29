@@ -37,7 +37,10 @@ def parse_pin_metadata(item: dict[str, Any], users: dict[str, Any] | None = None
     excerpt = item.get("excerpt", "")
     content_preview = excerpt or (item.get("content", "")[:200] if item.get("content") else "")
 
-    voteup_count = item.get("voteup_count", 0)
+    # Pins do not separate 赞同 from 点赞, so the reaction count is the
+    # vote count. ``voteup_count`` is what the field was originally read
+    # as, but no pin response actually carries it.
+    voteup_count = _pick(item, "voteup_count", "reaction_count", "reactionCount") or 0
     comment_count = _pick(item, "comment_count", "commentCount") or 0
 
     created = item.get("created", 0)
