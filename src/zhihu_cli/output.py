@@ -23,6 +23,7 @@ import click
 from rich import box
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 __all__ = [
     "echo",
@@ -206,13 +207,29 @@ def print_table(
     box_style: box.Box = box.ROUNDED,
     **kwargs: Any,
 ) -> None:
-    """Render a styled table."""
+    """Render a styled table.
+
+    Cells styled with the inline ``f_*`` helpers carry ANSI escapes.  They
+    are converted with :meth:`rich.text.Text.from_ansi` so Rich measures
+    their visible width; passing them through as plain strings makes Rich
+    count the escape bytes, which misaligns every column in the row.
+    """
     table = Table(title=title, box=box_style, **kwargs)
     for col in columns:
         table.add_column(col, style="cyan", header_style="bold cyan")
     for row in rows:
-        table.add_row(*[str(c) for c in row])
+        table.add_row(*[_table_cell(c) for c in row])
     (_console_err if _json_mode else _console).print(table)
+
+
+def _table_cell(value: Any) -> str | Text:
+    """Return a table cell, preserving ANSI styling when present.
+
+    :param value: Cell content.
+    :returns: A plain string, or a ``Text`` when *value* contains ANSI escapes.
+    """
+    text = str(value)
+    return Text.from_ansi(text) if "\x1b" in text else text
 
 
 # ── inline format helpers (for use in f-strings) ────────────────────────────
