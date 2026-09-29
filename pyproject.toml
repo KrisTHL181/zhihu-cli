@@ -68,9 +68,13 @@ creator = [
 notify = [
     "desktop-notifier",
 ]
+mcp = [
+    "mcp>=2.0",
+]
 
 [project.scripts]
 zhihu = "zhihu_cli.main:main"
+zhihu-mcp = "zhihu_cli.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/KrisTHL181/zhihu-cli"
