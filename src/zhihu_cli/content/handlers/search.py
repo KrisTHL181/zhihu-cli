@@ -9,13 +9,25 @@ from zhihu_cli.content.handlers.feed import _parse_article_target as feed_parse_
 from zhihu_cli.content.handlers.feed import _parse_author
 from zhihu_cli.content.handlers.question import parse_question_metadata
 from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.output import in_json_mode
 
 SEARCH_URL = "https://www.zhihu.com/api/v4/search_v3"
 ARTICLE_SEARCH_URL = "https://api.zhihu.com/search_v3"
 
 
 def replace_em(text: str) -> str:
-    """Replace <em> tags with terminal color codes."""
+    """Replace ``<em>`` tags around the matched keyword.
+
+    The search API wraps the query terms in ``<em>``. They become ANSI color
+    codes for terminal output, and are stripped outright under ``--json`` — the
+    escapes would otherwise be embedded in the JSON string values and reach
+    consumers as literal ``\\u001b[1;31m``.
+
+    :param text: raw field text from the search API.
+    :returns: the text with ``<em>`` tags rendered or removed.
+    """
+    if in_json_mode():
+        return re.sub(r"</?em>", "", text)
     text = re.sub(r"<em>", "\033[1;31m", text)
     return re.sub(r"</em>", "\033[0m", text)
 
