@@ -44,6 +44,8 @@ def register_tools(main_group):
                 f"Invalid period {period!r}. Use an integer (seconds) or suffix s/m/h/d, e.g. '60', '5m', '1h', '2d'."
             )
         value = int(m.group(1))
+        if value <= 0:
+            raise click.BadParameter(f"Invalid period {period!r} — must be greater than zero.")
         unit = m.group(2) or "s"
         multipliers: dict[str, int] = {"s": 1, "m": 60, "h": 3600, "d": 86400}
         return value * multipliers[unit]
@@ -112,6 +114,13 @@ def register_tools(main_group):
         heading(f"Loop: zhihu {command} --json  →  {target_jsonl_file}")
         info(f"Period: {period} ({period_seconds}s)")
 
+        # Deadlines are anchored to the start time and advance by exactly one
+        # period per round, so a slow run never pushes later runs back.  Sleeping
+        # ``period_seconds`` *after* each run would instead make the real interval
+        # ``period + run_duration``, drifting further every round.  ``monotonic``
+        # keeps the schedule immune to wall-clock jumps (NTP, DST, suspend).
+        deadline = time.monotonic() + period_seconds
+
         while True:
             try:
                 result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=300)
@@ -125,7 +134,16 @@ def register_tools(main_group):
 
             if once:
                 break
-            time.sleep(period_seconds)
+
+            now = time.monotonic()
+            if now > deadline:
+                # The run overran its slot — skip the slots it already missed
+                # rather than firing them back to back, which would hammer the API.
+                skipped = int((now - deadline) // period_seconds) + 1
+                deadline += skipped * period_seconds
+                warning(f"Run overran its interval — skipping {skipped} interval(s)")
+            time.sleep(deadline - now)
+            deadline += period_seconds
 
     @tools.command("request")
     @click.argument("url", type=str)
