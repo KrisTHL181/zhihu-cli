@@ -826,7 +826,7 @@ def register_browse(main_group):
 
     @browse.group("following")
     def browse_following() -> None:
-        """View your followed users, topics, questions, columns, and collections."""
+        """View a Zhihu user's followed users, topics, questions, columns, and collections."""
 
     def _following_command(
         fetch_fn,
@@ -861,7 +861,13 @@ def register_browse(main_group):
         _save_json_output(items, output, label)
 
     @browse_following.command("users")
-    @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+    @click.option(
+        "--url-token",
+        "-u",
+        type=str,
+        default=None,
+        help="Target user's url_token or profile URL (defaults to yourself)",
+    )
     @click.option("--limit", type=int, default=20, help="Items per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -876,7 +882,7 @@ def register_browse(main_group):
     def following_users(
         url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
-        """List users you follow."""
+        """List the users a Zhihu user follows."""
         _FOLLOWING_SORT = {"followers": "follower_count", "answers": "answer_count", "articles": "articles_count"}
         _following_command(
             fetch_followees,
@@ -891,7 +897,13 @@ def register_browse(main_group):
         )
 
     @browse_following.command("followers")
-    @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+    @click.option(
+        "--url-token",
+        "-u",
+        type=str,
+        default=None,
+        help="Target user's url_token or profile URL (defaults to yourself)",
+    )
     @click.option("--limit", type=int, default=20, help="Items per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -906,14 +918,20 @@ def register_browse(main_group):
     def following_followers(
         url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
-        """List your followers (people who follow you)."""
+        """List a Zhihu user's followers (people who follow them)."""
         _FOLLOWING_SORT = {"followers": "follower_count", "answers": "answer_count", "articles": "articles_count"}
         _following_command(
             fetch_followers, url_token, limit, max_items, output_json, output, "followers", sort_by, _FOLLOWING_SORT
         )
 
     @browse_following.command("topics")
-    @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+    @click.option(
+        "--url-token",
+        "-u",
+        type=str,
+        default=None,
+        help="Target user's url_token or profile URL (defaults to yourself)",
+    )
     @click.option("--limit", type=int, default=20, help="Items per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -928,7 +946,7 @@ def register_browse(main_group):
     def following_topics(
         url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
-        """List topics you follow."""
+        """List the topics a Zhihu user follows."""
         _FOLLOWING_SORT = {"followers": "followers_count", "questions": "questions_count"}
         _following_command(
             fetch_following_topics,
@@ -943,7 +961,13 @@ def register_browse(main_group):
         )
 
     @browse_following.command("questions")
-    @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+    @click.option(
+        "--url-token",
+        "-u",
+        type=str,
+        default=None,
+        help="Target user's url_token or profile URL (defaults to yourself)",
+    )
     @click.option("--limit", type=int, default=20, help="Items per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -958,7 +982,7 @@ def register_browse(main_group):
     def following_questions(
         url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
-        """List questions you follow."""
+        """List the questions a Zhihu user follows."""
         _FOLLOWING_SORT = {
             "time": "created_time",
             "answers": "answer_count",
@@ -978,7 +1002,13 @@ def register_browse(main_group):
         )
 
     @browse_following.command("columns")
-    @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+    @click.option(
+        "--url-token",
+        "-u",
+        type=str,
+        default=None,
+        help="Target user's url_token or profile URL (defaults to yourself)",
+    )
     @click.option("--limit", type=int, default=20, help="Items per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -993,7 +1023,7 @@ def register_browse(main_group):
     def following_columns(
         url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
-        """List columns (zhuanlan) you follow."""
+        """List the columns (zhuanlan) a Zhihu user follows."""
         _FOLLOWING_SORT = {"followers": "followers_count", "articles": "articles_count"}
         _following_command(
             fetch_following_columns,
@@ -1008,7 +1038,13 @@ def register_browse(main_group):
         )
 
     @browse_following.command("collections")
-    @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
+    @click.option(
+        "--url-token",
+        "-u",
+        type=str,
+        default=None,
+        help="Target user's url_token or profile URL (defaults to yourself)",
+    )
     @click.option("--limit", type=int, default=20, help="Items per page")
     @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
@@ -1023,7 +1059,7 @@ def register_browse(main_group):
     def following_collections(
         url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
-        """List collections (favorites) you follow."""
+        """List the collections (favorites) a Zhihu user follows."""
         _FOLLOWING_SORT = {
             "time": "created_time",
             "items": "answer_count",
