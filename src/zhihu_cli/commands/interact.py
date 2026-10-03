@@ -1,4 +1,4 @@
-"""Interact command group — vote, thank, follow, block, comment, collect, report."""
+"""Interact command group — vote, thank, follow, block, comment, collect, report, delete."""
 
 import json
 
@@ -30,6 +30,7 @@ from zhihu_cli.content.handlers.comments import (
     dislike_comment,
     like_comment,
 )
+from zhihu_cli.content.handlers.delete import delete_content
 from zhihu_cli.content.handlers.people import block, follow, unblock, unfollow
 from zhihu_cli.content.handlers.question import (
     downvote_answer,
@@ -71,7 +72,7 @@ def register_interact(main_group) -> None:
 
     @main_group.group()
     def interact() -> None:
-        """Social interactions — vote, thank, follow, block, comment, collect."""
+        """Social interactions — vote, thank, follow, block, comment, collect, report, delete."""
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
@@ -515,3 +516,87 @@ def register_interact(main_group) -> None:
                     echo(f"  {f_label('Detail:')} {custom_reason}")
             else:
                 error(f"Report failed: {json.dumps(resp, ensure_ascii=False)}")
+
+    # ── delete ──────────────────────────────────────────────────────────────
+
+    @interact.group("delete")
+    def interact_delete() -> None:
+        """Delete your own content (删除自己发布的内容)."""
+
+    def _delete_and_report(kind: str, item_id: str, skip_confirm: bool, output_json: bool) -> None:
+        """Confirm, delete, and report the outcome — shared by the subcommands.
+
+        :param kind: Content type, matching a handler endpoint key.
+        :param item_id: Numeric Zhihu ID to delete.
+        :param skip_confirm: When false, prompt before deleting.
+        :param output_json: Emit the raw response as JSON instead of prose.
+        """
+        if not skip_confirm:
+            click.confirm(f"Delete {kind} {item_id}? This cannot be undone.", abort=True)
+
+        try:
+            resp = delete_content(kind, item_id)
+        except (ValueError, RuntimeError) as e:
+            error(f"Failed to delete {kind} {item_id}: {e}")
+            raise SystemExit(1)
+
+        if output_json:
+            print_json({"type": kind, "id": item_id, "deleted": True, "response": resp})
+            return
+
+        success(f"Deleted {kind} {item_id}")
+
+    @interact_delete.command("answer")
+    @click.argument("answer_id")
+    @click.option("-y", "--yes", "skip_confirm", is_flag=True, default=False, help="Skip the confirmation prompt")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def delete_answer(answer_id: str, skip_confirm: bool, output_json: bool) -> None:
+        """Delete one of your own answers (删除自己的回答).
+
+        ANSWER_ID accepts either a bare answer ID or the composite
+        question_id/answer_id form used elsewhere in this CLI.
+
+        \b
+        Example:
+          zhihu interact delete answer 123456789 -y
+        """
+        _delete_and_report("answer", _resolve_answer_id(answer_id), skip_confirm, output_json)
+
+    @interact_delete.command("question")
+    @click.argument("question_id")
+    @click.option("-y", "--yes", "skip_confirm", is_flag=True, default=False, help="Skip the confirmation prompt")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def delete_question(question_id: str, skip_confirm: bool, output_json: bool) -> None:
+        """Delete one of your own questions (删除自己发布的提问).
+
+        \b
+        Example:
+          zhihu interact delete question 12345678 -y
+        """
+        _delete_and_report("question", question_id, skip_confirm, output_json)
+
+    @interact_delete.command("article")
+    @click.argument("article_id")
+    @click.option("-y", "--yes", "skip_confirm", is_flag=True, default=False, help="Skip the confirmation prompt")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def delete_article(article_id: str, skip_confirm: bool, output_json: bool) -> None:
+        """Delete one of your own articles (删除自己发布的文章).
+
+        \b
+        Example:
+          zhihu interact delete article 123456 -y
+        """
+        _delete_and_report("article", article_id, skip_confirm, output_json)
+
+    @interact_delete.command("pin")
+    @click.argument("pin_id")
+    @click.option("-y", "--yes", "skip_confirm", is_flag=True, default=False, help="Skip the confirmation prompt")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def delete_pin(pin_id: str, skip_confirm: bool, output_json: bool) -> None:
+        """Delete one of your own pins (删除自己发布的想法).
+
+        \b
+        Example:
+          zhihu interact delete pin 1234567890 -y
+        """
+        _delete_and_report("pin", pin_id, skip_confirm, output_json)
