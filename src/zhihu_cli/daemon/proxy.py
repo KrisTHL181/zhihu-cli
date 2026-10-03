@@ -42,6 +42,34 @@ SOCKET_PATH = Path.home() / ".zhihu-cli" / "daemon.sock"
 CONNECT_TIMEOUT = 2.0
 RW_TIMEOUT = 60.0
 
+
+class DaemonHTTPError(Exception):
+    """Raised for a >= 400 response relayed by the daemon.
+
+    Stands in for :class:`curl_cffi.requests.exceptions.HTTPError`.  The
+    daemon exists so that the CLI process never imports curl_cffi — which
+    still costs ~265 ms even after ``zhihu_cli`` trims its optional
+    HTML-to-Markdown dependencies.  Importing it here purely to raise gave
+    that cost straight back on any error response, which is exactly the
+    case the daemon is meant to avoid.
+
+    Not a subclass of curl_cffi's ``HTTPError``, so ``except
+    curl_cffi.requests.HTTPError`` does not catch it — catch
+    :class:`DaemonHTTPError` or the broader :class:`Exception` instead.
+    The message is richer than curl_cffi's (which is only
+    ``"HTTP Error <code>: <reason>"``): it includes the truncated body so
+    Zhihu's HTML error pages are visible.
+
+    :param message: Error message, including status code, reason, and body.
+    :param response: The offending response object, for parity with
+        ``curl_cffi.requests.exceptions.HTTPError.response``.
+    """
+
+    def __init__(self, message: str, response: Any = None) -> None:
+        super().__init__(message)
+        self.response = response
+
+
 # kwargs keys that are safe to serialise over the wire.
 # Excluded: stream (handled client-side), hooks, auth (may contain
 # callables), and other curl_cffi internals.
@@ -89,18 +117,19 @@ class _StreamResponse:
         return self._resp.iter_lines(decode_unicode=decode_unicode)
 
     def raise_for_status(self) -> None:
-        """Raise :class:`HTTPError` if the status code is >= 400.
+        """Delegate to the wrapped response's own :meth:`raise_for_status`.
 
-        The exception message includes the server reply body (truncated)
-        so callers see *why* the request failed, not just the status code.
+        Unlike :class:`DaemonProxyResponse`, this class wraps a *real*
+        curl_cffi response (streaming always bypasses the daemon), so
+        curl_cffi is already imported and raising its native
+        :class:`~curl_cffi.requests.exceptions.HTTPError` is free — and
+        matches what a caller would see with the daemon stopped.
+
+        (Previously this built its own message from ``self.text``, which
+        this class does not define — any >= 400 stream raised
+        :class:`AttributeError` instead.)
         """
-        if self.status_code >= 400:
-            from curl_cffi.requests.exceptions import HTTPError
-
-            body = self.text.strip() or "(empty body)"
-            if len(body) > 500:
-                body = body[:500] + "…"
-            raise HTTPError(f"{self.status_code} {self.reason}: {body}", response=self)
+        self._resp.raise_for_status()
 
     def close(self) -> None:
         """Close the underlying response and the temporary direct session."""
@@ -156,14 +185,12 @@ class DaemonProxyResponse:
         return json.loads(self._body_bytes, **kwargs)
 
     def raise_for_status(self) -> None:
-        """Raise :class:`HTTPError` if the status code is >= 400.
+        """Raise :class:`DaemonHTTPError` if the status code is >= 400.
 
         The exception message includes the server reply body (truncated)
         so callers see *why* the request failed, not just the status code.
         """
         if self.status_code >= 400:
-            from curl_cffi.requests.exceptions import HTTPError
-
             # DaemonProxyResponse stores the body as bytes (_body_bytes);
             # use the decoded ``text`` property so real bodies (e.g. Zhihu's
             # HTML 500 page) surface instead of a misleading "(empty body)".
@@ -172,7 +199,7 @@ class DaemonProxyResponse:
                 body = "(empty body)"
             if len(body) > 500:
                 body = body[:500] + "…"
-            raise HTTPError(f"{self.status_code} {self.reason}: {body}", response=self)
+            raise DaemonHTTPError(f"{self.status_code} {self.reason}: {body}", response=self)
 
     def iter_content(self, chunk_size: int = 8192) -> Any:
         """Yield the body in chunks (for streaming compatibility).
