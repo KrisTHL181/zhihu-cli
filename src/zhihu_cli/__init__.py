@@ -1,5 +1,6 @@
 """zhihu-cli: Zhihu scraping, automation, and analysis toolkit."""
 
+from zhihu_cli import _import_trim  # noqa: F401  # must precede zhihu_cli.content
 from zhihu_cli.content import (
     ContentDownloader,
     PageToMarkdown,
