@@ -1,6 +1,9 @@
 """QR code login for Zhihu. Based on login flow from zhihu-plus-plus."""
 
+import hashlib
+import tempfile
 import time
+from pathlib import Path
 
 from curl_cffi import requests as curl_requests
 
@@ -67,8 +70,38 @@ def _cookies_to_header(session: curl_requests.Session) -> str:
     return "; ".join(parts)
 
 
+def _save_qr_image(url: str) -> Path | None:
+    """Render ``url`` as a PNG file in the system temp directory.
+
+    The image is named after a digest of ``url`` so repeated logins do not
+    clobber each other's files.
+
+    :param url: The QR code payload.
+    :returns: The path of the saved PNG, or ``None`` if it could not be written.
+    """
+    try:
+        import qrcode
+
+        qr = qrcode.QRCode(border=4, box_size=10)
+        qr.add_data(url)
+        qr.make(fit=True)
+
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+        path = Path(tempfile.gettempdir()) / f"zhihu-qrcode-{digest}.png"
+        qr.make_image(fill_color="black", back_color="white").save(path)
+        return path
+    except Exception:
+        return None
+
+
 def _print_qr(url: str) -> None:
     print("Scan the QR code with the Zhihu App:\n")
+
+    image_path = _save_qr_image(url)
+    if image_path:
+        print(f"QR code image saved to \033[34m{image_path}\033[0m")
+        print("Open it if the ASCII code below is hard to scan.\n")
+
     import qrcode
 
     qr = qrcode.QRCode(border=2)
