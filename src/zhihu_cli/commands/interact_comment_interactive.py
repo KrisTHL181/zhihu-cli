@@ -167,7 +167,7 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical
-    from textual.widgets import Footer, Header, Input, ListItem, ListView, Static
+    from textual.widgets import Footer, Header, ListItem, ListView, Static, TextArea
 
     from zhihu_cli.output import error, info
 
@@ -204,6 +204,21 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
             """Update the selection marker when highlight state changes."""
             self._ci.update_highlight(value)
             self._line1.update(self._ci.line1)
+
+    class ReplyInput(TextArea):
+        """Reply box that soft-wraps long text instead of scrolling it sideways.
+
+        :kbd:`Enter` still submits (handled by an app-level priority binding, so it
+        never reaches the widget as a newline) and :kbd:`Esc` still cancels.
+        """
+
+        def __init__(self) -> None:
+            super().__init__(
+                soft_wrap=True,
+                tab_behavior="focus",
+                placeholder="输入回复...",
+                id="reply-input",
+            )
 
     # ── App ─────────────────────────────────────────────────────────────
 
@@ -260,19 +275,23 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
             width: 44;
             dock: right;
             background: #181825;
-            border-left: solid #313244;
             padding: 1;
             height: 1fr;
         }
 
-        #reply-header {
-            color: #cba6f7;
-            text-style: bold;
-            padding: 0 1;
+        #reply-quote {
+            border: round #cba6f7;
+            border-title-color: #cba6f7;
+            border-title-style: bold;
+            height: auto;
+            max-height: 12;
+            overflow-y: auto;
+            scrollbar-size-vertical: 1;
+            margin-bottom: 1;
         }
 
-        #reply-info {
-            color: #a6e3a1;
+        #reply-quote-body {
+            color: #7f849c;
             padding: 0 1;
         }
 
@@ -282,15 +301,21 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
             padding: 0 1;
         }
 
-        Input#reply-input {
+        ReplyInput#reply-input {
             margin: 1 0;
             background: #313244;
             color: #cdd6f4;
             border: none;
+            padding: 0 1;
+            height: auto;
+            min-height: 1;
+            max-height: 8;
+            scrollbar-size-vertical: 1;
         }
 
-        Input#reply-input:focus {
+        ReplyInput#reply-input:focus {
             background: #45475a;
+            border: none;
         }
 
         Header {
@@ -321,13 +346,13 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
                     id="comments",
                 )
                 with Vertical(id="reply-panel"):
-                    yield Static("", id="reply-header")
-                    yield Static("", id="reply-info")
+                    with Vertical(id="reply-quote"):
+                        yield Static("", id="reply-quote-body")
                     yield Static(
                         "Type your reply below.\nEnter to send, Esc to cancel.",
                         id="reply-hint",
                     )
-                    yield Input(id="reply-input", placeholder="输入回复...")
+                    yield ReplyInput()
             yield Footer()
 
         def on_mount(self) -> None:
@@ -399,24 +424,20 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
             author = c.get("author", "anonymous")
             content = c.get("content", "")
 
+            from rich.markup import escape
             from rich.text import Text
 
-            header = Text()
-            header.append("┌─ Replying to ", style="bold #cba6f7")
-            header.append("─" * 22, style="bold #cba6f7")
-            self.query_one("#reply-header", Static).update(header)
+            # Border titles go through markup parsing, so escape any ``[`` in the name.
+            self.query_one("#reply-quote", Vertical).border_title = f"Replying to {escape(str(author))}"
 
-            info = Text()
-            info.append("│  ", style="bold #cba6f7")
-            info.append(author, style="bold #a6e3a1")
-            info.append("\n")
-            info.append('│  "', style="#cba6f7")
-            info.append(content, style="#7f849c")
-            info.append('"', style="#cba6f7")
-            self.query_one("#reply-info", Static).update(info)
+            body = Text()
+            body.append('"', style="#cba6f7")
+            body.append(content, style="#7f849c")
+            body.append('"', style="#cba6f7")
+            self.query_one("#reply-quote-body", Static).update(body)
 
             self._reply_panel.display = True
-            inp = self.query_one("#reply-input", Input)
+            inp = self.query_one("#reply-input", ReplyInput)
             inp.clear()
             inp.focus()
 
@@ -429,8 +450,8 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
 
         def _submit_reply(self) -> None:
             """Submit the reply text and refresh the comment list."""
-            inp = self.query_one("#reply-input", Input)
-            content = inp.value.strip()
+            inp = self.query_one("#reply-input", ReplyInput)
+            content = inp.text.strip()
             if not content:
                 self._cancel_reply()
                 return
