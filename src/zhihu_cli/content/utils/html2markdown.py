@@ -125,12 +125,12 @@ class ZhihuLinkConverter:
         return link
 
 
-# ── main converter ────────────────────────────────────────────────────────────
+# ── public API ────────────────────────────────────────────────────────────────
 
 
-class ZhihuMarkdownConverter:
+class PageToMarkdown:
     """
-    Convert Zhihu HTML content to Markdown.
+    Convert Zhihu page HTML content to Markdown.
     """
 
     def __init__(self, skip_empty: bool = True) -> None:
@@ -176,11 +176,33 @@ class ZhihuMarkdownConverter:
                 replace_with_text(img, f"\n$$\n{latex_content}\n$$\n")
         return _get_lxml_html().tostring(doc, encoding="unicode")
 
-    # ── top-level entry point ────────────────────────────────────────────
+    # ── top-level entry points ───────────────────────────────────────────
 
-    def convert(self, html_content: str, url: str = "") -> str:
+    def convert(self, html_content: str, url: str = "", strip: bool = True) -> str:
         """
         Convert HTML content to Markdown.
+
+        This is the public entry point: it normalizes LaTeX images first, then
+        walks the document, then strips the result.
+
+        :param html_content: HTML string of the Zhihu page.
+        :param url: Base URL for resolving relative links (optional).
+        :param strip: Strip leading/trailing whitespace from the result.
+        :return: Markdown string.
+        """
+        if not html_content:
+            return ""
+
+        content = self.tex_normalize(html_content)
+        result = self._convert(content, url)
+        return result.strip() if strip else result
+
+    def _convert(self, html_content: str, url: str = "") -> str:
+        """
+        Walk already-normalized HTML and return Markdown.
+
+        Call :meth:`convert` instead unless the content has been through
+        :meth:`tex_normalize` already.
 
         :param html_content: The HTML string to convert.
         :param url: Optional URL for resolving relative links.
@@ -480,33 +502,6 @@ class ZhihuMarkdownConverter:
             markdown.append("| " + " | ".join(row) + " |")
 
         return "\n".join(markdown)
-
-
-# ── public API ────────────────────────────────────────────────────────────────
-
-
-class PageToMarkdown:
-    """
-    Main class for converting a Zhihu page HTML to Markdown.
-    """
-
-    def __init__(self, skip_empty: bool = True) -> None:
-        self.converter = ZhihuMarkdownConverter(skip_empty=skip_empty)
-
-    def convert(self, html_content: str, url: str = "", strip: bool = True) -> str:
-        """
-        Convert HTML content to Markdown.
-
-        :param html_content: HTML string of the Zhihu page.
-        :param url: Base URL for resolving relative links (optional).
-        :return: Markdown string.
-        """
-        if not html_content:
-            return ""
-
-        content = self.converter.tex_normalize(html_content)
-        result = self.converter.convert(content, url)
-        return result.strip() if strip else result
 
 
 def calculate_text_length(html_content: str) -> int:
