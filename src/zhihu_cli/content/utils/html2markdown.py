@@ -5,11 +5,14 @@ Convert Zhihu HTML content (answers, articles, pins) to Markdown format.
 Adapted from the Tampermonkey script "zhihu-backup-collect".
 """
 
+from __future__ import annotations
+
 import re
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any
 
     from lxml.html import HtmlElement
@@ -17,7 +20,7 @@ if TYPE_CHECKING:
 _lxml_html = None
 
 
-def _get_lxml_html() -> "Any":
+def _get_lxml_html() -> Any:
     """Import and cache the ``lxml.html`` module on first use.
 
     ``lxml`` is a heavy C-extension dependency; importing it eagerly would add
@@ -38,7 +41,7 @@ _eeimg_re = re.compile(r"eeimg|equation")
 # ── lxml helpers ──────────────────────────────────────────────────────────────
 
 
-def replace_with_text(elem: "HtmlElement", text: str) -> None:
+def replace_with_text(elem: HtmlElement, text: str) -> None:
     """Replace an lxml element with a text node, preserving surrounding tail text.
 
     lxml has no direct equivalent of BeautifulSoup's ``replace_with()``.
@@ -57,7 +60,7 @@ def replace_with_text(elem: "HtmlElement", text: str) -> None:
     parent.remove(elem)
 
 
-def _iter_nodes(element: "HtmlElement"):
+def _iter_nodes(element: HtmlElement):
     """Yield text strings and child elements in document order.
 
     lxml's tree model is different from BeautifulSoup's:
@@ -77,13 +80,13 @@ def _iter_nodes(element: "HtmlElement"):
             yield child.tail
 
 
-def _tag_name(element: "HtmlElement") -> str:
+def _tag_name(element: HtmlElement) -> str:
     """Return the lowercase tag name of an lxml element."""
     tag = element.tag
     return tag.lower() if isinstance(tag, str) else str(tag)
 
 
-def image_src(element: "HtmlElement") -> str:
+def image_src(element: HtmlElement) -> str:
     """Return the real image URL carried by an ``<img>`` element.
 
     Zhihu lazy-loads images: ``src`` often holds a placeholder while the
@@ -222,7 +225,7 @@ class PageToMarkdown:
         if rich_texts:
             markdown_parts = []
             for rt in rich_texts:
-                md = self._process_element(rt)
+                md = self._dispatch(rt)
                 if md:
                     markdown_parts.append(md)
             return "\n\n".join(markdown_parts)
@@ -231,255 +234,273 @@ class PageToMarkdown:
         if doc.tag == "html":
             parts = []
             for node in _iter_nodes(doc):
-                md = self._process_element(node)
+                md = self._dispatch(node)
                 if md:
                     parts.append(md)
             return "\n\n".join(parts) if parts else ""
 
         # HTML fragment – process the root element directly
-        md = self._process_element(doc)
+        md = self._dispatch(doc)
         return md if md else ""
 
-    # ── recursive element processor ──────────────────────────────────────
+    # ── dispatcher ───────────────────────────────────────────────────────
 
-    def _process_element(self, element) -> str | None:
+    def _dispatch(self, element) -> str | None:
         """Recursively convert a single element to Markdown.
 
         Accepts either an lxml ``HtmlElement`` or a plain ``str`` (text node).
+        Constructs identified by tag alone go through :data:`_TAG_HANDLERS`;
+        the attribute-conditional ones are guarded here, because each must win
+        over the generic handler for its own tag.
+
+        :param element: An lxml element or a plain text node.
+        :returns: The Markdown for *element*, or ``None`` when it contributes nothing.
         """
-        # Text node
         if isinstance(element, str):
-            text = element.strip()
-            return text if text else None
+            return element.strip() or None
 
         # Safety net – not an element
         if not hasattr(element, "tag"):
             return None
 
         tag = _tag_name(element)
-
-        # Skip non-content elements
-        if tag in (
-            "script",
-            "style",
-            "svg",
-            "button",
-            "input",
-            "form",
-            "nav",
-            "header",
-            "footer",
-            "aside",
-        ):
+        if tag in _SKIP_TAGS:
             return None
 
-        # Skip empty paragraphs if requested
-        if tag == "p" and self.skip_empty and not element.text_content().strip():
+        # Order is semantic: every one of these must be tested before the
+        # generic handler for the same tag.
+        if tag == "div" and _is_link_card(element):
+            return self._render_link_card(element)
+        if tag == "a" and _is_discarded_link(element):
             return None
+        if tag == "span" and _is_math_span(element):
+            return self._render_math(element)
+        if tag == "div" and _is_video_div(element):
+            return self._render_video(element)
 
-        # Headings
-        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
-            level = int(tag[1])
-            text = self._process_inline(element)
-            return f"{'#' * level} {text}"
+        handler = _TAG_HANDLERS.get(tag)
+        if handler is None:
+            return self._render_children(element)
+        return handler(self, element)
 
-        # Paragraph
-        if tag == "p":
-            return self._process_inline(element)
+    # ── inline descent ───────────────────────────────────────────────────
 
-        # Lists
-        if tag == "ul":
-            items = []
-            for li in element.findall("li"):  # direct children only
-                item_text = self._process_inline(li)
-                items.append(f"- {item_text}")
-            return "\n".join(items) if items else None
+    def _render_inline(self, element) -> str:
+        """Process inline content, returning plain text with inline Markdown.
 
-        if tag == "ol":
-            items = []
-            for idx, li in enumerate(element.findall("li"), start=1):  # direct children only
-                item_text = self._process_inline(li)
-                items.append(f"{idx}. {item_text}")
-            return "\n".join(items) if items else None
-
-        # Blockquote
-        if tag == "blockquote":
-            content = self._process_inline(element)
-            lines = content.split("\n")
-            quoted = "\n".join(f"> {line}" for line in lines)
-            return quoted
-
-        # Code block
-        if tag == "pre":
-            code = element.text_content()
-            language = ""
-            code_tag = element.find(".//code")
-            if code_tag is not None:
-                for cls in code_tag.classes:
-                    if cls.startswith("language-"):
-                        language = cls.split("-")[1]
-                        break
-            return f"```{language}\n{code}\n```"
-
-        # Horizontal rule
-        if tag == "hr":
-            return "---"
-
-        # Images
-        if tag == "img":
-            src = image_src(element)
-            alt = element.get("alt", "")
-            src = self.link_converter.normalize_link(src)
-            return f"![{alt}]({src})"
-
-        # Figure (often contains img and figcaption)
-        if tag == "figure":
-            img = element.find(".//img")
-            if img is not None:
-                src = image_src(img)
-                alt = img.get("alt", "")
-                src = self.link_converter.normalize_link(src)
-                md_img = f"![{alt}]({src})"
-            else:
-                md_img = ""
-
-            figcaption = element.find(".//figcaption")
-            if figcaption is not None:
-                caption = figcaption.text_content().strip()
-                md_img += f"\n*{caption}*"
-
-            return md_img
-
-        # Tables
-        if tag == "table":
-            return self._process_table(element)
-
-        # Link card (Zhihu specific: div.RichText-LinkCardContainer)
-        if tag == "div" and "RichText-LinkCardContainer" in element.classes:
-            a_tag = element.find(".//a")
-            if a_tag is not None:
-                href = a_tag.get("href", "")
-                # Prefer data-text attribute (Zhihu link card title)
-                text = a_tag.get("data-text") or a_tag.text_content().strip()
-                if not text:
-                    text = href
-                href = self.link_converter.normalize_link(href)
-                return f"[{text}]({href})"
-            # No a tag, recurse into children
-            return self._process_inline(element)
-
-        # Block Zhihu ad cards and paid-consult cards
-        if tag == "a" and (element.get("data-draft-type") == "ad-link-card" or element.get("data-ad-id") is not None):
-            return None
-        if tag == "a" and (element.get("data-draft-type") == "edu-card" or element.get("data-edu-card-id") is not None):
-            return None
-
-        if tag == "a":
-            href = element.get("href", "")
-            text = element.text_content().strip()
-            # If text is empty, try title or data-text attribute
-            if not text:
-                text = element.get("title") or element.get("data-text") or href
-            href = self.link_converter.normalize_link(href)
-            return f"[{text}]({href})"
-
-        # Bold / strong
-        if tag in ("b", "strong"):
-            return f"**{self._process_inline(element)}**"
-
-        # Italic / em
-        if tag in ("i", "em"):
-            return f"*{self._process_inline(element)}*"
-
-        # Underline
-        if tag == "u":
-            return f"<u>{self._process_inline(element)}</u>"
-
-        # Inline code
-        if tag == "code":
-            return f"`{element.text_content()}`"
-
-        # Line break
-        if tag == "br":
-            return "\n"
-
-        # Math (Zhihu specific)
-        if tag == "span" and "ztext-math" in element.classes:
-            tex = element.get("data-tex", "")
-            eeimg = element.get("data-eeimg", "")  # Zhihu formula type identifier
-
-            if tex:
-                # data-eeimg="2" means block/display formula
-                if eeimg == "2" or "\\tag" in tex:
-                    return f"\n$$\n{tex}\n$$\n"
-                else:
-                    return f"${tex}$"
-            return element.text_content()
-
-        # Video (Zhihu specific)
-        video = element.find(".//video")
-        if tag == "div" and video is not None:
-            src = video.get("src", "")
-            if src:
-                return f'<video src="{src}"></video>'
-
-        # Generic: recursively process children
-        parts = []
-        for node in _iter_nodes(element):
-            md = self._process_element(node)
-            if md:
-                parts.append(md)
-
-        # If no parts, return None
-        if not parts:
-            return None
-
-        # If the element is a block-level element, join with newlines
-        if tag in ("div", "section", "article", "main"):
-            return "\n\n".join(parts)
-        else:
-            return " ".join(parts)
-
-    # ── inline processor ─────────────────────────────────────────────────
-
-    def _process_inline(self, element) -> str:
-        """Process inline content, returning plain text with inline Markdown."""
+        :param element: An lxml element or a plain text node.
+        :returns: The inline Markdown, or ``""`` when there is none.
+        """
         if isinstance(element, str):
             return element.strip()
 
         if not hasattr(element, "tag"):
             return ""
 
-        parts = []
-        for node in _iter_nodes(element):
-            md = self._process_element(node)
-            if md:
-                parts.append(md)
+        parts = [md for node in _iter_nodes(element) if (md := self._dispatch(node))]
         return " ".join(parts)
 
-    # ── table processor ──────────────────────────────────────────────────
+    # ── handlers ─────────────────────────────────────────────────────────
 
-    def _process_table(self, table: "HtmlElement") -> str:
-        """Convert an HTML table to Markdown table."""
-        rows = []
-        header_row = table.find(".//thead")
-        body_rows = table.find(".//tbody")
-        if body_rows is None:
-            body_rows = table
+    def _render_heading(self, element) -> str:
+        """Render ``<h1>``–``<h6>`` as an ATX heading."""
+        level = int(_tag_name(element)[1])
+        return f"{'#' * level} {self._render_inline(element)}"
 
-        if header_row is not None:
-            headers = []
-            for th in header_row.findall(".//th"):
-                headers.append(th.text_content().strip())
-            rows.append(headers)
+    def _render_paragraph(self, element) -> str | None:
+        """Render ``<p>``, skipping it entirely when empty and ``skip_empty`` is set."""
+        if self.skip_empty and not element.text_content().strip():
+            return None
+        return self._render_inline(element)
 
-        for tr in body_rows.findall(".//tr"):
-            cells = []
-            for td in tr.findall(".//td") + tr.findall(".//th"):
-                cells.append(td.text_content().strip())
-            if cells:
-                rows.append(cells)
+    def _render_unordered_list(self, element) -> str | None:
+        """Render ``<ul>`` as a bullet list."""
+        items = [f"- {self._render_inline(li)}" for li in element.findall("li")]  # direct children only
+        return "\n".join(items) if items else None
 
+    def _render_ordered_list(self, element) -> str | None:
+        """Render ``<ol>`` as a numbered list."""
+        items = [
+            f"{idx}. {self._render_inline(li)}"  # direct children only
+            for idx, li in enumerate(element.findall("li"), start=1)
+        ]
+        return "\n".join(items) if items else None
+
+    def _render_blockquote(self, element) -> str:
+        """Render ``<blockquote>`` with every line prefixed by ``> ``."""
+        content = self._render_inline(element)
+        return "\n".join(f"> {line}" for line in content.split("\n"))
+
+    def _render_code_block(self, element) -> str:
+        """Render ``<pre>`` as a fenced code block, honouring a ``language-*`` class."""
+        language = ""
+        code_tag = element.find(".//code")
+        if code_tag is not None:
+            for cls in code_tag.classes:
+                if cls.startswith("language-"):
+                    language = cls.split("-")[1]
+                    break
+        return f"```{language}\n{element.text_content()}\n```"
+
+    def _render_rule(self, element) -> str:
+        """Render ``<hr>`` as a thematic break."""
+        return "---"
+
+    def _render_image(self, element) -> str:
+        """Render ``<img>`` as a Markdown image."""
+        alt = element.get("alt", "")
+        src = self.link_converter.normalize_link(image_src(element))
+        return f"![{alt}]({src})"
+
+    def _render_figure(self, element) -> str:
+        """Render ``<figure>`` as its image plus an optional italic caption.
+
+        :returns: The Markdown, which is empty when the figure holds neither an image nor a caption.
+        """
+        img = element.find(".//img")
+        if img is not None:
+            alt = img.get("alt", "")
+            src = self.link_converter.normalize_link(image_src(img))
+            md_img = f"![{alt}]({src})"
+        else:
+            md_img = ""
+
+        figcaption = element.find(".//figcaption")
+        if figcaption is not None:
+            md_img += f"\n*{figcaption.text_content().strip()}*"
+
+        return md_img
+
+    def _render_link(self, element) -> str:
+        """Render ``<a>`` as a Markdown link, falling back through its text sources."""
+        href = element.get("href", "")
+        text = element.text_content().strip()
+        if not text:
+            text = element.get("title") or element.get("data-text") or href
+        return f"[{text}]({self.link_converter.normalize_link(href)})"
+
+    def _render_link_card(self, element) -> str:
+        """Render a Zhihu link card (``div.RichText-LinkCardContainer``).
+
+        The card title prefers ``data-text``, unlike a plain ``<a>``.
+        """
+        a_tag = element.find(".//a")
+        if a_tag is None:
+            return self._render_inline(element)
+
+        href = a_tag.get("href", "")
+        text = a_tag.get("data-text") or a_tag.text_content().strip()
+        if not text:
+            text = href
+        return f"[{text}]({self.link_converter.normalize_link(href)})"
+
+    def _render_bold(self, element) -> str:
+        """Render ``<b>`` / ``<strong>`` as bold."""
+        return f"**{self._render_inline(element)}**"
+
+    def _render_italic(self, element) -> str:
+        """Render ``<i>`` / ``<em>`` as italic."""
+        return f"*{self._render_inline(element)}*"
+
+    def _render_underline(self, element) -> str:
+        """Render ``<u>`` as raw HTML, Markdown having no underline."""
+        return f"<u>{self._render_inline(element)}</u>"
+
+    def _render_inline_code(self, element) -> str:
+        """Render ``<code>`` as a code span, keeping only its text content."""
+        return f"`{element.text_content()}`"
+
+    def _render_break(self, element) -> str:
+        """Render ``<br>`` as a newline."""
+        return "\n"
+
+    def _render_math(self, element) -> str:
+        """Render a Zhihu formula span (``span.ztext-math``) as LaTeX."""
+        tex = element.get("data-tex", "")
+        eeimg = element.get("data-eeimg", "")  # Zhihu formula type identifier
+
+        if not tex:
+            return element.text_content()
+        # data-eeimg="2" means block/display formula
+        if eeimg == "2" or "\\tag" in tex:
+            return f"\n$$\n{tex}\n$$\n"
+        return f"${tex}$"
+
+    def _render_video(self, element) -> str | None:
+        """Render a Zhihu video wrapper.
+
+        :returns: The video tag, or the generic child rendering when ``src`` is empty.
+        """
+        video = element.find(".//video")
+        if video is not None:
+            src = video.get("src", "")
+            if src:
+                return f'<video src="{src}"></video>'
+        return self._render_children(element)
+
+    # ── generic fallback ─────────────────────────────────────────────────
+
+    def _render_children(self, element) -> str | None:
+        """Recursively render an element's children and join them.
+
+        Block-level containers join with a blank line, everything else with a
+        single space.
+
+        :param element: The element whose children should be rendered.
+        :returns: The joined Markdown, or ``None`` when no child contributes.
+        """
+        parts = [md for node in _iter_nodes(element) if (md := self._dispatch(node))]
+        if not parts:
+            return None
+        return "\n\n".join(parts) if _tag_name(element) in _BLOCK_TAGS else " ".join(parts)
+
+    # ── table ────────────────────────────────────────────────────────────
+
+    def _iter_own_rows(self, table: HtmlElement):
+        """Iterate the ``<tr>`` elements belonging to *table*.
+
+        Rows of a nested table belong to that table, not to this one. The
+        ancestry check walks the tree in Python once per row, so it is skipped
+        altogether when *table* holds no nested table.
+
+        :param table: The table to walk.
+        :returns: An iterator over this table's rows, in document order.
+        """
+        if not table.findall(".//table"):
+            yield from table.iter("tr")
+            return
+        for tr in table.iter("tr"):
+            if next(tr.iterancestors("table"), None) is table:
+                yield tr
+
+    def _row_cells(self, tr: HtmlElement) -> list[str]:
+        """Return the cell texts of *tr* in document order.
+
+        :param tr: A table row.
+        :returns: The stripped text of each direct ``<td>`` / ``<th>`` child.
+        """
+        return [cell.text_content().strip() for cell in tr.xpath("./td | ./th")]
+
+    def _render_table(self, table: HtmlElement) -> str:
+        """Convert an HTML table to a Markdown table.
+
+        :param table: The ``<table>`` element.
+        :returns: The Markdown table, or ``""`` when the table has no rows.
+        """
+        own_rows = list(self._iter_own_rows(table))
+        if not own_rows:
+            return ""
+
+        thead = table.find("thead")
+        if thead is None:
+            # No explicit header: the first row doubles as one.
+            header_rows, body_rows = own_rows[:1], own_rows[1:]
+        else:
+            is_head = [next(tr.iterancestors("thead"), None) is thead for tr in own_rows]
+            header_rows = [tr for tr, head in zip(own_rows, is_head) if head]
+            body_rows = [tr for tr, head in zip(own_rows, is_head) if not head]
+
+        rows = [cells for tr in header_rows + body_rows if (cells := self._row_cells(tr))]
         if not rows:
             return ""
 
@@ -492,16 +513,90 @@ class PageToMarkdown:
                 row.append("")
 
         # Build Markdown table
-        markdown = []
-        # Header row
-        markdown.append("| " + " | ".join(rows[0]) + " |")
-        # Separator row
-        markdown.append("| " + " | ".join(["---"] * max_cols) + " |")
+        markdown = [
+            # Header row
+            "| " + " | ".join(rows[0]) + " |",
+            # Separator row
+            "| " + " | ".join(["---"] * max_cols) + " |",
+        ]
         # Data rows
-        for row in rows[1:]:
-            markdown.append("| " + " | ".join(row) + " |")
+        markdown.extend("| " + " | ".join(row) + " |" for row in rows[1:])
 
         return "\n".join(markdown)
+
+
+# ── dispatch tables ───────────────────────────────────────────────────────────
+
+#: Elements that never contribute content.
+_SKIP_TAGS: frozenset[str] = frozenset(
+    {"script", "style", "svg", "button", "input", "form", "nav", "header", "footer", "aside"}
+)
+
+#: Containers whose children are joined by a blank line instead of a space.
+_BLOCK_TAGS: frozenset[str] = frozenset({"div", "section", "article", "main"})
+
+
+def _is_link_card(element: HtmlElement) -> bool:
+    """Return whether *element* is a Zhihu link card."""
+    return "RichText-LinkCardContainer" in element.classes
+
+
+def _is_discarded_link(element: HtmlElement) -> bool:
+    """Return whether *element* is a Zhihu ad or paid-consult card to drop."""
+    return (
+        element.get("data-draft-type") in ("ad-link-card", "edu-card")
+        or element.get("data-ad-id") is not None
+        or element.get("data-edu-card-id") is not None
+    )
+
+
+def _is_math_span(element: HtmlElement) -> bool:
+    """Return whether *element* is a Zhihu formula span."""
+    return "ztext-math" in element.classes
+
+
+def _is_video_div(element: HtmlElement) -> bool:
+    """Return whether *element* wraps a video.
+
+    The caller guards on the tag first, so this descendant query only runs for
+    ``div`` elements.
+    """
+    return element.find(".//video") is not None
+
+
+#: Tag → handler. The values are plain functions, so the dispatcher passes
+#: ``self`` explicitly. Tags that also have attribute-conditional variants are
+#: guarded in :meth:`PageToMarkdown._dispatch` before this table is consulted.
+_TAG_HANDLERS: dict[str, Callable[[PageToMarkdown, Any], str | None]] = {
+    "h1": PageToMarkdown._render_heading,
+    "h2": PageToMarkdown._render_heading,
+    "h3": PageToMarkdown._render_heading,
+    "h4": PageToMarkdown._render_heading,
+    "h5": PageToMarkdown._render_heading,
+    "h6": PageToMarkdown._render_heading,
+    "p": PageToMarkdown._render_paragraph,
+    "ul": PageToMarkdown._render_unordered_list,
+    "ol": PageToMarkdown._render_ordered_list,
+    "blockquote": PageToMarkdown._render_blockquote,
+    "pre": PageToMarkdown._render_code_block,
+    "hr": PageToMarkdown._render_rule,
+    "img": PageToMarkdown._render_image,
+    "figure": PageToMarkdown._render_figure,
+    "table": PageToMarkdown._render_table,
+    "a": PageToMarkdown._render_link,
+    "b": PageToMarkdown._render_bold,
+    "strong": PageToMarkdown._render_bold,
+    "i": PageToMarkdown._render_italic,
+    "em": PageToMarkdown._render_italic,
+    "u": PageToMarkdown._render_underline,
+    "code": PageToMarkdown._render_inline_code,
+    "br": PageToMarkdown._render_break,
+    "div": PageToMarkdown._render_children,
+    "section": PageToMarkdown._render_children,
+    "article": PageToMarkdown._render_children,
+    "main": PageToMarkdown._render_children,
+    "span": PageToMarkdown._render_children,
+}
 
 
 def calculate_text_length(html_content: str) -> int:
