@@ -9,7 +9,6 @@ from typing import Any
 
 import click
 
-from zhihu_cli.content.download_contents import sanitize_filename
 from zhihu_cli.content.handlers import get_type_and_id
 from zhihu_cli.output import (
     blank,
@@ -73,6 +72,11 @@ def _resolve_url_token(url_token: str | None) -> str:
 
 def _save_markdown(metadata: dict, markdown: str, output_dir: str, prefix: str = "") -> str:
     """Save markdown content to output_dir. Returns the file path."""
+    # Imported here rather than at module scope: ``download_contents`` pulls in
+    # ``curl_cffi`` via the session layer, and this module is imported by every
+    # command group at CLI startup.
+    from zhihu_cli.content.download_contents import sanitize_filename
+
     os.makedirs(output_dir, exist_ok=True)
     title = sanitize_filename(metadata.get("title", "untitled"))
 
