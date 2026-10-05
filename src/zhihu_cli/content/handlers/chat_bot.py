@@ -13,12 +13,12 @@ command modules.
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import Callable
 from typing import Any
 
 from zhihu_cli.content.handlers.chat import iter_chat_history, send_text_message
 from zhihu_cli.content.handlers.imchat import IMCHAT_TOPIC, ZhihuMessageListener, get_pm_mqtt_topic
+from zhihu_cli.content.utils.llm_config import build_client, require
 from zhihu_cli.output import error
 
 # Token budget for a single generated reply.
@@ -58,7 +58,7 @@ def run_bot(
     :param on_event: Optional callback invoked with one event dict per
         incoming message (``type`` in ``{"started", "reply", "error"}``).
     """
-    if _resolve_llm_config(api_base=api_base, api_key=api_key, model=model) is None:
+    if require(api_base=api_base, api_key=api_key, model=model) is None:
         return  # error already printed by the resolver
 
     try:
@@ -242,43 +242,6 @@ def _process_message(
     return {"type": "reply", "sender": sender_name, "message": text, "reply": reply, "dry_run": dry_run}
 
 
-def _resolve_llm_config(
-    *,
-    api_base: str | None = None,
-    api_key: str | None = None,
-    model: str | None = None,
-) -> tuple[str, str, str] | None:
-    """Resolve LLM config from args, env, and the cached config file.
-
-    Mirrors ``commands.agora._resolve_llm_config`` — precedence is CLI args,
-    then ``LLM_API_BASE`` / ``LLM_API_KEY`` / ``LLM_MODEL`` env vars, then the
-    values cached by ``zhihu config llm``.
-
-    :returns: ``(api_base, api_key, model)`` or ``None`` if the API key is missing.
-    """
-    try:
-        from zhihu_cli.extensions.crank.archiver import load_llm_config
-    except ImportError:
-        error("Cannot import LLM config loader (crank extension not available).")
-        return None
-
-    cached = load_llm_config()
-
-    _api_base = api_base or os.environ.get("LLM_API_BASE") or cached.get("api_base", "https://api.openai.com/v1")
-    _api_key = api_key or os.environ.get("LLM_API_KEY") or cached.get("api_key", "")
-    _model = model or os.environ.get("LLM_MODEL") or cached.get("model", "gpt-4o-mini")
-
-    if not _api_key:
-        error(
-            "LLM API key not configured. Set it via:\n"
-            "  zhihu config llm set --api-base <URL> --api-key <KEY> --model <NAME>\n"
-            "Or set the LLM_API_KEY environment variable."
-        )
-        return None
-
-    return _api_base, _api_key, _model
-
-
 def _call_llm(
     messages: list[dict[str, str]],
     *,
@@ -292,23 +255,17 @@ def _call_llm(
     :returns: The model's reply text (stripped), or ``None`` on failure or
         an empty response.
     """
-    resolved = _resolve_llm_config(api_base=api_base, api_key=api_key, model=model)
-    if resolved is None:
+    cfg = require(api_base=api_base, api_key=api_key, model=model)
+    if cfg is None:
         return None
 
-    _api_base, _api_key, _model = resolved
-
-    try:
-        from openai import OpenAI  # type: ignore[import-untyped]
-    except ImportError:
-        error("The 'openai' package is required for the chat bot. Install with: pip install openai")
+    client = build_client(cfg, purpose="the chat bot")
+    if client is None:
         return None
-
-    client = OpenAI(base_url=_api_base, api_key=_api_key)
 
     try:
         response = client.chat.completions.create(
-            model=_model,
+            model=cfg.model,
             messages=messages,
             temperature=0.7,
             max_tokens=_MAX_REPLY_TOKENS,

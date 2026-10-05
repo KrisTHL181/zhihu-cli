@@ -11,7 +11,6 @@ Environment variables:
 """
 
 import argparse
-import json
 import os
 import random
 import shutil
@@ -26,7 +25,16 @@ from zhihu_cli.content.handlers.article import scrape_article
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.universal_converter import convert_items
+from zhihu_cli.content.utils.llm_config import (
+    MISSING_API_KEY_MESSAGE,
+    build_client,
+    llm_supports_vision,  # noqa: F401  (re-exported for backward compatibility)
+    load_llm_config,  # noqa: F401  (re-exported for backward compatibility)
+    resolve,
+    save_llm_config,  # noqa: F401  (re-exported for backward compatibility)
+)
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.output import error, warning
 from zhihu_cli.prompts import COMMIT_MESSAGE_SYSTEM_PROMPT, SERIES_NAMING_SYSTEM_PROMPT
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
@@ -34,52 +42,6 @@ ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 CRANK_DIR = str(Path.home() / ".zhihu-cli" / "crank")
 HALL_OF_FLAMES_ROOT = CRANK_DIR
 SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
-LLM_CONFIG_PATH = os.path.join(CRANK_DIR, "llm_config.json")
-
-
-def load_llm_config() -> dict[str, str]:
-    """Load cached LLM config from disk. Returns empty dict if no cache exists."""
-    try:
-        if os.path.exists(LLM_CONFIG_PATH):
-            with open(LLM_CONFIG_PATH, encoding="utf-8") as f:
-                data = json.load(f)
-            return {k: v for k, v in data.items() if isinstance(v, str) and v}
-    except Exception:
-        pass
-    return {}
-
-
-def llm_supports_vision(cfg: dict[str, str] | None = None) -> bool:
-    """Report whether the cached LLM config declares multimodal image support.
-
-    The flag is stored as the string ``"true"``/``"false"`` rather than a JSON
-    boolean, because :func:`load_llm_config` keeps only non-empty strings.
-
-    :param cfg: Pre-loaded config; loaded from disk when omitted.
-    :returns: True when the configured model is declared to accept image input.
-    """
-    cfg = load_llm_config() if cfg is None else cfg
-    return str(cfg.get("vision", "")).strip().lower() in {"true", "on", "1", "yes"}
-
-
-def save_llm_config(api_base: str, api_key: str, model: str, *, vision: bool | None = None) -> None:
-    """Persist LLM config to disk cache.
-
-    :param vision: Whether the model accepts image input. ``None`` keeps the
-        currently cached value so callers that only touch the three credential
-        fields don't clobber it.
-    """
-    os.makedirs(CRANK_DIR, exist_ok=True)
-    if vision is None:
-        vision = llm_supports_vision()
-    data = {
-        "api_base": api_base,
-        "api_key": api_key,
-        "model": model,
-        "vision": "true" if vision else "false",
-    }
-    with open(LLM_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ── article list scraping ──────────────────────────────────────────────────
@@ -180,32 +142,21 @@ def call_llm_for_name(
         api_key: API key. Defaults to ``LLM_API_KEY`` env var.
         model: Model name. Defaults to ``LLM_MODEL`` env var or ``gpt-4o-mini``.
     """
-    _cached = load_llm_config()
-    _api_base = api_base or os.environ.get("LLM_API_BASE") or _cached.get("api_base", "https://api.openai.com/v1")
-    _api_key = api_key or os.environ.get("LLM_API_KEY") or _cached.get("api_key", "")
-    _model = model or os.environ.get("LLM_MODEL") or _cached.get("model", "gpt-4o-mini")
-
-    if not _api_key:
-        print("Error: LLM API key not provided. Use --api-key or set LLM_API_KEY env var.", file=sys.stderr)
+    cfg = resolve(api_base=api_base, api_key=api_key, model=model)
+    if cfg is None:
+        error(MISSING_API_KEY_MESSAGE)
         return None
 
     prompt = build_naming_prompt(author_name, samples)
 
-    try:
-        from openai import OpenAI
-    except ImportError:
-        print(
-            "Error: 'openai' package is required. Install with: pip install openai",
-            file=sys.stderr,
-        )
+    client = build_client(cfg, purpose="LLM series naming")
+    if client is None:
         return None
 
-    client = OpenAI(base_url=_api_base, api_key=_api_key)
-
-    print(f"Calling LLM ({_model}) to generate series name...")
+    print(f"Calling LLM ({cfg.model}) to generate series name...")
     try:
         response = client.chat.completions.create(
-            model=_model,
+            model=cfg.model,
             messages=[
                 {
                     "role": "system",
@@ -353,13 +304,9 @@ def call_llm_for_commit_message(
     Tries to read recent commit messages from the Hall of Flames repo
     so the LLM can match the user's personal style.
     """
-    _cached = load_llm_config()
-    _api_base = api_base or os.environ.get("LLM_API_BASE") or _cached.get("api_base", "https://api.openai.com/v1")
-    _api_key = api_key or os.environ.get("LLM_API_KEY") or _cached.get("api_key", "")
-    _model = model or os.environ.get("LLM_MODEL") or _cached.get("model", "gpt-4o-mini")
-
-    if not _api_key:
-        print("Warning: LLM API key not provided. Skipping commit message suggestion.", file=sys.stderr)
+    cfg = resolve(api_base=api_base, api_key=api_key, model=model)
+    if cfg is None:
+        warning("LLM API key not provided. Skipping commit message suggestion.")
         return None
 
     recent_commits: list[str] | None = None
@@ -371,18 +318,14 @@ def call_llm_for_commit_message(
 
     prompt = build_commit_message_prompt(author_name, series_name, samples, recent_commits)
 
-    try:
-        from openai import OpenAI
-    except ImportError:
-        print("Warning: 'openai' not installed. Skipping commit message suggestion.", file=sys.stderr)
+    client = build_client(cfg, purpose="commit message suggestions")
+    if client is None:
         return None
 
-    client = OpenAI(base_url=_api_base, api_key=_api_key)
-
-    print(f"Calling LLM ({_model}) to generate commit message suggestion...")
+    print(f"Calling LLM ({cfg.model}) to generate commit message suggestion...")
     try:
         response = client.chat.completions.create(
-            model=_model,
+            model=cfg.model,
             messages=[
                 {
                     "role": "system",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +10,7 @@ import click
 
 from zhihu_cli.content.handlers import get_user_agent, set_user_agent
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.utils import llm_config
 from zhihu_cli.output import echo, error, f_label, f_title, info, success
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -230,14 +230,7 @@ def register_config(main_group: click.Group) -> None:
         """Manage the cached LLM configuration for the crank extension."""
 
     @config_crank_llm.command("set")
-    @click.option("--api-base", default=None, help="LLM API endpoint URL (default: keep the cached one).")
-    @click.option("--api-key", default=None, help="API key for authentication (default: keep the cached one).")
-    @click.option("--model", default=None, help="Model name to use (default: keep the cached one).")
-    @click.option(
-        "--vision/--no-vision",
-        default=None,
-        help="Declare whether the model accepts image input (default: keep current setting).",
-    )
+    @llm_config.options(use_env=False, vision=True)
     def config_llm_set(
         api_base: str | None,
         api_key: str | None,
@@ -257,49 +250,29 @@ def register_config(main_group: click.Group) -> None:
         Enable \033[2m--vision\033[0m when the model accepts images, so that
         \033[2mzhihu agora ai\033[0m sends pictures embedded in reported comments.
         """
-        try:
-            from zhihu_cli.extensions.crank.archiver import (
-                llm_supports_vision,
-                load_llm_config,
-                save_llm_config,
-            )
-        except ImportError:
-            error("crank extension is not available (missing dependencies).")
-            raise SystemExit(1)
+        cached = llm_config.load_config()
+        new = cached.with_overrides(api_base=api_base, api_key=api_key, model=model, vision=vision)
 
-        cached = load_llm_config()
-        _api_base = api_base or cached.get("api_base", "") or "https://api.openai.com/v1"
-        _api_key = api_key or cached.get("api_key", "")
-        _model = model or cached.get("model", "") or "gpt-4o-mini"
-
-        if not _api_key:
+        if not new.api_key:
             error(
                 "No API key available. Pass --api-key, or configure one first:\n"
                 "  zhihu config llm set --api-base <URL> --api-key <KEY> --model <NAME>"
             )
             raise SystemExit(1)
 
-        save_llm_config(_api_base, _api_key, _model, vision=vision)
+        llm_config.save(new.api_base, new.api_key, new.model, vision=vision)
 
-        # Report the value that ends up stored, not just the flag that was passed.
-        vision_value = vision if vision is not None else llm_supports_vision(cached)
         lines = [
-            f"  {f_label('api_base:')} {_api_base}",
-            f"  {f_label('model:')} {_model}",
-            f"  {f_label('vision:')} {str(vision_value).lower()}",
+            f"  {f_label('api_base:')} {new.api_base}",
+            f"  {f_label('model:')} {new.model}",
+            f"  {f_label('vision:')} {str(new.vision).lower()}",
         ]
         success("LLM config saved:\n" + "\n".join(lines))
 
     @config_crank_llm.command("show")
     def config_llm_show() -> None:
         """Show the currently cached LLM configuration."""
-        try:
-            from zhihu_cli.extensions.crank.archiver import load_llm_config
-        except ImportError:
-            error("crank extension is not available (missing dependencies).")
-            raise SystemExit(1)
-
-        cfg = load_llm_config()
+        cfg = llm_config.load()
         if cfg:
             echo(f"{f_title('Cached LLM config:')}")
             for k, v in cfg.items():
@@ -312,14 +285,7 @@ def register_config(main_group: click.Group) -> None:
     @config_crank_llm.command("clear")
     def config_llm_clear() -> None:
         """Remove the cached LLM configuration."""
-        try:
-            from zhihu_cli.extensions.crank.archiver import LLM_CONFIG_PATH
-        except ImportError:
-            error("crank extension is not available (missing dependencies).")
-            raise SystemExit(1)
-
-        if os.path.exists(LLM_CONFIG_PATH):
-            os.remove(LLM_CONFIG_PATH)
+        if llm_config.clear():
             success("Cached LLM config removed.")
         else:
             info("No cached LLM config to remove.")

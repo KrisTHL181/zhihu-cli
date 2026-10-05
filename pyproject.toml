@@ -65,6 +65,9 @@ creator = [
     "scipy",
     "seaborn",
 ]
+llm = [
+    "openai",
+]
 notify = [
     "desktop-notifier",
 ]

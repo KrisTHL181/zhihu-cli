@@ -22,6 +22,7 @@ from zhihu_cli.content.handlers.chat import (
     unsend_message,
 )
 from zhihu_cli.content.handlers.people import get_my_url_token
+from zhihu_cli.content.utils.llm_config import options as llm_options
 from zhihu_cli.output import (
     blank,
     echo,
@@ -371,9 +372,7 @@ def register_chat(main_group: click.Group) -> None:
         show_default=True,
         help="Recent messages to include as LLM context (0 = all)",
     )
-    @click.option("--model", default=None, help="LLM model override (default: zhihu config llm / LLM_MODEL)")
-    @click.option("--api-base", default=None, help="LLM API base override (default: zhihu config llm / LLM_API_BASE)")
-    @click.option("--api-key", default=None, help="LLM API key override (default: zhihu config llm / LLM_API_KEY)")
+    @llm_options()
     @click.option("--dry-run", is_flag=True, default=False, help="Generate replies but do not send them")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output structured JSON events")
     def chat_bot(

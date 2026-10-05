@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import click
 
 from zhihu_cli.content.handlers import fmt_time
@@ -19,6 +17,8 @@ from zhihu_cli.content.handlers.agora import (
     fetch_reviews,
     vote_discussion,
 )
+from zhihu_cli.content.utils.llm_config import build_client, require
+from zhihu_cli.content.utils.llm_config import options as llm_options
 from zhihu_cli.output import (
     blank,
     echo,
@@ -283,21 +283,7 @@ def register_agora(main_group):
 
     @agora.command("ai")
     @click.argument("discussion_id", required=False)
-    @click.option(
-        "--model",
-        default=None,
-        help="LLM model override (default: from cached config).",
-    )
-    @click.option(
-        "--api-base",
-        default=None,
-        help="LLM API endpoint override.",
-    )
-    @click.option(
-        "--api-key",
-        default=None,
-        help="LLM API key override.",
-    )
+    @llm_options()
     @click.option(
         "--json",
         "output_json",
@@ -446,47 +432,6 @@ def _build_agora_vote_prompt(discussion: dict, *, image_count: int = 0) -> str:
     return "\n".join(parts)
 
 
-def _resolve_llm_config(
-    *,
-    api_base: str | None = None,
-    api_key: str | None = None,
-    model: str | None = None,
-) -> tuple[str, str, str, bool] | None:
-    """Resolve LLM config from args, env, and cached file.
-
-    :returns: ``(api_base, api_key, model, vision)`` or ``None`` if api_key is
-        missing. ``vision`` reports whether the model is declared to accept
-        image input (``LLM_VISION`` env var, else the cached config).
-    """
-    try:
-        from zhihu_cli.extensions.crank.archiver import llm_supports_vision, load_llm_config
-    except ImportError:
-        error("Cannot import LLM config loader (crank extension not available).")
-        return None
-
-    cached = load_llm_config()
-
-    _api_base = api_base or os.environ.get("LLM_API_BASE") or cached.get("api_base", "https://api.openai.com/v1")
-    _api_key = api_key or os.environ.get("LLM_API_KEY") or cached.get("api_key", "")
-    _model = model or os.environ.get("LLM_MODEL") or cached.get("model", "gpt-4o-mini")
-
-    _vision_env = os.environ.get("LLM_VISION")
-    if _vision_env is None:
-        _vision = llm_supports_vision(cached)
-    else:
-        _vision = _vision_env.strip().lower() in {"1", "true", "yes", "on"}
-
-    if not _api_key:
-        error(
-            "LLM API key not configured. Set it via:\n"
-            "  zhihu config llm set --api-base <URL> --api-key <KEY> --model <NAME>\n"
-            "Or set the LLM_API_KEY environment variable."
-        )
-        return None
-
-    return _api_base, _api_key, _model, _vision
-
-
 def _call_llm_for_vote(
     discussion: dict,
     *,
@@ -511,18 +456,16 @@ def _call_llm_for_vote(
     :returns: ``(vote, image_count)`` or None on failure. The vote label is
         one of affirmative/abstain/dissenting.
     """
-    resolved = _resolve_llm_config(api_base=api_base, api_key=api_key, model=model)
-    if resolved is None:
+    cfg = require(api_base=api_base, api_key=api_key, model=model)
+    if cfg is None:
         return None
-
-    _api_base, _api_key, _model, _vision = resolved
 
     if dry_run:
         # Config is valid — signal success without an actual LLM call.
         return "affirmative", 0  # any non-None value works
 
     image_data_urls: list[str] = []
-    if allow_images and _vision:
+    if allow_images and cfg.vision:
         image_urls = extract_comment_image_urls(discussion.get("comment", {}).get("content", ""))
         if image_urls:
             image_data_urls = fetch_images_as_data_urls(image_urls)
@@ -534,17 +477,13 @@ def _call_llm_for_vote(
         user_content = [{"type": "text", "text": prompt}]
         user_content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_data_urls)
 
-    try:
-        from openai import OpenAI  # type: ignore[import-untyped]
-    except ImportError:
-        error("The 'openai' package is required for AI voting. Install with: pip install openai")
+    client = build_client(cfg, purpose="AI voting")
+    if client is None:
         return None
-
-    client = OpenAI(base_url=_api_base, api_key=_api_key)
 
     try:
         response = client.chat.completions.create(
-            model=_model,
+            model=cfg.model,
             messages=[
                 {"role": "system", "content": AGORA_VOTE_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},

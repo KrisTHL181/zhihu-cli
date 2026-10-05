@@ -20,13 +20,12 @@ from typing import TYPE_CHECKING, Any
 
 from zhihu_cli.content.download_contents import build_yaml_frontmatter, get_safe_filename, sanitize_filename
 from zhihu_cli.content.handlers.article import scrape_article
+from zhihu_cli.content.utils.llm_config import options, require, save
 from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.extensions.crank.archiver import (
     call_llm_for_name,
     fetch_article_list,
-    load_llm_config,
     parse_since,
-    save_llm_config,
 )
 
 if TYPE_CHECKING:
@@ -708,52 +707,28 @@ def register_commands(main_group: click.Group) -> None:
         mon = CrankMonitor()
         mon.run(check=True, author_filter=author_name)
 
-    # Shared LLM options used by ``fetch`` and ``archive``.
-    _llm_options = [
-        _click.option("--api-endpoint", envvar="LLM_API_BASE", help="OpenAI-compatible API endpoint (saved to cache)"),
-        _click.option("--api-key", envvar="LLM_API_KEY", help="API key (saved to cache)"),
-        _click.option("--model", envvar="LLM_MODEL", help="Model name (saved to cache, default: gpt-4o-mini)"),
-    ]
-
-    def _resolve_llm_config(
-        api_endpoint: str | None,
-        api_key: str | None,
-        model: str | None,
-    ) -> tuple[str, str, str]:
-        """Resolve final LLM config: CLI arg → env var → cache → hardcoded default."""
-        cached = load_llm_config()
-        _api_base = (
-            api_endpoint or os.environ.get("LLM_API_BASE") or cached.get("api_base", "https://api.openai.com/v1")
-        )
-        _api_key = api_key or os.environ.get("LLM_API_KEY") or cached.get("api_key", "")
-        _model = model or os.environ.get("LLM_MODEL") or cached.get("model", "gpt-4o-mini")
-        return _api_base, _api_key, _model
-
-    def _llm_decorator(fn):
-        for opt in reversed(_llm_options):
-            fn = opt(fn)
-        return fn
-
     @crank_group.command("fetch")
     @_click.option("--author", "-a", "author_name", default=None, help="Only fetch for a specific author")
     @_click.option("--dry-run", is_flag=True, help="Show what would be downloaded without writing files")
     @_click.option("--classify", is_flag=True, help="Classify downloaded articles with BERT model")
-    @_llm_decorator
+    @options()
     def crank_fetch(
         author_name: str | None,
         dry_run: bool,
         classify: bool,
-        api_endpoint: str | None,
+        api_base: str | None,
         api_key: str | None,
         model: str | None,
     ) -> None:
         """Download new articles from watched authors."""
-        api_base, api_key, model = _resolve_llm_config(api_endpoint, api_key, model)
-        save_llm_config(api_base, api_key, model)
+        cfg = require(api_base=api_base, api_key=api_key, model=model)
+        if cfg is None:
+            raise SystemExit(1)
+        save(cfg.api_base, cfg.api_key, cfg.model)
         mon = CrankMonitor(
-            llm_api_base=api_base,
-            llm_api_key=api_key,
-            llm_model=model,
+            llm_api_base=cfg.api_base,
+            llm_api_key=cfg.api_key,
+            llm_model=cfg.model,
             classify_downloads=classify,
         )
         mon.run(fetch=True, author_filter=author_name, dry_run=dry_run, classify=classify)
@@ -773,14 +748,14 @@ def register_commands(main_group: click.Group) -> None:
         help="Only download articles created on or after this date (YYYY-MM-DD or YYYY/MM/DD)",
     )
     @_click.option("--dry-run", is_flag=True, help="Download but skip LLM naming")
-    @_llm_decorator
+    @options()
     def crank_archive(
         user_token: str,
         output_dir: str,
         sample_count: int,
         since: str | None,
         dry_run: bool,
-        api_endpoint: str | None,
+        api_base: str | None,
         api_key: str | None,
         model: str | None,
     ) -> None:
@@ -791,8 +766,10 @@ def register_commands(main_group: click.Group) -> None:
         """
         from zhihu_cli.extensions.crank.archiver import run_archiver
 
-        api_base, api_key, model = _resolve_llm_config(api_endpoint, api_key, model)
-        save_llm_config(api_base, api_key, model)
+        cfg = require(api_base=api_base, api_key=api_key, model=model)
+        if cfg is None:
+            raise SystemExit(1)
+        save(cfg.api_base, cfg.api_key, cfg.model)
 
         result = run_archiver(
             user_token=user_token,
@@ -800,9 +777,9 @@ def register_commands(main_group: click.Group) -> None:
             sample_count=sample_count,
             since=since,
             dry_run=dry_run,
-            api_base=api_base,
-            api_key=api_key,
-            model=model,
+            api_base=cfg.api_base,
+            api_key=cfg.api_key,
+            model=cfg.model,
         )
         if result:
             series_dir_name = os.path.basename(result)
