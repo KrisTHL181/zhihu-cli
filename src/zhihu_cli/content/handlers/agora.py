@@ -14,7 +14,9 @@ Endpoints:
 from __future__ import annotations
 
 import base64
+import io
 from collections.abc import Iterable
+from dataclasses import dataclass
 from html import unescape
 from typing import Any
 
@@ -323,7 +325,29 @@ _IMAGE_MIME_BY_EXT: tuple[tuple[str, str], ...] = (
 )
 
 
+@dataclass(frozen=True)
+class CommentImage:
+    """A comment picture held in memory as raw bytes.
+
+    :param url: The CDN URL the bytes were downloaded from.
+    :param data: The image bytes as received.
+    :param mime: Best-guess MIME type for *data*.
+    """
+
+    url: str
+    data: bytes
+    mime: str
+
+    def to_data_url(self) -> str:
+        """Render the image as a base64 ``data:`` URL.
+
+        :returns: A data URL suitable for a multimodal LLM message.
+        """
+        return f"data:{self.mime};base64,{base64.b64encode(self.data).decode('ascii')}"
+
+
 _lxml_html_mod = None
+_pil_image_mod = None
 
 
 def _lxml_html():
@@ -338,6 +362,21 @@ def _lxml_html():
     if _lxml_html_mod is None:
         from lxml import html as _lxml_html_mod
     return _lxml_html_mod
+
+
+def _pil_image():
+    """Import and cache the ``PIL.Image`` module on first use.
+
+    ``Pillow`` is a heavy C-extension dependency used only when an image has
+    to be re-encoded, so it is pulled in lazily rather than at module import
+    time — this module is on the ``zhihu`` CLI startup path.
+
+    :returns: The ``PIL.Image`` module.
+    """
+    global _pil_image_mod
+    if _pil_image_mod is None:
+        from PIL import Image as _pil_image_mod
+    return _pil_image_mod
 
 
 def _comment_html_root(content_html: str):
@@ -474,13 +513,13 @@ def _guess_image_mime(url: str, content_type: str) -> str:
     return "image/jpeg"
 
 
-def fetch_images_as_data_urls(
+def fetch_comment_images(
     urls: Iterable[str],
     *,
     max_images: int = MAX_COMMENT_IMAGES,
     max_bytes: int = MAX_IMAGE_BYTES,
-) -> list[str]:
-    """Download images and base64-encode them as ``data:`` URLs.
+) -> list[CommentImage]:
+    """Download comment images, keeping their bytes and guessed MIME type.
 
     Images go through the shared authenticated :data:`session`, so the Zhihu
     CDN sees the same cookies and headers as every other request. Downloads
@@ -489,9 +528,9 @@ def fetch_images_as_data_urls(
     :param urls: Image URLs, typically from :func:`extract_comment_image_urls`.
     :param max_images: Maximum number of images to fetch.
     :param max_bytes: Skip any image larger than this many bytes.
-    :returns: Data URLs suitable for a multimodal LLM message.
+    :returns: Downloaded images ready to attach to a message.
     """
-    data_urls: list[str] = []
+    images: list[CommentImage] = []
     for url in list(urls)[:max_images]:
         try:
             resp = session.get(url, timeout=30)
@@ -502,8 +541,52 @@ def fetch_images_as_data_urls(
         if not body or len(body) > max_bytes:
             continue
         mime = _guess_image_mime(url, resp.headers.get("content-type", ""))
-        data_urls.append(f"data:{mime};base64,{base64.b64encode(body).decode('ascii')}")
-    return data_urls
+        images.append(CommentImage(url=url, data=body, mime=mime))
+    return images
+
+
+def transcode_for_llm(image: CommentImage, *, max_bytes: int = MAX_IMAGE_BYTES) -> CommentImage | None:
+    """Re-encode an image in memory so a multimodal LLM will accept it.
+
+    The Zhihu CDN sometimes answers with something that is not a decodable
+    picture — an anti-hotlink HTML page, say — while the URL suffix still
+    claims ``image/jpeg``. This decodes the raw bytes with Pillow and encodes
+    them again in a format the model accepts. The work happens entirely in
+    memory: no temporary file, no download directory, no disk write.
+
+    Pictures carrying transparency become PNG; everything else (including
+    CMYK and palette images) becomes JPEG. An animated GIF contributes its
+    first frame only.
+
+    :param image: An image as downloaded by :func:`fetch_comment_images`.
+    :param max_bytes: Give up when the re-encoded result exceeds this size.
+    :returns: A new :class:`CommentImage` with the same URL and the re-encoded
+        bytes, or None when the input cannot be decoded or encoded, or when
+        Pillow itself is unavailable.
+    """
+    try:
+        pil_image = _pil_image()
+        with pil_image.open(io.BytesIO(image.data)) as img:
+            img.load()
+            has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+            if has_alpha:
+                reencoded = img.convert("RGBA")
+                mime = "image/png"
+                fmt = "PNG"
+                save_kwargs: dict[str, Any] = {}
+            else:
+                reencoded = img.convert("RGB")
+                mime = "image/jpeg"
+                fmt = "JPEG"
+                save_kwargs = {"quality": 90}
+            buffer = io.BytesIO()
+            reencoded.save(buffer, format=fmt, **save_kwargs)
+            data = buffer.getvalue()
+    except Exception:
+        return None
+    if len(data) > max_bytes:
+        return None
+    return CommentImage(url=image.url, data=data, mime=mime)
 
 
 # ── voting ─────────────────────────────────────────────────────────────────

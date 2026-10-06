@@ -8,13 +8,15 @@ from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.agora import (
     VALID_VOTES,
     VOTE_LABELS,
+    CommentImage,
     comment_to_markdown,
     extract_comment_image_urls,
     fetch_agora_me,
     fetch_comment_detail,
+    fetch_comment_images,
     fetch_court_page,
-    fetch_images_as_data_urls,
     fetch_reviews,
+    transcode_for_llm,
     vote_discussion,
 )
 from zhihu_cli.content.utils.llm_config import build_client, require
@@ -432,6 +434,66 @@ def _build_agora_vote_prompt(discussion: dict, *, image_count: int = 0) -> str:
     return "\n".join(parts)
 
 
+def _is_image_error(exc: Exception) -> bool:
+    """Tell whether an LLM failure is the model rejecting the image payload.
+
+    :param exc: The exception raised by the API call.
+    :returns: True when the message blames the image or vision payload and,
+        if the exception carries a status code, that status is 400.
+    """
+    message = str(exc).lower()
+    if "image" not in message and "vision" not in message:
+        return False
+    status = getattr(exc, "status_code", None)
+    return status is None or status == 400
+
+
+def _build_user_content(prompt: str, images: list[CommentImage]) -> str | list[dict]:
+    """Render a vote prompt and its images as LLM ``user`` message content.
+
+    :param prompt: Text prompt from :func:`_build_agora_vote_prompt`.
+    :param images: Images to attach, possibly empty.
+    :returns: The prompt alone when there are no images, otherwise a list of
+        content parts with the text first and one part per image.
+    """
+    if not images:
+        return prompt
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    content.extend({"type": "image_url", "image_url": {"url": image.to_data_url()}} for image in images)
+    return content
+
+
+def _request_vote(client, cfg, user_content: str | list[dict]) -> str | None:
+    """Ask the model for a vote and parse the label out of its reply.
+
+    :param client: OpenAI client from :func:`build_client`.
+    :param cfg: Resolved LLM config.
+    :param user_content: The ``user`` message content, text or text + images.
+    :returns: One of :data:`VALID_VOTES`, or None when the reply was empty or
+        did not name a known vote. API and transport errors propagate.
+    """
+    response = client.chat.completions.create(
+        model=cfg.model,
+        messages=[
+            {"role": "system", "content": AGORA_VOTE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.3,
+        max_tokens=16,
+        extra_body={"thinking": {"type": "disabled"}},
+    )
+    raw = response.choices[0].message.content
+    if not raw:
+        error("LLM returned empty response.")
+        return None
+    vote = raw.strip().lower()
+    for v in VALID_VOTES:
+        if v in vote:
+            return v
+    error(f"LLM returned unrecognized vote: {vote!r}")
+    return None
+
+
 def _call_llm_for_vote(
     discussion: dict,
     *,
@@ -447,6 +509,11 @@ def _call_llm_for_vote(
     set, images embedded in the reported comment are downloaded and attached
     to the message; otherwise the prompt stays text-only.
 
+    If the model rejects the image payload, the bytes are re-encoded locally
+    with :func:`transcode_for_llm` — dropping whatever cannot be decoded —
+    and the request is retried once. When every image fails to re-encode,
+    the retry still goes out, text-only.
+
     :param discussion: Parsed discussion dict.
     :param api_base: Optional API endpoint override.
     :param api_key: Optional API key override.
@@ -454,7 +521,8 @@ def _call_llm_for_vote(
     :param allow_images: Whether comment images may be attached at all.
     :param dry_run: If True, only validate config without calling the LLM.
     :returns: ``(vote, image_count)`` or None on failure. The vote label is
-        one of affirmative/abstain/dissenting.
+        one of affirmative/abstain/dissenting, and *image_count* is how many
+        images the successful attempt actually carried.
     """
     cfg = require(api_base=api_base, api_key=api_key, model=model)
     if cfg is None:
@@ -464,47 +532,42 @@ def _call_llm_for_vote(
         # Config is valid — signal success without an actual LLM call.
         return "affirmative", 0  # any non-None value works
 
-    image_data_urls: list[str] = []
+    images: list[CommentImage] = []
     if allow_images and cfg.vision:
         image_urls = extract_comment_image_urls(discussion.get("comment", {}).get("content", ""))
         if image_urls:
-            image_data_urls = fetch_images_as_data_urls(image_urls)
+            images = fetch_comment_images(image_urls)
 
-    prompt = _build_agora_vote_prompt(discussion, image_count=len(image_data_urls))
-
-    user_content: str | list[dict] = prompt
-    if image_data_urls:
-        user_content = [{"type": "text", "text": prompt}]
-        user_content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_data_urls)
+    prompt = _build_agora_vote_prompt(discussion, image_count=len(images))
+    user_content = _build_user_content(prompt, images)
 
     client = build_client(cfg, purpose="AI voting")
     if client is None:
         return None
 
     try:
-        response = client.chat.completions.create(
-            model=cfg.model,
-            messages=[
-                {"role": "system", "content": AGORA_VOTE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.3,
-            max_tokens=16,
-            extra_body={"thinking": {"type": "disabled"}},
-        )
-        raw = response.choices[0].message.content
-        if not raw:
-            error("LLM returned empty response.")
-            return None
-        vote = raw.strip().lower()
-        for v in VALID_VOTES:
-            if v in vote:
-                return v, len(image_data_urls)
-        error(f"LLM returned unrecognized vote: {vote!r}")
-        return None
+        vote = _request_vote(client, cfg, user_content)
     except Exception as e:
-        error(f"LLM call failed: {e}")
-        return None
+        if not images or not _is_image_error(e):
+            error(f"LLM call failed: {e}")
+            return None
+        # The model refused the image payload — re-encode the bytes here and
+        # try once more, dropping whatever Pillow cannot decode.
+        reencoded: list[CommentImage] = []
+        for image in images:
+            converted = transcode_for_llm(image)
+            if converted is not None:
+                reencoded.append(converted)
+        warning(f"Model rejected the comment images — retrying with {len(reencoded)} of {len(images)} re-encoded.")
+        retry_prompt = _build_agora_vote_prompt(discussion, image_count=len(reencoded))
+        retry_content = _build_user_content(retry_prompt, reencoded)
+        try:
+            vote = _request_vote(client, cfg, retry_content)
+        except Exception as retry_error:
+            error(f"LLM call failed after re-encoding the images: {retry_error}")
+            return None
+        return (vote, len(reencoded)) if vote else None
+    return (vote, len(images)) if vote else None
 
 
 def _ai_vote_one(
