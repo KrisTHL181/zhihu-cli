@@ -230,12 +230,13 @@ def register_config(main_group: click.Group) -> None:
         """Manage the cached LLM configuration for the crank extension."""
 
     @config_crank_llm.command("set")
-    @llm_config.options(use_env=False, vision=True)
+    @llm_config.options(use_env=False, vision=True, image_side=True)
     def config_llm_set(
         api_base: str | None,
         api_key: str | None,
         model: str | None,
         vision: bool | None,
+        max_image_side: int | None,
     ) -> None:
         """Cache LLM credentials for the crank archiver.
 
@@ -246,12 +247,21 @@ def register_config(main_group: click.Group) -> None:
           zhihu config llm set --api-base https://api.openai.com/v1 --api-key sk-xxx --model gpt-4
           zhihu config llm set --vision       # keep credentials, enable image input
           zhihu config llm set --no-vision    # keep credentials, disable image input
+          zhihu config llm set --max-image-side 8000   # cap the longest side when re-encoding
 
         Enable \033[2m--vision\033[0m when the model accepts images, so that
         \033[2mzhihu agora ai\033[0m sends pictures embedded in reported comments.
+        \033[2m--max-image-side\033[0m bounds how long a side may stay when
+        \033[2magora ai\033[0m re-encodes a rejected image.
         """
         cached = llm_config.load_config()
-        new = cached.with_overrides(api_base=api_base, api_key=api_key, model=model, vision=vision)
+        new = cached.with_overrides(
+            api_base=api_base,
+            api_key=api_key,
+            model=model,
+            vision=vision,
+            max_image_side=max_image_side,
+        )
 
         if not new.api_key:
             error(
@@ -260,12 +270,13 @@ def register_config(main_group: click.Group) -> None:
             )
             raise SystemExit(1)
 
-        llm_config.save(new.api_base, new.api_key, new.model, vision=vision)
+        llm_config.save(new.api_base, new.api_key, new.model, vision=vision, max_image_side=max_image_side)
 
         lines = [
             f"  {f_label('api_base:')} {new.api_base}",
             f"  {f_label('model:')} {new.model}",
             f"  {f_label('vision:')} {str(new.vision).lower()}",
+            f"  {f_label('max_image_side:')} {new.max_image_side}",
         ]
         success("LLM config saved:\n" + "\n".join(lines))
 

@@ -28,6 +28,7 @@ from zhihu_cli.content.utils.html2markdown import (
     image_src,
     replace_with_text,
 )
+from zhihu_cli.content.utils.llm_config import DEFAULT_MAX_IMAGE_SIDE
 
 AGORA_BASE = "https://www.zhihu.com/api/v4/agora"
 COURT_PAGE = "https://www.zhihu.com/appview/court/discussion"
@@ -545,14 +546,25 @@ def fetch_comment_images(
     return images
 
 
-def transcode_for_llm(image: CommentImage, *, max_bytes: int = MAX_IMAGE_BYTES) -> CommentImage | None:
+def transcode_for_llm(
+    image: CommentImage,
+    *,
+    max_bytes: int = MAX_IMAGE_BYTES,
+    max_side: int = DEFAULT_MAX_IMAGE_SIDE,
+) -> CommentImage | None:
     """Re-encode an image in memory so a multimodal LLM will accept it.
 
-    The Zhihu CDN sometimes answers with something that is not a decodable
-    picture — an anti-hotlink HTML page, say — while the URL suffix still
-    claims ``image/jpeg``. This decodes the raw bytes with Pillow and encodes
-    them again in a format the model accepts. The work happens entirely in
-    memory: no temporary file, no download directory, no disk write.
+    Two things trip the model up, and both are repaired here. The Zhihu CDN
+    sometimes answers with something that is not a decodable picture — an
+    anti-hotlink HTML page, say — while the URL suffix still claims
+    ``image/jpeg``; and comment pictures are often screenshots of a whole
+    thread, tall enough to blow past the model's per-side limit (see
+    :data:`zhihu_cli.content.utils.llm_config.DEFAULT_MAX_IMAGE_SIDE`). The
+    bytes are decoded with Pillow, re-encoded in a format the model accepts,
+    and scaled down if any side is still too long.
+
+    The work happens entirely in memory: no temporary file, no download
+    directory, no disk write.
 
     Pictures carrying transparency become PNG; everything else (including
     CMYK and palette images) becomes JPEG. An animated GIF contributes its
@@ -560,28 +572,28 @@ def transcode_for_llm(image: CommentImage, *, max_bytes: int = MAX_IMAGE_BYTES) 
 
     :param image: An image as downloaded by :func:`fetch_comment_images`.
     :param max_bytes: Give up when the re-encoded result exceeds this size.
+    :param max_side: Scale down until the longest side fits this many pixels.
     :returns: A new :class:`CommentImage` with the same URL and the re-encoded
         bytes, or None when the input cannot be decoded or encoded, or when
         Pillow itself is unavailable.
     """
     try:
         pil_image = _pil_image()
-        with pil_image.open(io.BytesIO(image.data)) as img:
-            img.load()
-            has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
-            if has_alpha:
-                reencoded = img.convert("RGBA")
-                mime = "image/png"
-                fmt = "PNG"
-                save_kwargs: dict[str, Any] = {}
-            else:
-                reencoded = img.convert("RGB")
-                mime = "image/jpeg"
-                fmt = "JPEG"
-                save_kwargs = {"quality": 90}
-            buffer = io.BytesIO()
-            reencoded.save(buffer, format=fmt, **save_kwargs)
-            data = buffer.getvalue()
+        with pil_image.open(io.BytesIO(image.data)) as opened:
+            has_alpha = opened.mode in ("RGBA", "LA") or (opened.mode == "P" and "transparency" in opened.info)
+            reencoded = opened.convert("RGBA" if has_alpha else "RGB")
+        mime, fmt, save_kwargs = ("image/png", "PNG", {}) if has_alpha else ("image/jpeg", "JPEG", {"quality": 90})
+        width, height = reencoded.size
+        longest = max(width, height)
+        if longest > max_side:
+            scale = max_side / longest
+            reencoded = reencoded.resize(
+                (max(1, round(width * scale)), max(1, round(height * scale))),
+                pil_image.LANCZOS,
+            )
+        buffer = io.BytesIO()
+        reencoded.save(buffer, format=fmt, **save_kwargs)
+        data = buffer.getvalue()
     except Exception:
         return None
     if len(data) > max_bytes:

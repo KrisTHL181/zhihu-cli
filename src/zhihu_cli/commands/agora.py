@@ -512,7 +512,8 @@ def _call_llm_for_vote(
     If the model rejects the image payload, the bytes are re-encoded locally
     with :func:`transcode_for_llm` — dropping whatever cannot be decoded —
     and the request is retried once. When every image fails to re-encode,
-    the retry still goes out, text-only.
+    the retry still goes out, text-only. The per-side ceiling imposed while
+    re-encoding comes from the resolved LLM configuration.
 
     :param discussion: Parsed discussion dict.
     :param api_base: Optional API endpoint override.
@@ -555,7 +556,7 @@ def _call_llm_for_vote(
         # try once more, dropping whatever Pillow cannot decode.
         reencoded: list[CommentImage] = []
         for image in images:
-            converted = transcode_for_llm(image)
+            converted = transcode_for_llm(image, max_side=cfg.max_image_side)
             if converted is not None:
                 reencoded.append(converted)
         warning(f"Model rejected the comment images — retrying with {len(reencoded)} of {len(images)} re-encoded.")
