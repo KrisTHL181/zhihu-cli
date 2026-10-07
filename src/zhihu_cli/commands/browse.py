@@ -25,6 +25,7 @@ from zhihu_cli.content.handlers.following import (
     fetch_following_topics,
 )
 from zhihu_cli.content.handlers.hot import fetch_hot_list
+from zhihu_cli.content.handlers.pin import scrape_pin
 from zhihu_cli.content.handlers.question import scrape_answer_page, scrape_answers, scrape_question_data
 from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.segment_comments import fetch_segment_comments
@@ -74,6 +75,32 @@ def _collapse_tag(ans: dict) -> str:
     if collapsed_by:
         parts.append(collapsed_by)
     return " · ".join(parts)
+
+
+def _print_reading(header: str, markdown: str, reading_mode: bool) -> None:
+    """Print a piece of content, paging through it when Rich is available.
+
+    :param header: Markdown header block with the item's title and metadata.
+    :param markdown: The item body as Markdown.
+    :param reading_mode: Page the output through Rich. Falls back to plain
+        printing when Rich is not installed.
+    """
+    if reading_mode:
+        try:
+            from rich.console import Console
+            from rich.markdown import Markdown
+        except ImportError:
+            reading_mode = False
+
+    if reading_mode:
+        console = Console()
+        with console.pager(styles=True, links=True):
+            console.print(Markdown(header))
+            console.print(Markdown(markdown))
+    else:
+        echo(header)
+        blank()
+        echo(markdown)
 
 
 def register_browse(main_group):
@@ -182,13 +209,6 @@ def register_browse(main_group):
             print_json({"metadata": metadata, "content_md": markdown})
             return
 
-        if reading_mode:
-            try:
-                from rich.console import Console
-                from rich.markdown import Markdown
-            except ImportError:
-                reading_mode = False
-
         title = metadata.get("title", "untitled")
         author = metadata.get("author", "unknown")
         created = metadata.get("created", "unknown")
@@ -197,15 +217,7 @@ def register_browse(main_group):
         favorites = metadata.get("favorite", 0)
         header = f"# {title}\n\n**Author:** {author} | **Date:** {created} | **Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
 
-        if reading_mode:
-            console = Console()
-            with console.pager(styles=True, links=True):
-                console.print(Markdown(header))
-                console.print(Markdown(markdown))
-        else:
-            echo(header)
-            blank()
-            echo(markdown)
+        _print_reading(header, markdown, reading_mode)
 
     @browse.command("article")
     @click.argument("url")
@@ -219,13 +231,6 @@ def register_browse(main_group):
             print_json({"metadata": metadata, "content_md": markdown})
             return
 
-        if reading_mode:
-            try:
-                from rich.console import Console
-                from rich.markdown import Markdown
-            except ImportError:
-                reading_mode = False
-
         title = metadata.get("title", "untitled")
         author = metadata.get("author", {}).get("name", "unknown")
         stats = metadata.get("stats", {})
@@ -234,15 +239,29 @@ def register_browse(main_group):
         favorites = stats.get("favlists_count", 0)
         header = f"# {title}\n\n**Author:** {author} | **Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
 
-        if reading_mode:
-            console = Console()
-            with console.pager(styles=True, links=True):
-                console.print(Markdown(header))
-                console.print(Markdown(markdown))
-        else:
-            echo(header)
-            blank()
-            echo(markdown)
+        _print_reading(header, markdown, reading_mode)
+
+    @browse.command("pin")
+    @click.argument("url")
+    @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
+    @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
+    def browse_pin(url: str, reading_mode: bool, output_json: bool) -> None:
+        """View a single Zhihu pin (想法) in the terminal."""
+        metadata, markdown = scrape_pin(url)
+
+        if output_json:
+            print_json({"metadata": metadata, "content_md": markdown})
+            return
+
+        title = metadata.get("title", "untitled")
+        author = metadata.get("author", {}).get("name", "unknown")
+        created = metadata.get("created_time", "unknown")
+        stats = metadata.get("stats", {})
+        upvotes = stats.get("voteup_count", 0)
+        comments = stats.get("comment_count", 0)
+        header = f"# {title}\n\n**Author:** {author} | **Date:** {created} | **Upvotes:** {upvotes} | **Comments:** {comments}"
+
+        _print_reading(header, markdown, reading_mode)
 
     @browse.command("log")
     @click.argument("url")
