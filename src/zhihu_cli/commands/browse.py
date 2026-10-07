@@ -1,5 +1,6 @@
 """Browse Zhihu content in the terminal."""
 
+import itertools
 import json
 
 import click
@@ -142,18 +143,25 @@ def register_browse(main_group):
         """
         q_meta, q_detail_md = scrape_question_data(url)
 
-        answers = list(scrape_answers(q_meta, limit=limit, max_items=max_items, collapsed=collapsed))
+        # scrape_answers is a lazy generator, so answers arrive page by page.
+        # Sorting needs the full set, so only that path materializes early.
+        answers = scrape_answers(q_meta, limit=limit, max_items=max_items, collapsed=collapsed)
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "upvotes": "vote", "favorites": "favorite", "comments": "comment"}
-            answers = _sort_items(answers, _SORT_MAP[sort_by])
+            answers = _sort_items(list(answers), _SORT_MAP[sort_by])
 
         if output_json:
-            print_json({"question": q_meta, "detail_md": q_detail_md, "answers": answers})
+            print_json({"question": q_meta, "detail_md": q_detail_md, "answers": list(answers)})
             return
 
-        if collapsed and not answers:
+        # Peek one item so an empty collapsed result can bail out before the
+        # question header is printed, while keeping the rest of the stream lazy.
+        answers_iter = iter(answers)
+        first = next(answers_iter, None)
+        if first is None and collapsed:
             info("No collapsed answers for this question.")
             return
+        answers = answers_iter if first is None else itertools.chain((first,), answers_iter)
 
         if reading_mode:
             try:
