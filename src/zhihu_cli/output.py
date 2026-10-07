@@ -13,17 +13,24 @@ Magenta     — numeric values, counts, statistics
 Blue dim    — URLs, links
 Dim         — metadata, timestamps, secondary info
 Bold        — emphasis on key actionable items
+
+Everything here is built on ``click`` alone except :func:`print_table` and
+:func:`divider`, which draw with ``rich``.  Those two import ``rich`` inside
+the function body so that paths which never render anything — ``--help`` and
+shell completion — do not pay the import cost.
 """
+
+from __future__ import annotations
 
 import json
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
-from rich import box
-from rich.console import Console
-from rich.table import Table
-from rich.text import Text
+
+if TYPE_CHECKING:
+    from rich import box
+    from rich.text import Text
 
 __all__ = [
     "echo",
@@ -70,10 +77,37 @@ def lazy_rich_excepthook(type, value, tb):
 
 sys.excepthook = lazy_rich_excepthook
 
-# ── console singleton ───────────────────────────────────────────────────────
+# ── console singletons (built on first render) ──────────────────────────────
 
-_console = Console()
-_console_err = Console(stderr=True)
+_console: Any = None
+_console_err: Any = None
+
+
+def _get_console() -> Any:
+    """Return the stdout Console, building it on first use.
+
+    :returns: The cached :class:`rich.console.Console` bound to stdout.
+    """
+    global _console
+    if _console is None:
+        from rich.console import Console
+
+        _console = Console()
+    return _console
+
+
+def _get_console_err() -> Any:
+    """Return the stderr Console, building it on first use.
+
+    :returns: The cached :class:`rich.console.Console` bound to stderr.
+    """
+    global _console_err
+    if _console_err is None:
+        from rich.console import Console
+
+        _console_err = Console(stderr=True)
+    return _console_err
+
 
 _json_mode: bool = False
 
@@ -152,7 +186,7 @@ def stat(label: str, value: Any, indent: int = 2) -> None:
 
 def divider(char: str = "─", length: int | None = None) -> None:
     """Print a horizontal rule."""
-    n = length if length else min(_console.width, 80)
+    n = length if length else min(_get_console().width, 80)
     click.secho(char * n, dim=True, err=_json_mode)
 
 
@@ -204,7 +238,7 @@ def print_table(
     columns: list[str],
     rows: list[list[Any]],
     *,
-    box_style: box.Box = box.ROUNDED,
+    box_style: box.Box | None = None,
     **kwargs: Any,
 ) -> None:
     """Render a styled table.
@@ -213,13 +247,25 @@ def print_table(
     are converted with :meth:`rich.text.Text.from_ansi` so Rich measures
     their visible width; passing them through as plain strings makes Rich
     count the escape bytes, which misaligns every column in the row.
+
+    :param title: Optional table title.
+    :param columns: Column headers.
+    :param rows: Row contents.
+    :param box_style: Box style; defaults to :data:`rich.box.ROUNDED`.
+    :param kwargs: Extra keyword arguments forwarded to :class:`rich.table.Table`.
     """
+    from rich import box
+    from rich.table import Table
+
+    if box_style is None:
+        box_style = box.ROUNDED
+
     table = Table(title=title, box=box_style, **kwargs)
     for col in columns:
         table.add_column(col, style="cyan", header_style="bold cyan")
     for row in rows:
         table.add_row(*[_table_cell(c) for c in row])
-    (_console_err if _json_mode else _console).print(table)
+    (_get_console_err() if _json_mode else _get_console()).print(table)
 
 
 def _table_cell(value: Any) -> str | Text:
@@ -229,7 +275,12 @@ def _table_cell(value: Any) -> str | Text:
     :returns: A plain string, or a ``Text`` when *value* contains ANSI escapes.
     """
     text = str(value)
-    return Text.from_ansi(text) if "\x1b" in text else text
+    if "\x1b" not in text:
+        return text
+
+    from rich.text import Text
+
+    return Text.from_ansi(text)
 
 
 # ── inline format helpers (for use in f-strings) ────────────────────────────
