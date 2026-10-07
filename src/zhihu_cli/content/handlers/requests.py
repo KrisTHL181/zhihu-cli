@@ -1,7 +1,10 @@
 """HTTP session management — lightweight entry point.
 
-This module provides a lazy :data:`session` singleton.  On first access
-it attempts to connect to the background daemon (→ lightweight
+This module provides a lazy :data:`session` singleton.  The module-level
+``session`` name is a :class:`_LazySession` *proxy*, so submodules that do
+``from zhihu_cli.content.handlers.requests import session`` at import time
+stay cheap.  On first attribute access the proxy connects to the background
+daemon (→ lightweight
 :class:`~zhihu_cli.daemon.proxy.DaemonProxySession`, no curl_cffi needed).
 If the daemon is unavailable it falls back to importing the heavy
 :mod:`_session_core` module and building a direct :class:`ZhihuSession`.
@@ -43,9 +46,8 @@ _LAZY_EXPORTS: dict[str, str] = {
 
 
 def __getattr__(name: str) -> Any:
-    # ── lazy session singleton ──────────────────────────────────────
-    if name in ("session", "requests"):
-        return _get_session()
+    # ``session`` and ``requests`` are real module attributes (a
+    # _LazySession proxy), so they never reach this function.
     if name == "headers":
         _get_session()  # ensure headers is populated
         return _headers
@@ -97,6 +99,41 @@ def get_page_state(html_text: str, key: str = "entities") -> dict[str, Any]:
 
 _session: Any = None
 _headers: dict[str, str] = {}
+
+
+class _LazySession:
+    """Transparent proxy that builds the real session on first attribute use.
+
+    Roughly 26 modules do ``from zhihu_cli.content.handlers.requests import
+    session`` at import time.  Resolving that name eagerly would pull
+    :mod:`_session_core` (curl_cffi + lxml, ~150 ms) into the startup path of
+    every command — including ``--help`` and shell completion.  Binding this
+    proxy instead keeps the import free.
+
+    The real object is re-resolved on *every* access rather than cached, so a
+    later :func:`reload_session` is picked up even by modules that imported
+    ``session`` before the reload.  ``__slots__`` is empty on purpose: with no
+    instance dict there is no ``self._obj`` lookup that could recurse back into
+    ``__getattr__``.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_get_session(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(_get_session(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(_get_session(), name)
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} → {_get_session()!r}>"
+
+
+session: Any = _LazySession()
+requests: Any = session
 
 
 def _get_session() -> Any:
