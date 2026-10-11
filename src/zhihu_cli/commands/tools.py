@@ -22,6 +22,7 @@ from zhihu_cli.output import (
     heading,
     info,
     print_json,
+    set_json_mode,
     success,
     warning,
 )
@@ -469,6 +470,7 @@ def register_tools(main_group):
         """Fetch follower profile/demographics (关注者画像) from Zhihu API."""
         from zhihu_cli.creator_tools.parse_follower_profile import run_task
 
+        set_json_mode(output_json)
         run_task()
         if output_json:
             filepath = get_data_dir() / "exports" / "follower_profile.json"
