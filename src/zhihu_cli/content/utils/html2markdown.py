@@ -139,6 +139,10 @@ class PageToMarkdown:
     def __init__(self, skip_empty: bool = True) -> None:
         self.skip_empty = skip_empty
         self.link_converter = ZhihuLinkConverter()
+        #: Citations collected during the current :meth:`convert` run, keyed by
+        #: citation number and holding a ``(title, url)`` pair. Reset on every
+        #: call, since one instance may convert several documents in a row.
+        self._references: dict[str, tuple[str, str]] = {}
 
     # ── LaTeX pre-processing ──────────────────────────────────────────────
 
@@ -188,6 +192,9 @@ class PageToMarkdown:
         This is the public entry point: it normalizes LaTeX images first, then
         walks the document, then strips the result.
 
+        Inline Zhihu citations become ``[^n]`` footnotes and their targets are
+        collected into a trailing ``参考`` section.
+
         :param html_content: HTML string of the Zhihu page.
         :param url: Base URL for resolving relative links (optional).
         :param strip: Strip leading/trailing whitespace from the result.
@@ -196,8 +203,10 @@ class PageToMarkdown:
         if not html_content:
             return ""
 
+        self._references = {}
         content = self.tex_normalize(html_content)
         result = self._convert(content, url)
+        result = self._append_references(result)
         return result.strip() if strip else result
 
     def _convert(self, html_content: str, url: str = "") -> str:
@@ -219,6 +228,11 @@ class PageToMarkdown:
         # Remove useless elements
         for element in doc.xpath(".//script") + doc.xpath(".//style"):
             element.drop_tree()
+
+        # A page scraped as HTML carries the citation list Zhihu rendered server
+        # side, which would duplicate the one rebuilt from the inline markers.
+        if doc.cssselect('sup[data-draft-type="reference"]'):
+            self._drop_rendered_references(doc)
 
         # Handle Zhihu full pages (with .RichText container)
         rich_texts = doc.cssselect(".RichText")
@@ -242,6 +256,56 @@ class PageToMarkdown:
         # HTML fragment – process the root element directly
         md = self._dispatch(doc)
         return md if md else ""
+
+    @staticmethod
+    def _drop_rendered_references(doc: HtmlElement) -> None:
+        """Remove a server-rendered ``参考`` list from *doc*.
+
+        Only called when the document also carries inline citation markers, so
+        the list is never the sole record of the references.
+
+        :param doc: The parsed document to prune in place.
+        """
+        for ol in doc.cssselect("ol.ReferenceList"):
+            previous = ol.getprevious()
+            if (
+                previous is not None
+                and _tag_name(previous) == "h2"
+                and (previous.text_content() or "").strip() == "参考"
+            ):
+                previous.drop_tree()
+            ol.drop_tree()
+
+    def _append_references(self, markdown: str) -> str:
+        """Append the footnote definitions collected during conversion.
+
+        Zhihu ships the ``参考`` list only in the server-rendered page, which the
+        scrapers never read; the URLs ride along on the inline citation markers,
+        so the list is rebuilt here from what :meth:`_render_reference` saw.
+        A citation title, when the author gave one, precedes its URL.
+
+        :param markdown: The converted document body.
+        :returns: *markdown* followed by a ``参考`` section, or *markdown*
+            unchanged when nothing was cited.
+        """
+        if not self._references:
+            return markdown
+
+        def sort_key(item: tuple[str, tuple[str, str]]) -> tuple[int, int | str]:
+            number = item[0]
+            return (0, int(number)) if number.isdigit() else (1, number)
+
+        def definition(number: str, reference: tuple[str, str]) -> str:
+            title, target = reference
+            label = f"{title} — " if title and title != target else ""
+            return f"[^{number}]: {label}{target}"
+
+        definitions = "\n".join(
+            definition(number, reference) for number, reference in sorted(self._references.items(), key=sort_key)
+        )
+        section = f"## 参考\n\n{definitions}"
+        body = markdown.strip()
+        return f"{body}\n\n{section}" if body else section
 
     # ── dispatcher ───────────────────────────────────────────────────────
 
@@ -277,6 +341,8 @@ class PageToMarkdown:
             return self._render_math(element)
         if tag == "div" and _is_video_div(element):
             return self._render_video(element)
+        if tag == "sup" and _is_reference_sup(element):
+            return self._render_reference(element)
 
         handler = _TAG_HANDLERS.get(tag)
         if handler is None:
@@ -414,6 +480,24 @@ class PageToMarkdown:
         """Render ``<br>`` as a newline."""
         return "\n"
 
+    def _render_reference(self, element) -> str:
+        """Render a Zhihu citation (``sup[data-draft-type="reference"]``).
+
+        The marker carries its target URL and, when the author supplied one, a
+        title; both are recorded for :meth:`_append_references` rather than
+        rendered inline.
+
+        :param element: The citation ``<sup>`` element.
+        :returns: A ``[^n]`` footnote marker, or the bare marker text when the
+            citation has no URL to define it with.
+        """
+        number = (element.get("data-numero") or "").strip() or element.text_content().strip().strip("[]")
+        target = (element.get("data-url") or "").strip()
+        if not number or not target:
+            return element.text_content().strip()
+        self._references.setdefault(number, ((element.get("data-text") or "").strip(), target))
+        return f"[^{number}]"
+
     def _render_math(self, element) -> str:
         """Render a Zhihu formula span (``span.ztext-math``) as LaTeX."""
         tex = element.get("data-tex", "")
@@ -548,6 +632,15 @@ def _is_discarded_link(element: HtmlElement) -> bool:
         or element.get("data-ad-id") is not None
         or element.get("data-edu-card-id") is not None
     )
+
+
+def _is_reference_sup(element: HtmlElement) -> bool:
+    """Return whether *element* is a Zhihu citation marker.
+
+    Zhihu also uses ``<sup>`` for ordinary superscripts, which the caller's tag
+    guard lets fall through to the generic handler.
+    """
+    return element.get("data-draft-type") == "reference"
 
 
 def _is_math_span(element: HtmlElement) -> bool:
