@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "知乎工具箱",
+    "description": "把 zhihu-cli（搜索、浏览、下载、发布、分析）作为 Harness 工具接入，底层走该仓库自带的 zhihu-mcp 服务。"
+  }
+}

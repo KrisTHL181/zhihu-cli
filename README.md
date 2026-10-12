@@ -22,6 +22,8 @@ browse · download · search · publish · analyze — all from the command line
 
 > ⚠️ This is an **unofficial** CLI for Zhihu. Use at your own risk. Not affiliated with Zhihu Inc.
 
+👉 Looking for the DSH plugin? → **[`dsh-plugin/`](dsh-plugin/)**
+
 ---
 
 ## 🚀 Quick Start

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Zhihu Toolkit",
+    "description": "Zhihu CLI (search, browse, download, publish, analyze) as Harness tools, over the package's own zhihu-mcp server."
+  }
+}

@@ -1,0 +1,32 @@
+# Zhihu Toolkit — configuration-only bundle.
+#
+# It contributes no JavaScript. It mounts the shipped MCP client bridge against
+# the `zhihu-mcp` stdio server that `zhihu-toolkit` already ships in its own
+# pyproject ([project.scripts]), so the plugin tracks the installed CLI instead
+# of re-declaring its commands.
+#
+# Nothing here is machine-specific: `zhihu-mcp` is the console script the
+# toolkit installs, resolved through PATH. The harness forwards PATH and HOME to
+# the child (only KEY/PASSWORD/SECRET/TOKEN-shaped names and DSH_* are scrubbed
+# — see scrubbedParentEnv), so the CLI finds its own credentials and downloads
+# with no `env` block and no absolute interpreter path.
+
+- insert:
+    - id: mcp-zhihu
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: zhihu
+        transport: stdio
+        # Overridable for installs that are not on PATH — a virtualenv that was
+        # never activated, a pipx shim under another name, or the module form:
+        #   ZHIHU_MCP_COMMAND=/venv/bin/python \
+        #   ZHIHU_MCP_ARGS="-m zhihu_cli.mcp.server"
+        command: !!js process.env.ZHIHU_MCP_COMMAND || 'zhihu-mcp'
+        args: !!js (process.env.ZHIHU_MCP_ARGS || '').split(' ').filter(Boolean)
+        # The server's own per-command ceiling is 900s for scrape/download/tools,
+        # so the MCP client's 60s default would kill legitimate work: this only
+        # has to be the looser of the two deadlines.
+        toolCallTimeoutMs: 960000
+        # Fail loudly in the Plugin Manager when the toolkit is missing, instead
+        # of silently contributing no tools.
+        failOnStartupError: true

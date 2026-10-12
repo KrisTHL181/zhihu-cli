@@ -1,0 +1,35 @@
+{
+  "name": "@kristhl181/dsh-plugin-zhihu",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Expose the zhihu-cli toolkit as DeepSeek Harness tools through the package's own zhihu-mcp stdio server.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KrisTHL181/zhihu-cli.git",
+    "directory": "dsh-plugin"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "icon": "./icon.svg",
+  "exports": {
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "locale/*.json",
+    "scripts/sync-version.mjs"
+  ],
+  "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
+    "prepublishOnly": "node scripts/sync-version.mjs --check"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

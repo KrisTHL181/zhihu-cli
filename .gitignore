@@ -1,4 +1,6 @@
 *.json
+
+!dsh-plugin/**/*.json
 *.png
 __pycache__
 
