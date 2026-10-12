@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 NOTIFICATIONS_URL = "https://www.zhihu.com/api/v4/notifications/v2/default"
 
@@ -49,6 +49,6 @@ def _parse_notifications(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [_parse_notification(item) for item in data.get("data", [])]
 
 
-def fetch_notifications(limit: int = 20, max_items: int | None = None) -> list[dict[str, Any]]:
+def fetch_notifications(limit: int = PAGE_SIZE, max_items: int | None = None) -> list[dict[str, Any]]:
     """Fetch Zhihu notifications with pagination."""
     return list(stream_handler(NOTIFICATIONS_URL, _parse_notifications, limit=limit, max_items=max_items))

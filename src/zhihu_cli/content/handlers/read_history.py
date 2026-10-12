@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 
 def _parse_history_item(card: dict[str, Any]) -> dict[str, Any] | None:
@@ -44,10 +44,10 @@ def _parse_history_items(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
             yield parsed
 
 
-def stream_read_history(limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+def stream_read_history(limit: int = PAGE_SIZE, max_items: int | None = None) -> Iterable[dict[str, Any]]:
     url = "https://www.zhihu.com/api/v4/unify-consumption/read_history?offset=0"
     return stream_handler(url, _parse_history_items, limit=limit, max_items=max_items)
 
 
-def fetch_read_history(limit: int = 20, max_items: int | None = 20) -> list[dict[str, Any]]:
+def fetch_read_history(limit: int = PAGE_SIZE, max_items: int | None = None) -> list[dict[str, Any]]:
     return list(stream_read_history(limit, max_items))

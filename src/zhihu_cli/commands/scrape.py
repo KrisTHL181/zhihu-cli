@@ -1,5 +1,7 @@
 """Scrape command group — batch scrape user content lists to JSON files."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from zhihu_cli.content.handlers.people import (
     fetch_member_answers,
     fetch_member_articles,
 )
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.output import f_name, f_num, f_path, info, print_json, set_json_mode, success
 
 
@@ -50,13 +53,11 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "zhihu_user_activities.json"),
         help="Output JSON file",
     )
-    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20)")
-    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def scrape_activities(
         url_token: str | None,
         output: str,
-        limit: int,
         max_items: int | None,
         output_json: bool,
     ) -> None:
@@ -68,7 +69,7 @@ def register_scrape(main_group: click.Group) -> None:
         set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching activities for {f_name(token)}...")
-        items = fetch_member_activities(token, limit=limit, max_items=max_items)
+        items = fetch_member_activities(token, limit=PAGE_SIZE, max_items=max_items)
 
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
@@ -84,13 +85,11 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "zhihu_answers.json"),
         help="Output JSON file",
     )
-    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20)")
-    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def scrape_answers_list(
         url_token: str | None,
         output: str,
-        limit: int,
         max_items: int | None,
         output_json: bool,
     ) -> None:
@@ -102,7 +101,7 @@ def register_scrape(main_group: click.Group) -> None:
         set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching answers for {f_name(token)}...")
-        items = fetch_member_answers(token, limit=limit, max_items=max_items)
+        items = fetch_member_answers(token, limit=PAGE_SIZE, max_items=max_items)
 
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
@@ -118,13 +117,11 @@ def register_scrape(main_group: click.Group) -> None:
         default=str(get_data_dir() / "exports" / "zhihu_articles.json"),
         help="Output JSON file",
     )
-    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20)")
-    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def scrape_articles_list(
         url_token: str | None,
         output: str,
-        limit: int,
         max_items: int | None,
         output_json: bool,
     ) -> None:
@@ -136,7 +133,7 @@ def register_scrape(main_group: click.Group) -> None:
         set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching articles for {f_name(token)}...")
-        items = fetch_member_articles(token, limit=limit, max_items=max_items)
+        items = fetch_member_articles(token, limit=PAGE_SIZE, max_items=max_items)
 
         with open(output, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)

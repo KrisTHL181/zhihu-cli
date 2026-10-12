@@ -3,6 +3,7 @@
 import click
 
 from zhihu_cli.content.handlers.search import search_articles, search_questions, search_topics, search_users
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.output import (
     blank,
     echo,
@@ -29,13 +30,12 @@ def register_search(main_group):
 
     @search.command("question")
     @click.argument("query")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def search_question_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    def search_question_cmd(query: str, max_items: int | None, output_json: bool) -> None:
         """Search Zhihu questions by keyword."""
         set_json_mode(output_json)
-        items = search_questions(query, limit=limit, max_items=max_items)
+        items = search_questions(query, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -52,13 +52,12 @@ def register_search(main_group):
 
     @search.command("article")
     @click.argument("query")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def search_article_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    def search_article_cmd(query: str, max_items: int | None, output_json: bool) -> None:
         """Search Zhihu articles by keyword."""
         set_json_mode(output_json)
-        items = search_articles(query, limit=limit, max_items=max_items)
+        items = search_articles(query, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -75,13 +74,12 @@ def register_search(main_group):
 
     @search.command("user")
     @click.argument("query")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def search_user_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    def search_user_cmd(query: str, max_items: int | None, output_json: bool) -> None:
         """Search Zhihu users by keyword."""
         set_json_mode(output_json)
-        items = search_users(query, limit=limit, max_items=max_items)
+        items = search_users(query, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -99,13 +97,12 @@ def register_search(main_group):
 
     @search.command("topic")
     @click.argument("query")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def search_topic_cmd(query: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    def search_topic_cmd(query: str, max_items: int | None, output_json: bool) -> None:
         """Search Zhihu topics by keyword."""
         set_json_mode(output_json)
-        items = search_topics(query, limit=limit, max_items=max_items)
+        items = search_topics(query, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return

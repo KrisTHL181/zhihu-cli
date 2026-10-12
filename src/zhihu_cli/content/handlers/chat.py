@@ -102,14 +102,14 @@ def _sanitize_html(raw: str) -> str:
     return doc.text_content()
 
 
-def get_inbox(limit: int = 0, unread_only: bool = False) -> tuple[list[dict[str, Any]], int]:
+def get_inbox(max_items: int | None = None, unread_only: bool = False) -> tuple[list[dict[str, Any]], int]:
     """Fetch inbox threads with pagination.
 
     The inbox API is paginated (waterfall-style).  This uses ``stream_handler``
     to walk through all pages automatically.
 
     Args:
-        limit: Max threads to fetch (0 = all pages).
+        max_items: Maximum number of threads to return (None = all pages).
         unread_only: Only include threads with ``unread_count > 0``.
     Returns:
         Tuple of (threads, total_unread) where *total_unread* is the
@@ -140,7 +140,7 @@ def get_inbox(limit: int = 0, unread_only: bool = False) -> tuple[list[dict[str,
             continue
         messages.append(msg)
         count += 1
-        if limit > 0 and count >= limit:
+        if max_items is not None and count >= max_items:
             break
 
     return messages, total_unread
@@ -212,13 +212,13 @@ def _parse_messages_page(
 
 
 def iter_chat_history(
-    chat_id: str, limit: int = 0, partner_info: list[str] | None = None
+    chat_id: str, max_items: int | None = None, partner_info: list[str] | None = None
 ) -> Generator[dict[str, str], None, None]:
     """Stream chat history pages via waterfall, yielding in chronological order.
 
-    The Zhihu API returns messages newest-first.  When *limit* > 0 only the
-    most recent *limit* messages are returned (applied before reversal so you
-    always get the freshest conversation tail).
+    The Zhihu API returns messages newest-first.  When *max_items* is not
+    ``None`` only the most recent *max_items* messages are returned (applied
+    before reversal so you always get the freshest conversation tail).
 
     If *partner_info* (a mutable list) is provided, the partner's and
     the current user's display names from the first API page are appended
@@ -251,8 +251,8 @@ def iter_chat_history(
     # API returns messages newest-first; collect, optionally trim to newest N,
     # then reverse to chronological order.
     all_messages = list(stream_handler(initial_url, parse_messages, extract_next, delay=0.6))
-    if limit > 0 and len(all_messages) > limit:
-        all_messages = all_messages[:limit]
+    if max_items is not None and len(all_messages) > max_items:
+        all_messages = all_messages[:max_items]
     yield from reversed(all_messages)
 
 
@@ -307,7 +307,7 @@ def mark_inbox_read(
             continue
         try:
             # Fetch just 1 message — Zhihu marks the conversation as read.
-            msgs = list(iter_chat_history(tid, limit=1))
+            msgs = list(iter_chat_history(tid, max_items=1))
             if msgs:
                 marked.append(t)
             else:
@@ -367,7 +367,7 @@ def send_image_message(their_id: str, file_path: str) -> dict[str, Any]:
 def export_chat_history(
     chat_id: str,
     output_dir: str,
-    limit: int = 0,
+    max_items: int | None = None,
 ) -> str:
     """Export chat history to a markdown file with images downloaded locally.
 
@@ -382,7 +382,7 @@ def export_chat_history(
     :param chat_id: The other user's ID (``sender_id`` API parameter).
     :param output_dir: Directory to save the exported ``.md`` file and
         ``media/`` subdirectory.
-    :param limit: Max messages to export (0 = all pages).
+    :param max_items: Maximum number of messages to export (None = all pages).
     :returns: Absolute path to the saved markdown file.
     """
     import os
@@ -402,7 +402,7 @@ def export_chat_history(
     # 1. Fetch all messages (resolve partner names from the first API page).
     click.echo("  Fetching messages...", err=True)
     partner_info: list[str] = []
-    msgs = list(iter_chat_history(chat_id, limit=limit, partner_info=partner_info))
+    msgs = list(iter_chat_history(chat_id, max_items=max_items, partner_info=partner_info))
     click.echo(f"    {len(msgs)} messages fetched", err=True)
 
     if len(partner_info) >= 2:

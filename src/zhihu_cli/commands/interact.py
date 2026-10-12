@@ -44,6 +44,7 @@ from zhihu_cli.content.handlers.question import (
     upvote_question,
 )
 from zhihu_cli.content.handlers.report import fetch_report_reasons, flatten_reasons, submit_report
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.output import (
     echo,
     error,
@@ -334,13 +335,10 @@ def register_interact(main_group) -> None:
 
     @interact_collect.command("view")
     @click.argument("collection_id_or_url")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
-    def collect_view(
-        collection_id_or_url: str, limit: int, max_items: int | None, output_json: bool, output: str
-    ) -> None:
+    def collect_view(collection_id_or_url: str, max_items: int | None, output_json: bool, output: str) -> None:
         """View contents of a collection by ID or URL.
 
         \b
@@ -358,7 +356,7 @@ def register_interact(main_group) -> None:
             collection_id = collection_id_or_url.strip()
 
         meta = get_collection_meta(collection_id)
-        items = list_collection_contents(collection_id, limit=limit, max_items=max_items)
+        items = list_collection_contents(collection_id, limit=PAGE_SIZE, max_items=max_items)
 
         if output_json:
             result = {"meta": meta, "items": items}
@@ -413,17 +411,16 @@ def register_interact(main_group) -> None:
 
     @interact_collect.command("list")
     @click.option("--url-token", "-u", type=str, default=None, help="Your Zhihu url_token (auto-detected if omitted)")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
-    def collect_list(url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str) -> None:
+    def collect_list(url_token: str | None, max_items: int | None, output_json: bool, output: str) -> None:
         """List your collections."""
         set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching collections for {token}...")
 
-        items = list_collections(token, limit=limit, max_items=max_items)
+        items = list_collections(token, limit=PAGE_SIZE, max_items=max_items)
 
         if output_json:
             print_json(items)

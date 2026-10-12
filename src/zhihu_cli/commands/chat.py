@@ -109,12 +109,12 @@ def register_chat(main_group: click.Group) -> None:
         """Read inbox, view chat history, send messages."""
 
     @chat.command("inbox")
-    @click.option("--limit", "-n", type=int, default=0, help="Max threads to fetch (0 = all pages)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--unread", is_flag=True, default=False, help="Show only threads with unread messages")
-    def chat_inbox(limit: int, output_json: bool, unread: bool) -> None:
+    def chat_inbox(max_items: int | None, output_json: bool, unread: bool) -> None:
         """List recent conversations (paginated — walks all pages by default)."""
-        messages, total_unread = get_inbox(limit=limit, unread_only=unread)
+        messages, total_unread = get_inbox(max_items=max_items, unread_only=unread)
         if output_json:
             print_json(messages)
             return
@@ -199,7 +199,7 @@ def register_chat(main_group: click.Group) -> None:
 
     @chat.command("history")
     @click.argument("chat_id")
-    @click.option("--limit", "-n", type=int, default=50, help="Max messages to fetch")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--rich-images/--no-rich-images",
@@ -209,10 +209,10 @@ def register_chat(main_group: click.Group) -> None:
         help="Render images as clickable Rich [图片] links instead of raw URLs",
     )
     @click.option("--show-id", is_flag=True, default=False, help="Show message IDs")
-    def chat_history(chat_id: str, limit: int, output_json: bool, rich_images: bool, show_id: bool) -> None:
+    def chat_history(chat_id: str, max_items: int | None, output_json: bool, rich_images: bool, show_id: bool) -> None:
         """Read messages from a chat conversation."""
         if output_json:
-            msgs = list(iter_chat_history(chat_id, limit=limit))
+            msgs = list(iter_chat_history(chat_id, max_items=max_items))
             print_json(msgs)
             return
         if rich_images:
@@ -220,7 +220,7 @@ def register_chat(main_group: click.Group) -> None:
             from rich.text import Text
 
             _console = Console()
-            for msg in iter_chat_history(chat_id, limit=limit):
+            for msg in iter_chat_history(chat_id, max_items=max_items):
                 t = msg["time"]
                 s = msg["sender"]
                 line = Text("  ")
@@ -233,7 +233,7 @@ def register_chat(main_group: click.Group) -> None:
                 line.append(_render_chat_content(msg["content"]))
                 _console.print(line)
         else:
-            for msg in iter_chat_history(chat_id, limit=limit):
+            for msg in iter_chat_history(chat_id, max_items=max_items):
                 t = msg["time"]
                 s = msg["sender"]
                 msg_id = msg["id"]
@@ -284,7 +284,7 @@ def register_chat(main_group: click.Group) -> None:
 
     @chat.command("export")
     @click.argument("chat_id")
-    @click.option("--limit", "-n", type=int, default=0, help="Max messages to export (0 = all)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option(
         "--output-dir",
         "-o",
@@ -292,7 +292,7 @@ def register_chat(main_group: click.Group) -> None:
         help="Output directory (default: ~/.zhihu-cli/downloads/chats)",
     )
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output result as JSON")
-    def chat_export(chat_id: str, limit: int, output_dir: str | None, output_json: bool) -> None:
+    def chat_export(chat_id: str, max_items: int | None, output_dir: str | None, output_json: bool) -> None:
         """Export chat history to a markdown file with images downloaded locally.
 
         Fetches the full conversation with CHAT_ID, builds a markdown document
@@ -307,7 +307,7 @@ def register_chat(main_group: click.Group) -> None:
         if output_dir is None:
             output_dir = str(Path.home() / ".zhihu-cli" / "downloads" / "chats")
 
-        filepath = export_chat_history(chat_id, output_dir, limit=limit)
+        filepath = export_chat_history(chat_id, output_dir, max_items=max_items)
 
         if output_json:
             print_json({"filepath": filepath, "chat_id": chat_id})
@@ -364,9 +364,9 @@ def register_chat(main_group: click.Group) -> None:
         help="Only auto-reply to this sender (repeatable; default: all senders)",
     )
     @click.option(
-        "--history",
+        "--context",
         "-n",
-        "history_limit",
+        "context",
         type=int,
         default=20,
         show_default=True,
@@ -378,7 +378,7 @@ def register_chat(main_group: click.Group) -> None:
     def chat_bot(
         prompt_file: str,
         senders: tuple[str, ...],
-        history_limit: int,
+        context: int,
         model: str | None,
         api_base: str | None,
         api_key: str | None,
@@ -411,7 +411,7 @@ def register_chat(main_group: click.Group) -> None:
             url_token=url_token,
             system_prompt=system_prompt,
             senders=senders,
-            history_limit=history_limit,
+            history_limit=context,
             api_base=api_base,
             api_key=api_key,
             model=model,

@@ -300,7 +300,7 @@ def download_batch_articles(
     help="Base output directory (default: ~/.zhihu-cli/downloads/<username>)",
 )
 @click.option("--delay", "-d", type=float, default=1.0, help="Delay between requests in seconds")
-@click.option("--max-items", "-n", type=int, default=None, help="Max items per content type")
+@click.option("--max", "-n", "max_items", type=int, default=None, help="Max items per content type (default: all)")
 @click.option(
     "--type",
     "content_types",

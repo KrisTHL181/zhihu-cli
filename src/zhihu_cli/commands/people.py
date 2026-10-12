@@ -1,5 +1,7 @@
 """People command group — look up user profiles and content."""
 
+from __future__ import annotations
+
 import click
 
 from zhihu_cli.commands._helpers import _extract_url_token
@@ -12,6 +14,7 @@ from zhihu_cli.content.handlers.people import (
     fetch_member_profile,
     fetch_member_questions,
 )
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.output import (
     blank,
     echo,
@@ -187,13 +190,13 @@ def _list_content_section(
     fetch_fn,
     url_token: str,
     section_title: str,
-    limit: int = 5,
+    max_items: int | None = None,
     *,
     show_type: bool = False,
 ) -> list:
     """Fetch and display a content section. Returns the fetched items."""
     try:
-        items = fetch_fn(url_token, limit=limit, max_items=limit)
+        items = fetch_fn(url_token, limit=PAGE_SIZE, max_items=max_items)
     except Exception:
         return []
 
@@ -216,9 +219,16 @@ def register_people(main_group):
 
     @people.command("show")
     @click.argument("url_token")
-    @click.option("--limit", "-n", type=int, default=5, help="Items per content type (default: 5)")
+    @click.option(
+        "--max",
+        "-n",
+        "max_items",
+        type=int,
+        default=5,
+        help="Max items per content type (default: 5 — this is a profile overview, not a full dump)",
+    )
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def people_show(url_token: str, limit: int, output_json: bool) -> None:
+    def people_show(url_token: str, max_items: int | None, output_json: bool) -> None:
         """Display a user's profile and recent content across all types.
 
         URL_TOKEN can be a Zhihu url_token (e.g. "zhangsan") or a full profile URL
@@ -246,7 +256,7 @@ def register_people(main_group):
                 ("questions", fetch_member_questions),
             ]:
                 try:
-                    result[key] = fn(token, limit=limit, max_items=limit)
+                    result[key] = fn(token, limit=PAGE_SIZE, max_items=max_items)
                 except Exception:
                     result[key] = []
             print_json(result)
@@ -254,21 +264,21 @@ def register_people(main_group):
 
         _show_profile_rich(profile)
 
-        _list_content_section(fetch_member_answers, token, "Answers", limit)
-        _list_content_section(fetch_member_articles, token, "Articles", limit)
-        _list_content_section(fetch_member_pins, token, "Pins", limit)
-        _list_content_section(fetch_member_questions, token, "Questions", limit)
+        _list_content_section(fetch_member_answers, token, "Answers", max_items)
+        _list_content_section(fetch_member_articles, token, "Articles", max_items)
+        _list_content_section(fetch_member_pins, token, "Pins", max_items)
+        _list_content_section(fetch_member_questions, token, "Questions", max_items)
 
     @people.command("answers")
     @click.argument("url_token")
-    @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def people_answers(url_token: str, limit: int, output_json: bool) -> None:
+    def people_answers(url_token: str, max_items: int | None, output_json: bool) -> None:
         """List a user's answers."""
         set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching answers for {token}...")
-        items = fetch_member_answers(token, max_items=limit)
+        items = fetch_member_answers(token, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -281,14 +291,14 @@ def register_people(main_group):
 
     @people.command("articles")
     @click.argument("url_token")
-    @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def people_articles(url_token: str, limit: int, output_json: bool) -> None:
+    def people_articles(url_token: str, max_items: int | None, output_json: bool) -> None:
         """List a user's articles."""
         set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching articles for {token}...")
-        items = fetch_member_articles(token, max_items=limit)
+        items = fetch_member_articles(token, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -301,14 +311,14 @@ def register_people(main_group):
 
     @people.command("pins")
     @click.argument("url_token")
-    @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def people_pins(url_token: str, limit: int, output_json: bool) -> None:
+    def people_pins(url_token: str, max_items: int | None, output_json: bool) -> None:
         """List a user's pins (想法)."""
         set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching pins for {token}...")
-        items = fetch_member_pins(token, max_items=limit)
+        items = fetch_member_pins(token, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -328,14 +338,14 @@ def register_people(main_group):
 
     @people.command("questions")
     @click.argument("url_token")
-    @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def people_questions(url_token: str, limit: int, output_json: bool) -> None:
+    def people_questions(url_token: str, max_items: int | None, output_json: bool) -> None:
         """List questions asked by a user."""
         set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching questions for {token}...")
-        items = fetch_member_questions(token, max_items=limit)
+        items = fetch_member_questions(token, limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -348,12 +358,12 @@ def register_people(main_group):
 
     @people.command("activities")
     @click.argument("url_token")
-    @click.option("--limit", "-n", type=int, default=20, help="Max items (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option(
         "--creations-only", is_flag=True, default=False, help="Only show content creations (answers, pins, articles)"
     )
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def people_activities(url_token: str, limit: int, creations_only: bool, output_json: bool) -> None:
+    def people_activities(url_token: str, max_items: int | None, creations_only: bool, output_json: bool) -> None:
         """List a user's recent activities (new answers, articles, pins, etc.).
 
         By default shows ALL activities including votes and follows.
@@ -362,7 +372,7 @@ def register_people(main_group):
         set_json_mode(output_json)
         token = _extract_url_token(url_token)
         info(f"Fetching activities for {token}...")
-        items = fetch_member_activities(token, max_items=limit, creations_only=creations_only)
+        items = fetch_member_activities(token, limit=PAGE_SIZE, max_items=max_items, creations_only=creations_only)
         if output_json:
             print_json(items)
             return

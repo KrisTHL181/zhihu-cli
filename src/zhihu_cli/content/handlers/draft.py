@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from zhihu_cli.content.handlers import fmt_time, get_type_and_id
 from zhihu_cli.content.handlers.requests import session
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 from zhihu_cli.content.utils.html2markdown import calculate_text_length, converter
 
 DRAFT_HISTORIES_URL = "https://www.zhihu.com/api/v4/draft-histories"
@@ -39,53 +39,57 @@ def _parse_draft_page(data: dict[str, Any]) -> list[dict[str, Any]]:
     return data.get("data", [])
 
 
-def list_drafts(object_type: str, object_id: str, limit: int = 10) -> list[dict]:
+def list_drafts(object_type: str, object_id: str, max_items: int | None = 10) -> list[dict]:
     """List draft histories for a question/answer/article.
 
     :param object_type: ``"question"``, ``"answer"``, or ``"article"``.
     :param object_id: The Zhihu object ID.
-    :param limit: Maximum number of drafts to return (fetches multiple pages if needed).
+    :param max_items: Maximum number of drafts to return (fetches multiple pages
+        if needed).  Defaults to 10; ``None`` fetches all drafts.
     :returns: List of draft metadata dicts, newest first.
     """
-    page_size = min(limit, 20)
+    page_size = PAGE_SIZE
     url = (
         f"{DRAFT_HISTORIES_URL}?"
         f"{urlencode({'object_type': object_type, 'object_id': object_id, 'limit': page_size, 'offset': 0})}"
     )
-    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=max_items))
 
 
-def list_answer_drafts(limit: int = 20) -> list[dict]:
+def list_answer_drafts(max_items: int | None = 20) -> list[dict]:
     """List all answer drafts for the current user.
 
-    :param limit: Maximum number of drafts to return.
+    :param max_items: Maximum number of drafts to return.  Defaults to 20;
+        ``None`` fetches all drafts.
     :returns: List of draft metadata dicts, newest first.
     """
-    page_size = min(limit, 20)
+    page_size = PAGE_SIZE
     url = f"{ANSWER_DRAFTS_URL}?{urlencode({'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
-    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=max_items))
 
 
-def list_article_drafts(limit: int = 20) -> list[dict]:
+def list_article_drafts(max_items: int | None = 20) -> list[dict]:
     """List all article drafts for the current user.
 
-    :param limit: Maximum number of drafts to return.
+    :param max_items: Maximum number of drafts to return.  Defaults to 20;
+        ``None`` fetches all drafts.
     :returns: List of draft metadata dicts, newest first.
     """
-    page_size = min(limit, 20)
+    page_size = PAGE_SIZE
     url = f"{ARTICLE_DRAFTS_URL}?{urlencode({'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
-    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=max_items))
 
 
-def list_pin_drafts(limit: int = 20) -> list[dict]:
+def list_pin_drafts(max_items: int | None = 20) -> list[dict]:
     """List all pin drafts for the current user.
 
-    :param limit: Maximum number of drafts to return.
+    :param max_items: Maximum number of drafts to return.  Defaults to 20;
+        ``None`` fetches all drafts.
     :returns: List of draft metadata dicts, newest first.
     """
-    page_size = min(limit, 20)
+    page_size = PAGE_SIZE
     url = f"{PIN_DRAFTS_URL}?{urlencode({'action': 'pin', 'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
-    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=max_items))
 
 
 def get_draft(draft_id: str, version_type: str = "current") -> dict:
@@ -122,7 +126,7 @@ def draft_to_markdown(url: str, draft_index: int = 0) -> tuple[dict, str]:
     if object_type == "answers" and "/" in object_id:
         object_id = object_id.split("/")[1]
 
-    drafts = list_drafts(api_type, object_id, limit=draft_index + 1)
+    drafts = list_drafts(api_type, object_id, max_items=draft_index + 1)
     if not drafts:
         raise ValueError(f"No drafts found for: {url}")
     if draft_index >= len(drafts):

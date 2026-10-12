@@ -39,19 +39,19 @@ def register_draft(main_group):
 
     @draft.command("view")
     @click.argument("url")
-    @click.option("--number", "-n", default=0, type=int, help="Draft index: 0 = latest (default), 1 = previous, …")
+    @click.option("--index", "-n", default=0, type=int, help="Draft index: 0 = latest (default), 1 = previous, …")
     @click.option("--output", "-o", default=None, help="Save Markdown to file instead of printing")
-    def draft_view(url: str, number: int, output: str | None) -> None:
+    def draft_view(url: str, index: int, output: str | None) -> None:
         """View a draft of a Zhihu question/answer/article as Markdown.
 
         Provide a Zhihu URL (e.g. https://www.zhihu.com/question/123456)
         to fetch and convert your unpublished draft to Markdown.
 
-        Use --number/-n to step back through draft history:
+        Use --index/-n to step back through draft history:
         0 = latest (default), 1 = previous, 2 = the one before that, …
         """
         try:
-            metadata, markdown = draft_to_markdown(url, draft_index=number)
+            metadata, markdown = draft_to_markdown(url, draft_index=index)
         except ValueError as e:
             error(f"{e}")
             raise SystemExit(1)
@@ -65,14 +65,14 @@ def register_draft(main_group):
 
     @draft.command("history")
     @click.argument("url")
-    @click.option("--limit", "-l", default=10, type=int, help="Max drafts to list (default: 10)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "-j", "as_json", is_flag=True, default=False, help="Output as JSON")
-    def draft_history(url: str, limit: int, as_json: bool) -> None:
+    def draft_history(url: str, max_items: int | None, as_json: bool) -> None:
         """List draft history for a Zhihu URL.
 
         Shows all saved drafts for the given question/answer/article,
         newest first.  Use the index shown to view a specific draft with
-        ``zhihu draft view <url> -n <index>``.
+        ``zhihu draft view <url> --index/-n <index>``.
         """
         object_type, object_id = get_type_and_id(url)
         if not object_type or not object_id:
@@ -88,7 +88,7 @@ def register_draft(main_group):
         if object_type == "answers" and "/" in object_id:
             object_id = object_id.split("/")[1]
 
-        drafts = list_drafts(api_type, object_id, limit=limit)
+        drafts = list_drafts(api_type, object_id, max_items=max_items)
         if not drafts:
             echo(f_dim("No drafts found."))
             return
@@ -108,18 +108,18 @@ def register_draft(main_group):
                 echo(f"      {f_dim(excerpt[:120])}")
             blank()
 
-        echo(f"  {f_dim('Use --number/-n <index> with `zhihu draft view` to view a specific draft.')}")
+        echo(f"  {f_dim('Use --index/-n <index> with `zhihu draft view` to view a specific draft.')}")
 
     @draft.group("list")
     def draft_list() -> None:
         """List your Zhihu drafts by type."""
 
     @draft_list.command("answer")
-    @click.option("--limit", "-l", default=20, type=int, help="Max drafts to show (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "-j", "as_json", is_flag=True, default=False, help="Output as JSON")
-    def draft_list_answer(limit: int, as_json: bool) -> None:
+    def draft_list_answer(max_items: int | None, as_json: bool) -> None:
         """List all answer drafts."""
-        drafts = list_answer_drafts(limit=limit)
+        drafts = list_answer_drafts(max_items=max_items)
         if not drafts:
             echo(f_dim("No answer drafts found."))
             return
@@ -146,11 +146,11 @@ def register_draft(main_group):
         echo(f"  {f_dim(f'── {len(drafts)} answer drafts')}")
 
     @draft_list.command("article")
-    @click.option("--limit", "-l", default=20, type=int, help="Max drafts to show (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "-j", "as_json", is_flag=True, default=False, help="Output as JSON")
-    def draft_list_article(limit: int, as_json: bool) -> None:
+    def draft_list_article(max_items: int | None, as_json: bool) -> None:
         """List all article drafts."""
-        drafts = list_article_drafts(limit=limit)
+        drafts = list_article_drafts(max_items=max_items)
         if not drafts:
             echo(f_dim("No article drafts found."))
             return
@@ -177,11 +177,11 @@ def register_draft(main_group):
         echo(f"  {f_dim(f'── {len(drafts)} article drafts')}")
 
     @draft_list.command("pin")
-    @click.option("--limit", "-l", default=20, type=int, help="Max drafts to show (default: 20)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "-j", "as_json", is_flag=True, default=False, help="Output as JSON")
-    def draft_list_pin(limit: int, as_json: bool) -> None:
+    def draft_list_pin(max_items: int | None, as_json: bool) -> None:
         """List all pin drafts."""
-        drafts = list_pin_drafts(limit=limit)
+        drafts = list_pin_drafts(max_items=max_items)
         if not drafts:
             echo(f_dim("No pin drafts found."))
             return

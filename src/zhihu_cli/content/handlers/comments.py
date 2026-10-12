@@ -3,7 +3,7 @@ from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 from zhihu_cli.content.utils import markdown2html
 from zhihu_cli.content.utils.html2markdown import converter
 from zhihu_cli.output import divider, echo, f_dim, f_green, f_meta, f_name, f_num, item_index
@@ -130,7 +130,7 @@ def fetch_child_comments(parent_comment: dict[str, Any], seen_ids: set[str] | No
 
 
 def fetch_root_comments(
-    item_type: str, item_id: str, limit: int = 20, max_items: int | None = None
+    item_type: str, item_id: str, limit: int = PAGE_SIZE, max_items: int | None = None
 ) -> Iterable[dict[str, Any]]:
     segment = _URL_SEGMENT.get(item_type, item_type)
     initial_url = f"https://www.zhihu.com/api/v4/comment_v5/{segment}/{item_id}/root_comment?order_by=score&offset="

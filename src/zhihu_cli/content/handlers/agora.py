@@ -21,7 +21,7 @@ from html import unescape
 from typing import Any
 
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 from zhihu_cli.content.utils.html2markdown import (
     ZhihuLinkConverter,
     converter,
@@ -223,7 +223,7 @@ def _parse_reviews(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_reviews(
     discussion_id: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch review cases for an agora discussion (paginated).

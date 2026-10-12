@@ -10,7 +10,7 @@ from urllib.parse import quote
 from zhihu_cli.content.handlers.feed import _parse_article_target as feed_parse_article
 from zhihu_cli.content.handlers.feed import _parse_author
 from zhihu_cli.content.handlers.question import parse_question_metadata
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 from zhihu_cli.output import in_json_mode
 
 SEARCH_URL = "https://www.zhihu.com/api/v4/search_v3"
@@ -130,7 +130,7 @@ def _build_search(
     query: str,
     search_type: str,
     item_parser,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Shared search: build URL, stream pages, parse items, return list."""
@@ -153,8 +153,8 @@ def _build_search(
 
 def search_questions(
     query: str,
-    limit: int = 20,
-    max_items: int | None = 20,
+    limit: int = PAGE_SIZE,
+    max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Search Zhihu questions."""
     return _build_search(query, "question", _parse_question, limit, max_items)
@@ -162,8 +162,8 @@ def search_questions(
 
 def search_articles(
     query: str,
-    limit: int = 20,
-    max_items: int | None = 20,
+    limit: int = PAGE_SIZE,
+    max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Search Zhihu articles via the article-specific search endpoint."""
     encoded_query = quote(query)
@@ -206,8 +206,8 @@ def search_articles(
 
 def search_users(
     query: str,
-    limit: int = 20,
-    max_items: int | None = 20,
+    limit: int = PAGE_SIZE,
+    max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Search Zhihu users."""
     return _build_search(query, "people", _parse_user, limit, max_items)
@@ -215,8 +215,8 @@ def search_users(
 
 def search_topics(
     query: str,
-    limit: int = 20,
-    max_items: int | None = 20,
+    limit: int = PAGE_SIZE,
+    max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Search Zhihu topics."""
     return _build_search(query, "topic", _parse_topic, limit, max_items)

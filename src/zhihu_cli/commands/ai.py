@@ -30,16 +30,16 @@ def register_ai(main_group):
         """Zhihu Direct Answer (知乎直答) — Zhihu's built-in LLM service."""
 
     @ai.command("list")
-    @click.option("--limit", "-n", type=int, default=None, help="Max items to show")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def ai_list(limit: int | None, output_json: bool) -> None:
+    def ai_list(max_items: int | None, output_json: bool) -> None:
         """List your Zhihu Direct Answer session history."""
         from zhihu_cli.content.handlers.ai_direct import fetch_session_history
 
         items = fetch_session_history()
 
-        if limit is not None and len(items) > limit:
-            items = items[:limit]
+        if max_items is not None and len(items) > max_items:
+            items = items[:max_items]
 
         if output_json:
             print_json(items)

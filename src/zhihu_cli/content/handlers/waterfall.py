@@ -10,6 +10,14 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.wait import wait
 
+PAGE_SIZE: int = 20
+"""Items requested per API page.
+
+Page size is an API-level detail, not a user-facing knob: the CLI exposes only
+``-n/--max`` (a cap on the *total* number of items).  This module owns the
+value so every handler paginates identically.
+"""
+
 
 def _set_query_param(url: str, key: str, value: Any) -> str:
     """Return ``url`` with the query parameter ``key`` set to ``value``.

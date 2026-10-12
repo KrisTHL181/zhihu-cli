@@ -19,6 +19,7 @@ from zhihu_cli.content.handlers.agora import (
     transcode_for_llm,
     vote_discussion,
 )
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.content.utils.llm_config import build_client, require
 from zhihu_cli.content.utils.llm_config import options as llm_options
 from zhihu_cli.output import (
@@ -166,12 +167,11 @@ def register_agora(main_group):
 
     @agora.command("reviews")
     @click.argument("discussion_id")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def agora_reviews(discussion_id: str, limit: int, max_items: int | None, output_json: bool) -> None:
+    def agora_reviews(discussion_id: str, max_items: int | None, output_json: bool) -> None:
         """List review cases in an agora discussion."""
-        items = fetch_reviews(discussion_id, limit=limit, max_items=max_items)
+        items = fetch_reviews(discussion_id, limit=PAGE_SIZE, max_items=max_items)
 
         if output_json:
             print_json(items)

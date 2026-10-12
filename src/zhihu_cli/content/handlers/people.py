@@ -7,7 +7,7 @@ from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import session
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 MEMBER_API = "https://www.zhihu.com/api/v4/members/{token}"
 
@@ -140,7 +140,7 @@ def _parse_answer_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_member_answers(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's answers list."""
@@ -177,7 +177,7 @@ def _parse_article_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_member_articles(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's articles list."""
@@ -220,7 +220,7 @@ def _parse_pin_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_member_pins(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a member's pins (想法) list."""
@@ -257,7 +257,7 @@ def _parse_question_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_member_questions(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch questions a member has asked.
@@ -369,7 +369,7 @@ def _parse_activity_list(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_member_activities(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
     creations_only: bool = False,
 ) -> list[dict[str, Any]]:

@@ -11,6 +11,7 @@ from zhihu_cli.content.handlers.consult import (
     parse_conversation_id,
     send_consult_answer,
 )
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.output import (
     blank,
     echo,
@@ -205,23 +206,19 @@ def register_consult(main_group: click.Group) -> click.Group:
 
     # ── shared options ────────────────────────────────────────────────────
 
-    limit_opt = click.option("--limit", "-l", type=int, default=20, help="Page size (default: 20)")
-    max_opt = click.option(
-        "--max", "-n", "max_items", type=int, default=None, help="Max total items (default: unlimited)"
-    )
+    max_opt = click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     json_opt = click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 
     # ── unanswered ────────────────────────────────────────────────────────
 
     @consult.command("unanswered")
-    @limit_opt
     @max_opt
     @json_opt
-    def consult_unanswered(limit: int, max_items: int | None, output_json: bool) -> None:
+    def consult_unanswered(max_items: int | None, output_json: bool) -> None:
         """List unanswered paid-consultation questions."""
         set_json_mode(output_json)
         info("Fetching unanswered consultations...")
-        items = fetch_consult_answers("unanswered", limit=limit, max_items=max_items)
+        items = fetch_consult_answers("unanswered", limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -236,14 +233,13 @@ def register_consult(main_group: click.Group) -> click.Group:
     # ── closed ────────────────────────────────────────────────────────────
 
     @consult.command("closed")
-    @limit_opt
     @max_opt
     @json_opt
-    def consult_closed(limit: int, max_items: int | None, output_json: bool) -> None:
+    def consult_closed(max_items: int | None, output_json: bool) -> None:
         """List closed / resolved paid-consultation questions."""
         set_json_mode(output_json)
         info("Fetching closed consultations...")
-        items = fetch_consult_answers("closed", limit=limit, max_items=max_items, sub_status="all")
+        items = fetch_consult_answers("closed", limit=PAGE_SIZE, max_items=max_items, sub_status="all")
         if output_json:
             print_json(items)
             return
@@ -258,14 +254,13 @@ def register_consult(main_group: click.Group) -> click.Group:
     # ── other ─────────────────────────────────────────────────────────────
 
     @consult.command("other")
-    @limit_opt
     @max_opt
     @json_opt
-    def consult_other(limit: int, max_items: int | None, output_json: bool) -> None:
+    def consult_other(max_items: int | None, output_json: bool) -> None:
         """List other paid-consultation questions (non-standard status)."""
         set_json_mode(output_json)
         info("Fetching other consultations...")
-        items = fetch_consult_answers("other", limit=limit, max_items=max_items)
+        items = fetch_consult_answers("other", limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return
@@ -280,7 +275,6 @@ def register_consult(main_group: click.Group) -> click.Group:
     # ── answering ───────────────────────────────────────────────────────
 
     @consult.command("answering")
-    @limit_opt
     @max_opt
     @click.option(
         "--show-answers",
@@ -291,7 +285,7 @@ def register_consult(main_group: click.Group) -> click.Group:
         help="Fetch and display the answer content for each consultation.",
     )
     @json_opt
-    def consult_answering(limit: int, max_items: int | None, with_answers: bool, output_json: bool) -> None:
+    def consult_answering(max_items: int | None, with_answers: bool, output_json: bool) -> None:
         """List in-progress paid-consultation questions, optionally showing answers.
 
         These are conversations where you have already replied but both
@@ -302,7 +296,7 @@ def register_consult(main_group: click.Group) -> click.Group:
         """
         set_json_mode(output_json)
         info("Fetching answering consultations...")
-        items = fetch_answering_with_detail(limit=limit, max_items=max_items)
+        items = fetch_answering_with_detail(limit=PAGE_SIZE, max_items=max_items)
         if output_json:
             print_json(items)
             return

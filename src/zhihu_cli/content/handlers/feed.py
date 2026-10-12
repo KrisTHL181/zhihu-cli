@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 RECOMMEND_URL = "https://www.zhihu.com/api/v3/feed/topstory/recommend?limit=20&desktop=true"
 FOLLOW_URL = "https://www.zhihu.com/api/v3/moments?limit=20&desktop=true"
@@ -128,17 +128,19 @@ def _parse_feed_items(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
             yield parsed
 
 
-def stream_recommend_feed(limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+def stream_recommend_feed(limit: int = PAGE_SIZE, max_items: int | None = None) -> Iterable[dict[str, Any]]:
     url = "https://www.zhihu.com/api/v3/feed/topstory/recommend?desktop=true"
     return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items)
 
 
-def stream_follow_feed(limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+def stream_follow_feed(limit: int = PAGE_SIZE, max_items: int | None = None) -> Iterable[dict[str, Any]]:
     url = "https://www.zhihu.com/api/v3/moments?desktop=true"
     return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items)
 
 
-def fetch_feed(feed_type: str = "recommend", limit: int = 20, max_items: int | None = 20) -> list[dict[str, Any]]:
+def fetch_feed(
+    feed_type: str = "recommend", limit: int = PAGE_SIZE, max_items: int | None = None
+) -> list[dict[str, Any]]:
     stream = (
         stream_recommend_feed(limit, max_items) if feed_type == "recommend" else stream_follow_feed(limit, max_items)
     )
@@ -146,7 +148,7 @@ def fetch_feed(feed_type: str = "recommend", limit: int = 20, max_items: int | N
 
 
 def fetch_feed_with_markdown(
-    feed_type: str = "recommend", limit: int = 20, max_items: int | None = 20
+    feed_type: str = "recommend", limit: int = PAGE_SIZE, max_items: int | None = None
 ) -> list[dict[str, Any]]:
     from zhihu_cli.content.utils.html2markdown import converter
 

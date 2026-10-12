@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 MEMBER_API = "https://www.zhihu.com/api/v4/members/{token}"
 TOPIC_FOLLOWING_API = "https://www.zhihu.com/api/v5.1/topics/{token}/following_topics_contributions"
@@ -38,7 +38,7 @@ def _parse_followees(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_followees(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = (
@@ -56,7 +56,7 @@ def fetch_followees(
 
 def fetch_followers(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a user's followers (people who follow them)."""
@@ -98,7 +98,7 @@ def _parse_following_topics(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_following_topics(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = f"{TOPIC_FOLLOWING_API.format(token=url_token)}?include=data%5B*%5D.topic.introduction&offset=0"
@@ -133,7 +133,7 @@ def _parse_following_questions(data: dict[str, Any]) -> Iterable[dict[str, Any]]
 
 def fetch_following_questions(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = f"{MEMBER_API.format(token=url_token)}/following-questions?offset=0"
@@ -170,7 +170,7 @@ def _parse_following_columns(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 
 def fetch_following_columns(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = f"{MEMBER_API.format(token=url_token)}/following-columns?offset=0"
@@ -210,7 +210,7 @@ def _parse_following_collections(data: dict[str, Any]) -> Iterable[dict[str, Any
 
 def fetch_following_collections(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = (

@@ -205,7 +205,7 @@ def _process_message(
     my_name: str | None = None
     try:
         partner_info: list[str] = []
-        history = list(iter_chat_history(sender_id, limit=history_limit, partner_info=partner_info))
+        history = list(iter_chat_history(sender_id, max_items=history_limit or None, partner_info=partner_info))
         if len(partner_info) >= 2:
             sender_name = partner_info[0]
             my_name = partner_info[1]

@@ -31,6 +31,7 @@ from zhihu_cli.content.handlers.question import scrape_answer_page, scrape_answe
 from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.segment_comments import fetch_segment_comments
 from zhihu_cli.content.handlers.upvoter import fetch_upvoters
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.content.handlers.yanxuan import (
     extract_url_token,
     fetch_paid_column_section_segments,
@@ -116,8 +117,7 @@ def register_browse(main_group):
     @browse.command("question")
     @click.argument("url")
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
-    @click.option("--limit", type=int, default=20, help="Answers per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total answers to fetch")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--collapsed", is_flag=True, default=False, help="Only show collapsed (折叠) answers")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
@@ -130,7 +130,6 @@ def register_browse(main_group):
     def browse_question(
         url: str,
         reading_mode: bool,
-        limit: int,
         max_items: int | None,
         collapsed: bool,
         output_json: bool,
@@ -145,7 +144,7 @@ def register_browse(main_group):
 
         # scrape_answers is a lazy generator, so answers arrive page by page.
         # Sorting needs the full set, so only that path materializes early.
-        answers = scrape_answers(q_meta, limit=limit, max_items=max_items, collapsed=collapsed)
+        answers = scrape_answers(q_meta, limit=PAGE_SIZE, max_items=max_items, collapsed=collapsed)
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "upvotes": "vote", "favorites": "favorite", "comments": "comment"}
             answers = _sort_items(list(answers), _SORT_MAP[sort_by])
@@ -348,8 +347,7 @@ def register_browse(main_group):
 
     @browse.command("comments")
     @click.argument("url")
-    @click.option("--limit", type=int, default=20, help="Comments per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total root comments to fetch")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--sort",
@@ -358,7 +356,7 @@ def register_browse(main_group):
         default="default",
         help="Sort comments by criteria",
     )
-    def browse_comments(url: str, limit: int, max_items: int | None, output_json: bool, sort_by: str) -> None:
+    def browse_comments(url: str, max_items: int | None, output_json: bool, sort_by: str) -> None:
         """Print the comment tree for any Zhihu item."""
         item_type, item_id = _parse_item_url(url)
         if item_type == "answers":
@@ -366,7 +364,7 @@ def register_browse(main_group):
 
         from zhihu_cli.content.handlers.comments import fetch_root_comments
 
-        comments = list(fetch_root_comments(item_type, item_id, limit=limit, max_items=max_items))
+        comments = list(fetch_root_comments(item_type, item_id, limit=PAGE_SIZE, max_items=max_items))
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "likes": "like_count", "dislikes": "dislike_count"}
             comments = _sort_items(comments, _SORT_MAP[sort_by])
@@ -379,8 +377,7 @@ def register_browse(main_group):
 
     @browse.command("annotation")
     @click.argument("url")
-    @click.option("--limit", type=int, default=20, help="Comments per page (default: 20)")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total comments to fetch")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--sort",
@@ -389,7 +386,7 @@ def register_browse(main_group):
         default="default",
         help="Sort segment comments by criteria",
     )
-    def browse_annotation(url: str, limit: int, max_items: int | None, output_json: bool, sort_by: str) -> None:
+    def browse_annotation(url: str, max_items: int | None, output_json: bool, sort_by: str) -> None:
         """Show segment comments (句子评论) for an answer.
 
         Segment comments are anchored to specific text spans within the
@@ -403,7 +400,7 @@ def register_browse(main_group):
         answer_id = _resolve_answer_id(item_id)
 
         info(f"Fetching segment comments for answer {answer_id} ...")
-        comments = list(fetch_segment_comments(answer_id, limit=limit, max_items=max_items))
+        comments = list(fetch_segment_comments(answer_id, limit=PAGE_SIZE, max_items=max_items))
 
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "likes": "like_count"}
@@ -461,8 +458,14 @@ def register_browse(main_group):
 
     @browse.command("feed")
     @click.option("--type", "-t", "feed_type", type=click.Choice(["recommend", "follow"]), default="recommend")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
+    @click.option(
+        "--max",
+        "-n",
+        "max_items",
+        type=int,
+        default=20,
+        help="Max total items (default: 20 — the feed never ends, so 'all' would not terminate)",
+    )
     @click.option("--markdown/--no-markdown", default=False, help="Convert HTML to Markdown")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
@@ -474,12 +477,12 @@ def register_browse(main_group):
         help="Sort feed items by criteria",
     )
     def browse_feed(
-        feed_type: str, limit: int, max_items: int | None, markdown: bool, output_json: bool, output: str, sort_by: str
+        feed_type: str, max_items: int | None, markdown: bool, output_json: bool, output: str, sort_by: str
     ) -> None:
         """Stream Zhihu recommend or follow feed."""
         set_json_mode(output_json)
         fetch_fn = fetch_feed_with_markdown if markdown else fetch_feed
-        items = fetch_fn(feed_type, limit, max_items)
+        items = fetch_fn(feed_type, PAGE_SIZE, max_items)
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "upvotes": "voteup_count", "comments": "comment_count"}
             items = _sort_items(items, _SORT_MAP[sort_by])
@@ -513,7 +516,7 @@ def register_browse(main_group):
             success(f"Saved {len(items)} items to {output}")
 
     @browse.command("hot")
-    @click.option("--limit", "-n", type=int, default=30, help="Number of hot items to show (default: 30)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -523,16 +526,19 @@ def register_browse(main_group):
         default="default",
         help="Sort hot list by criteria",
     )
-    def browse_hot(limit: int, output_json: bool, output: str, sort_by: str) -> None:
+    def browse_hot(max_items: int | None, output_json: bool, output: str, sort_by: str) -> None:
         """View the Zhihu real-time hot list."""
         set_json_mode(output_json)
-        items = fetch_hot_list(limit=50 if sort_by != "default" else limit)
+        # The hot list is a single fetch with no pagination, so ``max_items`` is
+        # both the API's ``limit`` and a local slice — it caps what is shown.
+        fetch_limit = 50 if sort_by != "default" else (max_items if max_items is not None else 50)
+        items = fetch_hot_list(limit=fetch_limit)
         if sort_by != "default":
             _SORT_MAP = {"heat": "heat", "comments": "comment_count", "answers": "answer_count"}
             items = _sort_items(items, _SORT_MAP[sort_by])
 
-        if limit and len(items) > limit:
-            items = items[:limit]
+        if max_items is not None and len(items) > max_items:
+            items = items[:max_items]
 
         if output_json:
             print_json(items)
@@ -580,8 +586,14 @@ def register_browse(main_group):
             info("No hot items found. Try logging in first: zhihu auth login")
 
     @browse.command("notifications")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
+    @click.option(
+        "--max",
+        "-n",
+        "max_items",
+        type=int,
+        default=20,
+        help="Max total items (default: 20 — Zhihu retains the full history, so fetching all is slow)",
+    )
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -591,12 +603,12 @@ def register_browse(main_group):
         default="default",
         help="Sort notifications by time",
     )
-    def browse_notifications(limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str) -> None:
+    def browse_notifications(max_items: int | None, output_json: bool, output: str, sort_by: str) -> None:
         """View your Zhihu notifications."""
         set_json_mode(output_json)
         from zhihu_cli.content.handlers.notifications import fetch_notifications
 
-        items = fetch_notifications(limit=limit, max_items=max_items)
+        items = fetch_notifications(limit=PAGE_SIZE, max_items=max_items)
         if sort_by != "default":
             _SORT_MAP = {"time": "timestamp"}
             items = _sort_items(items, _SORT_MAP[sort_by])
@@ -639,19 +651,25 @@ def register_browse(main_group):
             info("No notifications found. Try logging in first: zhihu auth login")
 
     @browse.command("history")
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=20, help="Max total items (default: 20)")
+    @click.option(
+        "--max",
+        "-n",
+        "max_items",
+        type=int,
+        default=20,
+        help="Max total items (default: 20 — the full read history is large)",
+    )
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
         "--sort", "sort_by", type=click.Choice(["default", "time"]), default="default", help="Sort history by time"
     )
-    def browse_history(limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str) -> None:
+    def browse_history(max_items: int | None, output_json: bool, output: str, sort_by: str) -> None:
         """View your Zhihu read history."""
         set_json_mode(output_json)
         from zhihu_cli.content.handlers.read_history import fetch_read_history
 
-        items = fetch_read_history(limit=limit, max_items=max_items)
+        items = fetch_read_history(limit=PAGE_SIZE, max_items=max_items)
         if sort_by != "default":
             _SORT_MAP = {"time": "read_time"}
             items = _sort_items(items, _SORT_MAP[sort_by])
@@ -696,7 +714,7 @@ def register_browse(main_group):
     @browse.command("yanxuan")
     @click.argument("url_or_id")
     @click.option("--offset", type=int, default=0, help="Starting segment offset (default: 0)")
-    @click.option("--max-segments", "-n", type=int, default=None, help="Max segments to fetch")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--max-pages", type=int, default=None, help="Max API pages to fetch")
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output segments as JSON")
@@ -704,7 +722,7 @@ def register_browse(main_group):
     def browse_yanxuan(
         url_or_id: str,
         offset: int,
-        max_segments: int | None,
+        max_items: int | None,
         max_pages: int | None,
         reading_mode: bool,
         output_json: bool,
@@ -721,15 +739,15 @@ def register_browse(main_group):
         # Paid column section URLs use SSR page parsing
         if is_paid_column_section_url(url_or_id):
             meta, segments = fetch_paid_column_section_segments(url_or_id)
-            # Honour max_segments as a cap on returned segments
-            if max_segments is not None and len(segments) > max_segments:
-                segments = segments[:max_segments]
+            # Honour max_items as a cap on returned segments
+            if max_items is not None and len(segments) > max_items:
+                segments = segments[:max_items]
         else:
             url_token = extract_url_token(url_or_id)
             meta, segments = fetch_yanxuan_segments(
                 url_token,
                 offset=offset,
-                max_segments=max_segments,
+                max_segments=max_items,
                 max_pages=max_pages,
             )
 
@@ -783,8 +801,7 @@ def register_browse(main_group):
 
     @browse.command("upvoters")
     @click.argument("url")
-    @click.option("--limit", "-n", type=int, default=20, help="Items per page (default: 20, max: 20)")
-    @click.option("--max", "-m", "max_items", type=int, default=None, help="Max total items (default: fetch all)")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option(
         "--sort",
@@ -793,7 +810,7 @@ def register_browse(main_group):
         default="default",
         help="Sort upvoters by criteria",
     )
-    def browse_upvoters(url: str, limit: int, max_items: int | None, output_json: bool, sort_by: str) -> None:
+    def browse_upvoters(url: str, max_items: int | None, output_json: bool, sort_by: str) -> None:
         """List users who upvoted an answer or article.
 
         \b
@@ -813,7 +830,7 @@ def register_browse(main_group):
             item_id = _resolve_answer_id(item_id)
 
         info(f"Fetching upvoters for {item_type} {item_id}...")
-        items = fetch_upvoters(item_type, item_id, limit=limit, max_items=max_items)
+        items = fetch_upvoters(item_type, item_id, limit=PAGE_SIZE, max_items=max_items)
         if sort_by != "default":
             _SORT_MAP = {"followers": "follower_count", "upvotes": "member_upvote_cnt"}
             items = _sort_items(items, _SORT_MAP[sort_by])
@@ -858,7 +875,6 @@ def register_browse(main_group):
     def _following_command(
         fetch_fn,
         url_token: str | None,
-        limit: int,
         max_items: int | None,
         output_json: bool,
         output: str,
@@ -870,7 +886,7 @@ def register_browse(main_group):
         set_json_mode(output_json)
         token = _resolve_url_token(url_token)
         info(f"Fetching {label} for {token}...")
-        items = fetch_fn(token, limit=limit, max_items=max_items)
+        items = fetch_fn(token, limit=PAGE_SIZE, max_items=max_items)
         if sort_map and sort_by != "default":
             items = _sort_items(items, sort_map[sort_by])
 
@@ -895,8 +911,7 @@ def register_browse(main_group):
         default=None,
         help="Target user's url_token or profile URL (defaults to yourself)",
     )
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -907,14 +922,13 @@ def register_browse(main_group):
         help="Sort users by criteria",
     )
     def following_users(
-        url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
+        url_token: str | None, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
         """List the users a Zhihu user follows."""
         _FOLLOWING_SORT = {"followers": "follower_count", "answers": "answer_count", "articles": "articles_count"}
         _following_command(
             fetch_followees,
             url_token,
-            limit,
             max_items,
             output_json,
             output,
@@ -931,8 +945,7 @@ def register_browse(main_group):
         default=None,
         help="Target user's url_token or profile URL (defaults to yourself)",
     )
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -943,12 +956,12 @@ def register_browse(main_group):
         help="Sort followers by criteria",
     )
     def following_followers(
-        url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
+        url_token: str | None, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
         """List a Zhihu user's followers (people who follow them)."""
         _FOLLOWING_SORT = {"followers": "follower_count", "answers": "answer_count", "articles": "articles_count"}
         _following_command(
-            fetch_followers, url_token, limit, max_items, output_json, output, "followers", sort_by, _FOLLOWING_SORT
+            fetch_followers, url_token, max_items, output_json, output, "followers", sort_by, _FOLLOWING_SORT
         )
 
     @browse_following.command("topics")
@@ -959,8 +972,7 @@ def register_browse(main_group):
         default=None,
         help="Target user's url_token or profile URL (defaults to yourself)",
     )
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -971,14 +983,13 @@ def register_browse(main_group):
         help="Sort topics by criteria",
     )
     def following_topics(
-        url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
+        url_token: str | None, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
         """List the topics a Zhihu user follows."""
         _FOLLOWING_SORT = {"followers": "followers_count", "questions": "questions_count"}
         _following_command(
             fetch_following_topics,
             url_token,
-            limit,
             max_items,
             output_json,
             output,
@@ -995,8 +1006,7 @@ def register_browse(main_group):
         default=None,
         help="Target user's url_token or profile URL (defaults to yourself)",
     )
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -1007,7 +1017,7 @@ def register_browse(main_group):
         help="Sort questions by criteria",
     )
     def following_questions(
-        url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
+        url_token: str | None, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
         """List the questions a Zhihu user follows."""
         _FOLLOWING_SORT = {
@@ -1019,7 +1029,6 @@ def register_browse(main_group):
         _following_command(
             fetch_following_questions,
             url_token,
-            limit,
             max_items,
             output_json,
             output,
@@ -1036,8 +1045,7 @@ def register_browse(main_group):
         default=None,
         help="Target user's url_token or profile URL (defaults to yourself)",
     )
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -1048,14 +1056,13 @@ def register_browse(main_group):
         help="Sort columns by criteria",
     )
     def following_columns(
-        url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
+        url_token: str | None, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
         """List the columns (zhuanlan) a Zhihu user follows."""
         _FOLLOWING_SORT = {"followers": "followers_count", "articles": "articles_count"}
         _following_command(
             fetch_following_columns,
             url_token,
-            limit,
             max_items,
             output_json,
             output,
@@ -1072,8 +1079,7 @@ def register_browse(main_group):
         default=None,
         help="Target user's url_token or profile URL (defaults to yourself)",
     )
-    @click.option("--limit", type=int, default=20, help="Items per page")
-    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items")
+    @click.option("--max", "-n", "max_items", type=int, default=None, help="Max total items (default: all)")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to JSON file")
     @click.option(
@@ -1084,7 +1090,7 @@ def register_browse(main_group):
         help="Sort collections by criteria",
     )
     def following_collections(
-        url_token: str | None, limit: int, max_items: int | None, output_json: bool, output: str, sort_by: str
+        url_token: str | None, max_items: int | None, output_json: bool, output: str, sort_by: str
     ) -> None:
         """List the collections (favorites) a Zhihu user follows."""
         _FOLLOWING_SORT = {
@@ -1096,7 +1102,6 @@ def register_browse(main_group):
         _following_command(
             fetch_following_collections,
             url_token,
-            limit,
             max_items,
             output_json,
             output,

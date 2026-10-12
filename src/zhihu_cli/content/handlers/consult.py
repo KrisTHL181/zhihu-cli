@@ -8,7 +8,7 @@ from typing import Any
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, session
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 INFINITY_BASE = "https://www.zhihu.com/api/v4/infinity/self/answers"
 
@@ -253,7 +253,7 @@ def send_consult_answer(
 
 def fetch_consult_answers(
     status: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
     sub_status: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -277,7 +277,7 @@ def fetch_consult_answers(
 
 
 def fetch_answering_with_detail(
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch in-progress (answering) consultations enriched with answer messages.

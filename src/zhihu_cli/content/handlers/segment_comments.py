@@ -16,14 +16,16 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 SEGMENT_COMMENT_API = (
     "https://api.zhihu.com/comment_v5/answers/{answer_id}/segment_comment?order_by=score&limit=20&offset="
 )
 
 
-def fetch_segment_comments(answer_id: str, limit: int = 20, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+def fetch_segment_comments(
+    answer_id: str, limit: int = PAGE_SIZE, max_items: int | None = None
+) -> Iterable[dict[str, Any]]:
     """Fetch segment comments for an answer, enriched with per-segment context.
 
     :param answer_id: The answer ID (url_token / numeric ID).

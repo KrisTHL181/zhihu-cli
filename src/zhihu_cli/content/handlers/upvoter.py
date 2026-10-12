@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE, stream_handler
 
 UPVOTER_API: dict[str, str] = {
     "answers": "https://www.zhihu.com/api/v4/answers/{item_id}/upvoters",
@@ -49,7 +49,7 @@ def _parse_upvoters(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
 def fetch_upvoters(
     item_type: str,
     item_id: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch upvoters for an answer or article (paginated).

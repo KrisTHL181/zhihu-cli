@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 
 
 def _safe_json(resp) -> dict[str, Any]:
@@ -100,7 +101,7 @@ def _parse_collection_contents(data: dict[str, Any]) -> Iterable[dict[str, Any]]
 
 def list_collection_contents(
     collection_id: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """List all items inside a collection with waterfall pagination.
@@ -118,7 +119,7 @@ def list_collection_contents(
 
 def list_collections(
     url_token: str,
-    limit: int = 20,
+    limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     from zhihu_cli.content.handlers.following import _parse_following_collections
