@@ -32,6 +32,7 @@ from zhihu_cli.output import (
     print_json,
     set_json_mode,
     stat,
+    warning,
 )
 
 # ── helpers ──
@@ -186,6 +187,46 @@ def _show_profile_rich(profile: dict) -> None:
         blank()
 
 
+# One row per content section of ``people show``: JSON key, display label, and
+# the handler that fetches it.  Both output branches read this table, so a
+# section cannot be added to one and forgotten in the other.
+_CONTENT_SECTIONS = (
+    ("answers", "Answers", fetch_member_answers),
+    ("articles", "Articles", fetch_member_articles),
+    ("pins", "Pins", fetch_member_pins),
+    ("questions", "Questions", fetch_member_questions),
+)
+
+
+def _fetch_section(
+    fetch_fn,
+    url_token: str,
+    section_title: str,
+    max_items: int | None = None,
+) -> list | None:
+    """Fetch one content section, reporting failure instead of hiding it.
+
+    A section that fails is not fatal — ``people show`` renders whichever
+    sections do come back — but the failure is announced rather than folded
+    into an empty list.  The warning goes to whichever stream
+    :func:`~zhihu_cli.output.warning` is using for the current mode, so a
+    ``--json`` run keeps stdout parseable.
+
+    :param fetch_fn: Handler taking ``(url_token, limit, max_items)``.
+    :param url_token: The profile to read.
+    :param section_title: Display name, used in the failure warning.
+    :param max_items: Cap on items fetched per section.
+    :returns: the fetched items, or ``None`` when the fetch failed.  An empty
+        list means the user genuinely has no content of that type, which is
+        not an error and is not reported.
+    """
+    try:
+        return fetch_fn(url_token, limit=PAGE_SIZE, max_items=max_items)
+    except Exception as e:
+        warning(f"Could not fetch {section_title}: {e}")
+        return None
+
+
 def _list_content_section(
     fetch_fn,
     url_token: str,
@@ -193,13 +234,12 @@ def _list_content_section(
     max_items: int | None = None,
     *,
     show_type: bool = False,
-) -> list:
-    """Fetch and display a content section. Returns the fetched items."""
-    try:
-        items = fetch_fn(url_token, limit=PAGE_SIZE, max_items=max_items)
-    except Exception:
-        return []
+) -> list | None:
+    """Fetch and display a content section.
 
+    :returns: the fetched items, or ``None`` when the fetch failed.
+    """
+    items = _fetch_section(fetch_fn, url_token, section_title, max_items)
     if items:
         heading(f"Recent {len(items)} {section_title}")
         for item in items:
@@ -249,25 +289,15 @@ def register_people(main_group):
 
         if output_json:
             result: dict = {"profile": profile}
-            for key, fn in [
-                ("answers", fetch_member_answers),
-                ("articles", fetch_member_articles),
-                ("pins", fetch_member_pins),
-                ("questions", fetch_member_questions),
-            ]:
-                try:
-                    result[key] = fn(token, limit=PAGE_SIZE, max_items=max_items)
-                except Exception:
-                    result[key] = []
+            for key, label, fn in _CONTENT_SECTIONS:
+                result[key] = _fetch_section(fn, token, label, max_items)
             print_json(result)
             return
 
         _show_profile_rich(profile)
 
-        _list_content_section(fetch_member_answers, token, "Answers", max_items)
-        _list_content_section(fetch_member_articles, token, "Articles", max_items)
-        _list_content_section(fetch_member_pins, token, "Pins", max_items)
-        _list_content_section(fetch_member_questions, token, "Questions", max_items)
+        for _key, label, fn in _CONTENT_SECTIONS:
+            _list_content_section(fn, token, label, max_items)
 
     @people.command("answers")
     @click.argument("url_token")

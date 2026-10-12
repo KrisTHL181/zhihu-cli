@@ -180,14 +180,19 @@ def fetch_member_articles(
     limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch a member's articles list."""
+    """Fetch a member's articles list.
+
+    The articles endpoint answers HTTP 500 when the ``x-app-za`` /
+    ``x-app-version`` app-identity headers are present, so they are omitted
+    here.
+    """
     url = (
         f"{MEMBER_API.format(token=url_token)}/articles"
         f"?include=data%5B%2A%5D.excerpt%2Cdata%5B%2A%5D.voteup_count"
         f"%2Cdata%5B%2A%5D.comment_count"
         f"&offset=0&limit={limit}&sort_by=created"
     )
-    return list(stream_handler(url, _parse_article_list, max_items=max_items))
+    return list(stream_handler(url, _parse_article_list, max_items=max_items, skip_app_headers=True))
 
 
 # ── pin list ────────────────────────────────────────────────────────────────
