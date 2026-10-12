@@ -52,12 +52,7 @@ def list_drafts(object_type: str, object_id: str, limit: int = 10) -> list[dict]
         f"{DRAFT_HISTORIES_URL}?"
         f"{urlencode({'object_type': object_type, 'object_id': object_id, 'limit': page_size, 'offset': 0})}"
     )
-    drafts: list[dict] = []
-    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
-        drafts.append(draft)
-        if len(drafts) >= limit:
-            break
-    return drafts
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
 
 
 def list_answer_drafts(limit: int = 20) -> list[dict]:
@@ -68,12 +63,7 @@ def list_answer_drafts(limit: int = 20) -> list[dict]:
     """
     page_size = min(limit, 20)
     url = f"{ANSWER_DRAFTS_URL}?{urlencode({'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
-    drafts: list[dict] = []
-    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
-        drafts.append(draft)
-        if len(drafts) >= limit:
-            break
-    return drafts
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
 
 
 def list_article_drafts(limit: int = 20) -> list[dict]:
@@ -84,12 +74,7 @@ def list_article_drafts(limit: int = 20) -> list[dict]:
     """
     page_size = min(limit, 20)
     url = f"{ARTICLE_DRAFTS_URL}?{urlencode({'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
-    drafts: list[dict] = []
-    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
-        drafts.append(draft)
-        if len(drafts) >= limit:
-            break
-    return drafts
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
 
 
 def list_pin_drafts(limit: int = 20) -> list[dict]:
@@ -100,12 +85,7 @@ def list_pin_drafts(limit: int = 20) -> list[dict]:
     """
     page_size = min(limit, 20)
     url = f"{PIN_DRAFTS_URL}?{urlencode({'action': 'pin', 'offset': 0, 'limit': page_size, 'include': 'data[*].schedule'})}"
-    drafts: list[dict] = []
-    for draft in stream_handler(url, _parse_draft_page, delay=0.3):
-        drafts.append(draft)
-        if len(drafts) >= limit:
-            break
-    return drafts
+    return list(stream_handler(url, _parse_draft_page, delay=0.3, max_items=limit))
 
 
 def get_draft(draft_id: str, version_type: str = "current") -> dict:

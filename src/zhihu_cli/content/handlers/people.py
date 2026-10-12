@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import itertools
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -147,12 +150,7 @@ def fetch_member_answers(
         f"%2Cdata%5B%2A%5D.comment_count%2Cdata%5B%2A%5D.is_copyable"
         f"&offset=0&limit={limit}&sort_by=created"
     )
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_answer_list):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_answer_list, max_items=max_items))
 
 
 # ── article list ────────────────────────────────────────────────────────────
@@ -189,12 +187,7 @@ def fetch_member_articles(
         f"%2Cdata%5B%2A%5D.comment_count"
         f"&offset=0&limit={limit}&sort_by=created"
     )
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_article_list):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_article_list, max_items=max_items))
 
 
 # ── pin list ────────────────────────────────────────────────────────────────
@@ -237,12 +230,7 @@ def fetch_member_pins(
         f"%2Cdata%5B%2A%5D.voteup_count%2Cdata%5B%2A%5D.comment_count"
         f"&offset=0&limit={limit}&sort_by=created"
     )
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_pin_list):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_pin_list, max_items=max_items))
 
 
 # ── question list ───────────────────────────────────────────────────────────
@@ -279,10 +267,9 @@ def fetch_member_questions(
     url = f"{MEMBER_API.format(token=url_token)}/questions?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}"
     items: list[dict[str, Any]] = []
     try:
-        for item in stream_handler(url, _parse_question_list):
-            items.append(item)
-            if max_items is not None and len(items) >= max_items:
-                break
+        # ``extend`` (not ``list``) so a mid-stream failure still returns the
+        # items already received.
+        items.extend(stream_handler(url, _parse_question_list, max_items=max_items))
     except Exception:
         pass
     return items
@@ -395,14 +382,15 @@ def fetch_member_activities(
         (answers, pins, articles, questions), filtering out votes, follows, etc.
     """
     url = f"https://www.zhihu.com/api/v3/moments/{url_token}/activities?limit={limit}&desktop=True"
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_activity_list):
-        if creations_only and not item["is_creation"]:
-            continue
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    if creations_only:
+        # ``max_items`` caps the *filtered* count here, so it cannot be pushed
+        # into ``stream_handler`` (which would count pre-filter items).  Filter
+        # first, then cap the filtered stream.
+        filtered = (item for item in stream_handler(url, _parse_activity_list) if item["is_creation"])
+        if max_items is not None:
+            filtered = itertools.islice(filtered, max_items)
+        return list(filtered)
+    return list(stream_handler(url, _parse_activity_list, max_items=max_items))
 
 
 def get_my_url_token():

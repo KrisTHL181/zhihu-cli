@@ -237,12 +237,7 @@ def fetch_reviews(
         List of parsed review dicts.
     """
     url = f"{AGORA_BASE}/discussions/{discussion_id}/reviews?limit={limit}&offset=0"
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_reviews):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_reviews, max_items=max_items))
 
 
 # ── comment detail ─────────────────────────────────────────────────────────

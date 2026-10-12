@@ -1,5 +1,7 @@
 """Search Zhihu via the search_v3 API."""
 
+from __future__ import annotations
+
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -136,7 +138,7 @@ def _build_search(
     url = f"{SEARCH_URL}?t={search_type}&q={encoded_query}&offset=0&limit={limit}&search_source=Normal"
     parser = _make_parser(item_parser)
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, parser):
+    for item in stream_handler(url, parser, max_items=max_items):
         if item.get("name"):
             item["name"] = replace_em(item["name"])
         if item.get("title"):
@@ -146,8 +148,6 @@ def _build_search(
         if item.get("description"):
             item["description"] = replace_em(item["description"])
         items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
     return items
 
 
@@ -186,7 +186,7 @@ def search_articles(
     url = f"{ARTICLE_SEARCH_URL}?{params}"
     parser = _make_parser(_parse_article)
     items: list[dict[str, Any]] = []
-    for item in stream_handler(url, parser):
+    for item in stream_handler(url, parser, max_items=max_items):
         url = item.get("url", "")
         if url.startswith("https://api.zhihu.com/"):
             url = url.replace("api.zhihu.com", "www.zhihu.com")
@@ -201,8 +201,6 @@ def search_articles(
         if item.get("excerpt"):
             item["excerpt"] = replace_em(item["excerpt"])
         items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
     return items
 
 

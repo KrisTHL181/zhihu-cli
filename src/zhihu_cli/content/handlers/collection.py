@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Iterable
 from typing import Any
 
@@ -111,12 +113,7 @@ def list_collection_contents(
     from zhihu_cli.content.handlers.waterfall import stream_handler
 
     url = f"https://www.zhihu.com/api/v4/collections/{collection_id}/contents?offset=0&limit={limit}"
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_collection_contents):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_collection_contents, max_items=max_items))
 
 
 def list_collections(
@@ -133,9 +130,4 @@ def list_collections(
         "%2Ccreator%2Cdescription%2Cis_following%2Ccomment_count%2Ccreated_time"
         f"&offset=0&limit={limit}"
     )
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_following_collections):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_following_collections, max_items=max_items))

@@ -273,12 +273,7 @@ def fetch_consult_answers(
 
     url = f"{INFINITY_BASE}?{'&'.join(params)}&offset=0&limit={limit}"
 
-    items: list[dict[str, Any]] = []
-    for item in stream_handler(url, _parse_answer_list):
-        items.append(item)
-        if max_items is not None and len(items) >= max_items:
-            break
-    return items
+    return list(stream_handler(url, _parse_answer_list, max_items=max_items))
 
 
 def fetch_answering_with_detail(
