@@ -1,12 +1,15 @@
 """Interact command group — vote, thank, follow, block, comment, collect, report, delete."""
 
-import json
+from __future__ import annotations
+
+import sys
 
 import click
 
 from zhihu_cli.commands._helpers import (
     _display_following_items,
     _parse_item_url,
+    _read_content,
     _resolve_answer_id,
     _resolve_url_token,
     _save_json_output,
@@ -43,7 +46,11 @@ from zhihu_cli.content.handlers.question import (
     upvote_answer,
     upvote_question,
 )
-from zhihu_cli.content.handlers.report import fetch_report_reasons, flatten_reasons, submit_report
+from zhihu_cli.content.handlers.report import (
+    fetch_report_reasons,
+    flatten_reasons,
+    submit_reports_batch,
+)
 from zhihu_cli.content.handlers.waterfall import PAGE_SIZE
 from zhihu_cli.output import (
     echo,
@@ -63,7 +70,56 @@ from zhihu_cli.output import (
     set_json_mode,
     success,
     summary,
+    warning,
 )
+
+# ── report input parsing ───────────────────────────────────────────────────
+
+# URL type (from get_type_and_id) → the object_type the reports API expects.
+_REPORT_TYPE_MAP = {
+    "articles": "article",
+    "questions": "question",
+    "answers": "answer",
+    "pins": "pin",
+}
+
+
+def _report_target_from_url(url: str) -> dict[str, str]:
+    """Resolve a Zhihu URL into the fields ``submit_report`` takes.
+
+    :param url: A Zhihu content URL — answer, article, question, or pin.
+    :raises click.BadParameter: If the URL is not a reportable Zhihu URL.
+    """
+    item_type, item_id = _parse_item_url(url)
+    if item_type == "answers":
+        item_id = _resolve_answer_id(item_id)
+    return {
+        "object_type": _REPORT_TYPE_MAP.get(item_type, item_type),
+        "resource_id": item_id,
+        "url": url,
+    }
+
+
+def _parse_report_lines(text: str) -> list[tuple[int, str, str | None, str | None]]:
+    """Parse batch input into ``(line_number, url, reason_id, custom_reason)``.
+
+    Blank lines and lines starting with ``#`` are skipped. A line holds a URL,
+    then optionally a per-item reason ID, then optionally free-text custom
+    reason (which may contain spaces).
+
+    :param text: The contents of the input file, or ``-`` for stdin.
+    :returns: One tuple per non-empty line, in file order.
+    """
+    entries: list[tuple[int, str, str | None, str | None]] = []
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(maxsplit=2)
+        reason_id = parts[1] if len(parts) > 1 else None
+        custom_reason = parts[2].strip() if len(parts) > 2 else None
+        entries.append((lineno, parts[0], reason_id, custom_reason))
+    return entries
 
 
 def register_interact(main_group) -> None:
@@ -470,49 +526,118 @@ def register_interact(main_group) -> None:
             echo(label)
 
     @interact_report.command("submit")
-    @click.argument("url")
-    @click.option("--reason", "-r", "reason_id", required=True, help="Reason ID (from 'zhihu interact report reasons')")
-    @click.option("--custom-reason", "-c", default="", help="Custom explanation text")
+    @click.argument("urls", nargs=-1)
+    @click.option(
+        "--reason",
+        "-r",
+        "reason_id",
+        default=None,
+        help="Default reason ID (from 'zhihu interact report reasons') for items that don't carry their own",
+    )
+    @click.option("--custom-reason", "-c", default="", help="Default custom explanation text")
+    @click.option("--file", "-f", "file", default=None, help="Read targets from a file, one per line ('-' for stdin)")
+    @click.option("--delay", default=2.0, show_default=True, help="Seconds to wait between submissions")
+    @click.option("-y", "--yes", "skip_confirm", is_flag=True, default=False, help="Skip the confirmation prompt")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
-    def report_submit(url: str, reason_id: str, custom_reason: str, output_json: bool) -> None:
-        """Submit a report for content at URL.
+    def report_submit(
+        urls: tuple[str, ...],
+        reason_id: str | None,
+        custom_reason: str,
+        file: str | None,
+        delay: float,
+        skip_confirm: bool,
+        output_json: bool,
+    ) -> None:
+        """Report one or more Zhihu items (举报).
+
+        URLs can be passed as arguments and/or read from --file, one per line
+        (blank lines and '#' comments are ignored). A line may carry its own
+        reason ID and custom text, which take precedence over -r/-c:
+
+        \b
+            <url> [reason_id] [custom reason text]
+
+        Reports go out one at a time with --delay between them, and one failed
+        item does not stop the rest. A pipe into '-f -' cannot be confirmed, so
+        the prompt is skipped in that case — pass -y to suppress the warning.
 
         \b
         Examples:
           zhihu interact report reasons answer
           zhihu interact report submit https://www.zhihu.com/question/123/answer/456 -r 1040-irrelevant-answer
-          zhihu interact report submit https://www.zhihu.com/question/123/answer/456 -r 1040-irrelevant-answer -c "广告垃圾"
+          zhihu interact report submit URL1 URL2 -r 1040-irrelevant-answer -c "广告垃圾" -y
+          zhihu interact report submit -f urls.txt
+          cat urls.txt | zhihu interact report submit -f -
         """
-        item_type, item_id = _parse_item_url(url)
-        if item_type == "answers":
-            item_id = _resolve_answer_id(item_id)
-        # Map URL type to API object_type
-        type_map = {
-            "articles": "article",
-            "questions": "question",
-            "answers": "answer",
-            "pins": "pin",
-        }
-        object_type = type_map.get(item_type, item_type)
+        set_json_mode(output_json)
 
-        resp = submit_report(
-            resource_id=item_id,
-            object_type=object_type,
-            reason_id=reason_id,
-            custom_reason=custom_reason,
-            url=url,
-        )
+        raw_entries: list[tuple[int | None, str, str | None, str | None]] = []
+        if file:
+            raw_entries.extend(_parse_report_lines(_read_content(file)))
+        raw_entries.extend((None, url, None, None) for url in urls)
+
+        targets: list[dict[str, str]] = []
+        problems: list[str] = []
+        for lineno, url, line_reason, line_custom in raw_entries:
+            where = f"line {lineno}" if lineno is not None else "argument"
+            reason = line_reason or reason_id
+            if not reason:
+                problems.append(f"{where}: {url} — no reason given (use --reason, or '<url> <reason_id>')")
+                continue
+            try:
+                target = _report_target_from_url(url)
+            except click.BadParameter as e:
+                problems.append(f"{where}: {e.message}")
+                continue
+            target["reason_id"] = reason
+            target["custom_reason"] = custom_reason if line_custom is None else line_custom
+            targets.append(target)
+
+        if problems:
+            for problem in problems:
+                error(problem)
+            raise SystemExit(1)
+        if not targets:
+            error("No report targets given. Pass URLs as arguments or use --file.")
+            raise SystemExit(1)
+
+        # ``-f -`` has already consumed stdin, so a pipe leaves nothing for the
+        # prompt to read; only a terminal-typed list can still be confirmed.
+        if not skip_confirm and file == "-" and not sys.stdin.isatty():
+            warning("Reading targets from stdin — skipping the confirmation prompt (pass -y to silence this).")
+            skip_confirm = True
+
+        if not skip_confirm:
+            heading(f"Report {len(targets)} item(s)")
+            for index, target in enumerate(targets, start=1):
+                echo(
+                    f"  {item_index(index, len(targets))} "
+                    f"{f_tag(target['object_type'])} {target['resource_id']}  "
+                    f"{f_label(target['reason_id'])}"
+                )
+            click.confirm("Submit these reports?", abort=True)
+
+        def _progress(index: int, result: dict) -> None:
+            label = f"{f_tag(result['object_type'])} {result['resource_id']}"
+            position = f"[{index + 1}/{len(targets)}]"
+            if result["success"]:
+                success(f"{position} Reported {label}")
+            elif result.get("skipped"):
+                warning(f"{position} Skipped {label} — aborted after a 403")
+            else:
+                error(f"{position} Failed {label}: {result.get('error', 'unknown error')}")
+
+        results = submit_reports_batch(targets, delay=delay, on_result=_progress)
+        reported = sum(1 for r in results if r["success"])
+        failed = len(results) - reported
 
         if output_json:
-            print_json(resp)
+            print_json(results)
         else:
-            if resp.get("is_reported") or (isinstance(resp, dict) and resp.get("success", True)):
-                success(f"Report submitted for {f_tag(item_type)} {item_id}")
-                echo(f"  {f_label('Reason:')} {reason_id}")
-                if custom_reason:
-                    echo(f"  {f_label('Detail:')} {custom_reason}")
-            else:
-                error(f"Report failed: {json.dumps(resp, ensure_ascii=False)}")
+            summary(f"{reported} reported, {failed} failed")
+
+        if failed:
+            raise SystemExit(1)
 
     # ── delete ──────────────────────────────────────────────────────────────
 
