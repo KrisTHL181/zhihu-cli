@@ -19,6 +19,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from zhihu_cli.content.handlers.captcha_gate import captcha_gate, resolve_captcha
 from zhihu_cli.daemon.protocol import (
     MSG_CAPTCHA_REQUIRED,
     MSG_CAPTCHA_RESOLVED,
@@ -449,8 +450,14 @@ class DaemonProxySession:
         if kwargs.get("stream", False):
             return self._stream_direct(method, url, **kwargs)
 
-        wire_kwargs = self._serialize_kwargs(kwargs)
-        msg = build_http_request(method, url, wire_kwargs)
+        # Park here — deliberately *before* ``_send_recv`` takes the socket
+        # lock — while another thread resolves a captcha.  A waiter holding
+        # that lock would deadlock the resolver, which needs the socket to
+        # send ``captcha_resolved``.  The wait is bounded, so a timed-out
+        # thread simply sends and gets the daemon's 403.
+        captcha_gate.acquire()
+
+        msg = self._build_request_msg(method, url, kwargs)
 
         try:
             resp_data = self._send_recv(msg)
@@ -462,6 +469,19 @@ class DaemonProxySession:
         return self._process_response(resp_data, method, url, kwargs)
 
     # ── internal helpers ───────────────────────────────────────────────
+
+    def _build_request_msg(self, method: str, url: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Build the ``http_request`` wire message for *kwargs*.
+
+        Factored out of :meth:`request` so the post-captcha retry can re-send
+        the caller's original request without duplicating the serialisation.
+
+        :param method: HTTP method.
+        :param url: Full request URL.
+        :param kwargs: Caller kwargs, filtered by :meth:`_serialize_kwargs`.
+        :returns: The message dict to hand to :meth:`_send_recv`.
+        """
+        return build_http_request(method, url, self._serialize_kwargs(kwargs))
 
     def _serialize_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Filter *kwargs* to only the keys safe for wire transport.
@@ -485,7 +505,23 @@ class DaemonProxySession:
         method: str,
         url: str,
         original_kwargs: dict[str, Any],
+        *,
+        allow_captcha_handling: bool = True,
     ) -> DaemonProxyResponse:
+        """Turn one daemon reply into a response, handling captchas on the way.
+
+        :param resp_data: The decoded daemon message.
+        :param method: HTTP method of the request that produced it.
+        :param url: URL of the request that produced it.
+        :param original_kwargs: Caller kwargs of that request.
+        :param allow_captcha_handling: When ``False``, a ``captcha_required``
+            reply is turned into a synthetic 403 instead of re-entering the
+            resolution flow.  The post-gate retry sets this so a *second*
+            captcha cannot send the thread back around the wait loop.
+        :returns: The response.
+        :raises DaemonRequestError: if the daemon reported an error.
+        :raises DaemonProtocolError: on an unexpected message type.
+        """
         resp_type = resp_data.get("type")
 
         if resp_type == MSG_HTTP_RESPONSE:
@@ -495,6 +531,8 @@ class DaemonProxySession:
             return DaemonProxyResponse(resp_data)
 
         if resp_type == MSG_CAPTCHA_REQUIRED:
+            if not allow_captcha_handling:
+                return _synthetic_403(resp_data.get("captcha_error", {}), url)
             return self._handle_captcha_via_daemon(resp_data, method, url, original_kwargs)
 
         if resp_type == MSG_ERROR:
@@ -555,6 +593,20 @@ class DaemonProxySession:
         Interactive resolution happens in the CLI process (which has a
         TTY).  After resolution, a ``captcha_resolved`` message is sent
         to the daemon so it can harvest cookies and retry.
+
+        The :data:`~zhihu_cli.content.handlers.captcha_gate.captcha_gate`
+        coordinates threads: the first thread to see the challenge becomes the
+        resolver, the rest park in the gate and re-send their own stale 403
+        once it clears.  A resolver is *not* required to succeed — giving up
+        still releases the gate, and everyone falls back to the 403.
+
+        :param captcha_data: The ``captcha_required`` message.
+        :param method: HTTP method of the blocked request.
+        :param url: URL of the blocked request.
+        :param original_kwargs: Caller kwargs of the blocked request, used to
+            re-send it after the gate clears.
+        :returns: The retried response, or a synthetic 403 when the challenge
+            was skipped, cancelled, timed out, or nothing can prompt.
         """
         captcha_error = captcha_data.get("captcha_error", {})
         pending = captcha_data.get("pending_request", {})
@@ -568,14 +620,75 @@ class DaemonProxySession:
             _print_captcha_warning(captcha_error)
             return _synthetic_403(captcha_error, url)
 
-        # "auto" mode: interactive resolution
+        # "auto" mode: interactive resolution.  ``_can_prompt_user`` is the
+        # same guard the direct path uses — without a terminal, prompting
+        # would block forever, so degrade to returning the 403.
+        from zhihu_cli.content.handlers._session_core import (
+            _can_prompt_user,
+            _print_non_interactive_captcha_warning,
+        )
+
+        if not _can_prompt_user():
+            _print_non_interactive_captcha_warning(captcha_error)
+            return _synthetic_403(captcha_error, url)
+
+        if captcha_gate.is_resolver():
+            # Re-entrant: this reply reached a thread that is already running
+            # the resolution flow — never prompt twice.
+            return _synthetic_403(captcha_error, url)
+
+        if captcha_gate.try_begin():
+            try:
+                return self._resolve_captcha_interactively(captcha_error, pending, method, url, original_kwargs)
+            finally:
+                captcha_gate.finish()
+
+        if captcha_gate.acquire():
+            # Another thread resolved the captcha while we waited: our own
+            # request already came back as a stale 403, so re-send it once.
+            # ``allow_captcha_handling=False`` is the non-recursion guard — a
+            # second captcha on the retry yields a synthetic 403 instead of
+            # re-entering this method and waiting again.
+            resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
+            return self._process_response(
+                resp_data,
+                method,
+                url,
+                original_kwargs,
+                allow_captcha_handling=False,
+            )
+
+        # Gate timed out: hand back the 403 rather than hang forever.
+        return _synthetic_403(captcha_error, url)
+
+    def _resolve_captcha_interactively(
+        self,
+        captcha_error: dict[str, Any],
+        pending: dict[str, Any],
+        method: str,
+        url: str,
+        original_kwargs: dict[str, Any],
+    ) -> DaemonProxyResponse:
+        """Run the interactive flow and tell the daemon to retry.
+
+        Called on the resolver thread with the gate held; the caller is
+        responsible for :meth:`CaptchaGate.finish`.
+
+        :param captcha_error: The error dict from the daemon.
+        :param pending: ``pending_request`` from the ``captcha_required`` message.
+        :param method: HTTP method of the blocked request (fallback).
+        :param url: URL of the blocked request (fallback).
+        :param original_kwargs: Caller kwargs of the blocked request (fallback).
+        :returns: The daemon's response to the retried request, or a synthetic
+            403 when the user skipped/cancelled the challenge.
+        :raises DaemonRequestError: if the daemon's retry failed.
+        """
         from zhihu_cli.content.handlers._session_core import _build_direct_session
-        from zhihu_cli.content.handlers.captcha import handle_captcha
 
         # Use a temporary direct session for captcha cookie harvesting
         direct = _build_direct_session()
         try:
-            result = handle_captcha(direct, captcha_error)
+            result = resolve_captcha(direct, captcha_error)
             if result == "resolved":
                 # Build the unhuman URL for the daemon to visit
                 unhuman_url = captcha_error.get("redirect", "")

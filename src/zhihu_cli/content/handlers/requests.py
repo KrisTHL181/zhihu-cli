@@ -16,6 +16,7 @@ which is loaded *only* when a direct session is built or when calling
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 # ── lightweight (stdlib-only) imports ──────────────────────────────────────
@@ -100,6 +101,12 @@ def get_page_state(html_text: str, key: str = "entities") -> dict[str, Any]:
 _session: Any = None
 _headers: dict[str, str] = {}
 
+#: Guards the ``_session`` / ``_headers`` globals.  A plain (non-reentrant)
+#: lock is enough: :func:`_build_session` never calls back into
+#: :func:`_get_session` — it talks to the daemon or to ``_session_core``
+#: directly — so there is no re-entry path that could self-deadlock.
+_session_lock = threading.Lock()
+
 
 class _LazySession:
     """Transparent proxy that builds the real session on first attribute use.
@@ -137,18 +144,32 @@ requests: Any = session
 
 
 def _get_session() -> Any:
-    """Return the singleton session, creating it on first call."""
+    """Return the singleton session, creating it on first call.
+
+    Thread-safe via double-checked locking.  Building the session performs
+    network I/O (a daemon ping, a session reload) and creating a second one
+    would leave the process with two competing sessions, so the build must
+    happen exactly once.
+
+    The unsynchronised fast path matters: :data:`session` is a
+    :class:`_LazySession` proxy that re-resolves through here on *every*
+    attribute access, so the common case must stay a plain attribute read.
+    """
     global _session, _headers
     if _session is not None:
         return _session
 
-    _session = _build_session()
-    if _session is not None:
-        try:
-            _headers = dict(_session.headers)
-        except Exception:
-            pass
-    return _session
+    with _session_lock:
+        if _session is not None:
+            return _session
+
+        _session = _build_session()
+        if _session is not None:
+            try:
+                _headers = dict(_session.headers)
+            except Exception:
+                pass
+        return _session
 
 
 def _build_session() -> Any:
@@ -222,6 +243,11 @@ def reload_session() -> None:
     When proxying through the daemon, sends a reload message so the
     daemon rebuilds its session from the new profileʼs headers.  For a
     direct session, rebuilds the session in-process.
+
+    Serialised by :data:`_session_lock` so two threads reloading at once
+    cannot leave the ``_session``/``_headers`` pair inconsistent, or build two
+    sessions where one was meant.  The lock is held across the rebuild's I/O
+    on purpose — that is exactly the work that must not be duplicated.
     """
     global _session, _headers
 
@@ -230,23 +256,24 @@ def reload_session() -> None:
     except ImportError:
         DaemonProxySession = None  # type: ignore[assignment]
 
-    if DaemonProxySession is not None and isinstance(_session, DaemonProxySession):
-        # Update local headers mirror
-        hdrs = cache_manager.load_headers()
-        _headers = dict(hdrs)
-        _session.headers = dict(hdrs)
-        if hdrs.get("User-Agent"):
-            _session.headers["User-Agent"] = hdrs["User-Agent"]
-        _session._init_cookie_cache()
+    with _session_lock:
+        if DaemonProxySession is not None and isinstance(_session, DaemonProxySession):
+            # Update local headers mirror
+            hdrs = cache_manager.load_headers()
+            _headers = dict(hdrs)
+            _session.headers = dict(hdrs)
+            if hdrs.get("User-Agent"):
+                _session.headers["User-Agent"] = hdrs["User-Agent"]
+            _session._init_cookie_cache()
 
-        _session._send_reload()
-        _session._send_config("captcha_handler", _session.captcha_handler)
-    else:
-        # Direct reload: rebuild the session
-        sess = _build_session()
-        _session = sess
-        _inject_app_headers(sess)
-        try:
-            _headers = dict(sess.headers)
-        except Exception:
-            pass
+            _session._send_reload()
+            _session._send_config("captcha_handler", _session.captcha_handler)
+        else:
+            # Direct reload: rebuild the session
+            sess = _build_session()
+            _session = sess
+            _inject_app_headers(sess)
+            try:
+                _headers = dict(sess.headers)
+            except Exception:
+                pass

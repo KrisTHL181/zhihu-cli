@@ -16,6 +16,8 @@ import hashlib
 import json
 import re
 import sys
+import threading
+from contextlib import nullcontext
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,7 +27,8 @@ from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import get_user_agent
 from zhihu_cli.content.handlers.cache_manager import cache_manager
-from zhihu_cli.content.handlers.captcha import detect_captcha, handle_captcha
+from zhihu_cli.content.handlers.captcha import detect_captcha
+from zhihu_cli.content.handlers.captcha_gate import captcha_gate, resolve_captcha
 
 ZSE93 = "101_3_3.0"
 
@@ -92,6 +95,10 @@ class ZhihuSession(_requests.Session):
         super().__init__(*args, **kwargs)
         self._zse_cipher = None  # lazy init to avoid import-time side effects
         self.captcha_handler: str = "auto"  # "auto", "prompt", or "ignore"
+        # Serialises the pop→request→restore window over the *shared*
+        # ``self.headers`` dict for ``skip_app_headers`` requests (see
+        # ``request``); only those callers ever take it.
+        self._app_headers_lock = threading.Lock()
 
     @property
     def zse_cipher(self):
@@ -145,66 +152,106 @@ class ZhihuSession(_requests.Session):
         return "+".join(parts)
 
     def request(self, method, url, **kwargs):
+        """Send a request, waiting at the captcha gate and handling challenges.
+
+        The gate handles multi-threaded use: while any thread is resolving a
+        captcha, every other thread parks here instead of sending requests
+        Zhihu would only answer with another 403.  The wait is bounded (see
+        :mod:`zhihu_cli.content.handlers.captcha_gate`), so a timed-out thread
+        still sends and simply sees the original 403.
+
+        :param method: HTTP method.
+        :param url: Full request URL.
+        :param kwargs: Same keyword arguments as
+            :meth:`curl_cffi.requests.Session.request`, plus
+            ``skip_app_headers`` (suppress ``x-app-version``/``x-app-za``).
+        :returns: The response, retried once when a captcha was resolved.
+        """
+        captcha_gate.acquire()
         skip_app = kwargs.pop("skip_app_headers", False)
 
         saved_version = None
         saved_za = None
-        if skip_app:
-            saved_version = self.headers.pop("x-app-version", None)
-            saved_za = self.headers.pop("x-app-za", None)
 
-        try:
-            sign_source = self._build_sign_source(method, url, kwargs)
-            if sign_source is not None:
-                md5_hash = hashlib.md5(sign_source.encode()).hexdigest()
-                signature = self.zse_cipher.encrypt(md5_hash)
-
-                zse_headers = {
-                    "x-zse-93": ZSE93,
-                    "x-zse-96": "2.0_" + signature,
-                    "x-requested-with": "fetch",
-                }
-                user_headers = kwargs.get("headers", {})
-                zse_headers.update(user_headers)
-                kwargs["headers"] = zse_headers
-
-            resp = super().request(method, url, **kwargs)
-
-            # Post-response captcha / risk-control handling
-            if self.captcha_handler != "ignore":
-                captcha_error = detect_captcha(resp)
-                if captcha_error is not None:
-                    # Avoid re-entrant handling for captcha-related endpoints
-                    parsed = urlparse(url)
-                    path = parsed.path
-                    if not _is_captcha_endpoint(path):
-                        mode = self.captcha_handler
-                        if mode == "auto":
-                            if _can_prompt_user():
-                                result = handle_captcha(self, captcha_error)
-                                if result == "resolved":
-                                    # Retry the original request once after verification
-                                    resp = super().request(method, url, **kwargs)
-                                # For "skipped" or "cancelled", return the original
-                                # 403 response so the caller can handle it appropriately.
-                            else:
-                                # ``handle_captcha`` prompts through ``input()``. With no
-                                # terminal to read from it would block forever (or die with
-                                # EOFError), and either way it consumes the 403 so the
-                                # caller can no longer tell "captcha" from "this item is
-                                # unavailable". Degrade to the "ignore" behaviour instead:
-                                # hand the raw 403 back and let the caller decide.
-                                _print_non_interactive_captcha_warning(captcha_error)
-                        elif mode == "prompt":
-                            _print_captcha_warning(captcha_error)
-
-            return resp
-        finally:
+        # Taking the app-headers lock for the whole request is the cheap,
+        # obviously-correct way to keep two concurrent ``skip_app_headers``
+        # requests from interleaving their pop/restore on the shared header
+        # dict.  Residual (pre-existing, out of scope) limitation: a request
+        # that does *not* skip the app headers can still observe them missing
+        # while a skip_app request is in flight.
+        with self._app_headers_lock if skip_app else nullcontext():
             if skip_app:
-                if saved_version is not None:
-                    self.headers["x-app-version"] = saved_version
-                if saved_za is not None:
-                    self.headers["x-app-za"] = saved_za
+                saved_version = self.headers.pop("x-app-version", None)
+                saved_za = self.headers.pop("x-app-za", None)
+
+            try:
+                sign_source = self._build_sign_source(method, url, kwargs)
+                if sign_source is not None:
+                    md5_hash = hashlib.md5(sign_source.encode()).hexdigest()
+                    signature = self.zse_cipher.encrypt(md5_hash)
+
+                    zse_headers = {
+                        "x-zse-93": ZSE93,
+                        "x-zse-96": "2.0_" + signature,
+                        "x-requested-with": "fetch",
+                    }
+                    user_headers = kwargs.get("headers", {})
+                    zse_headers.update(user_headers)
+                    kwargs["headers"] = zse_headers
+
+                resp = super().request(method, url, **kwargs)
+
+                # Post-response captcha / risk-control handling
+                if self.captcha_handler != "ignore":
+                    captcha_error = detect_captcha(resp)
+                    if captcha_error is not None:
+                        # Avoid re-entrant handling for captcha-related endpoints
+                        parsed = urlparse(url)
+                        path = parsed.path
+                        if not _is_captcha_endpoint(path):
+                            mode = self.captcha_handler
+                            if mode == "auto":
+                                if not _can_prompt_user():
+                                    # ``handle_captcha`` prompts through ``input()``. With no
+                                    # terminal to read from it would block forever (or die with
+                                    # EOFError), and either way it consumes the 403 so the
+                                    # caller can no longer tell "captcha" from "this item is
+                                    # unavailable". Degrade to the "ignore" behaviour instead:
+                                    # hand the raw 403 back and let the caller decide.
+                                    _print_non_interactive_captcha_warning(captcha_error)
+                                elif captcha_gate.is_resolver():
+                                    # Re-entrant: this request came from the resolver
+                                    # thread's own resolution flow — never prompt twice.
+                                    pass
+                                elif captcha_gate.try_begin():
+                                    try:
+                                        result = resolve_captcha(self, captcha_error)
+                                    finally:
+                                        captcha_gate.finish()
+                                    if result == "resolved":
+                                        # Retry the original request once after
+                                        # verification.  ``super().request`` on purpose:
+                                        # the retry must bypass this block rather than
+                                        # recurse into it.  For "skipped"/"cancelled"
+                                        # the original 403 is returned as-is.
+                                        resp = super().request(method, url, **kwargs)
+                                elif captcha_gate.acquire():
+                                    # Another thread resolved the captcha while we waited
+                                    # at the gate: our own in-flight request is already a
+                                    # stale 403, so re-send it exactly once.
+                                    resp = super().request(method, url, **kwargs)
+                                # On gate timeout, fall through and return the original
+                                # 403 so the caller can decide what to do.
+                            elif mode == "prompt":
+                                _print_captcha_warning(captcha_error)
+
+                return resp
+            finally:
+                if skip_app:
+                    if saved_version is not None:
+                        self.headers["x-app-version"] = saved_version
+                    if saved_za is not None:
+                        self.headers["x-app-za"] = saved_za
 
 
 def _resolve_user_agent(headers: dict[str, str]) -> str:
@@ -295,18 +342,23 @@ def _can_prompt_user() -> bool:
 
 
 _non_interactive_captcha_warned = False
+_non_interactive_captcha_lock = threading.Lock()
 
 
 def _print_non_interactive_captcha_warning(captcha_error: dict) -> None:
     """Warn that a captcha went unhandled because nothing can prompt.
 
     Printed at most once per process — a captcha window lasts many requests and
-    repeating this on every one of them would bury the rest of the output.
+    repeating this on every one of them would bury the rest of the output.  The
+    flag is claimed under a lock (several worker threads can hit a captcha at
+    the same instant); the message itself is printed outside it, so threads
+    never contend on I/O.
     """
     global _non_interactive_captcha_warned
-    if _non_interactive_captcha_warned:
-        return
-    _non_interactive_captcha_warned = True
+    with _non_interactive_captcha_lock:
+        if _non_interactive_captcha_warned:
+            return
+        _non_interactive_captcha_warned = True
 
     redirect = captcha_error.get("redirect", "")
     print(file=sys.stderr)
