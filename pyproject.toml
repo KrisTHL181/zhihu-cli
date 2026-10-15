@@ -74,6 +74,9 @@ notify = [
 mcp = [
     "mcp>=2.0",
 ]
+browser = [
+    "browser-cookie3",
+]
 
 [project.scripts]
 zhihu = "zhihu_cli.main:main"

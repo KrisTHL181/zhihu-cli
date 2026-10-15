@@ -40,6 +40,7 @@ pip install zhihu-toolkit
 ```bash
 zhihu auth paste          # paste a cURL from browser DevTools
 zhihu auth login          # scan a QR code with the Zhihu App
+zhihu auth import         # import the session from a local browser (needs: pip install 'zhihu-toolkit[browser]')
 ```
 
 ### 2. Verify

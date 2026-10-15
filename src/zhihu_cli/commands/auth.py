@@ -1,6 +1,10 @@
 """Auth command group — manage authentication (cURL headers / QR login / captcha)."""
 
+from __future__ import annotations
+
+import json
 import sys
+from pathlib import Path
 
 import click
 
@@ -104,6 +108,128 @@ def register_auth(main_group) -> None:
         active = cache_manager.get_active_profile() or "default"
         success(f"Saved credentials to profile '{active}'")
         reload_session()
+
+    @auth.command("import")
+    @click.option(
+        "--browser", "-b", "browser_name", default=None, help="Browser to read cookies from (default: auto-detect)"
+    )
+    @click.option("--profile", "-p", "profile_name", default=None, help="Save to a named profile")
+    @click.option("--no-verify", is_flag=True, default=False, help="Skip the login check after importing")
+    def auth_import(browser_name: str | None, profile_name: str | None, no_verify: bool) -> None:
+        """Import the Zhihu session from a local browser's cookie store.
+
+        Reads the cookies straight out of a browser you are already logged in
+        to — no DevTools copy-paste like \033[2mauth paste\033[0m and no QR scan like
+        \033[2mauth login\033[0m. Log in to Zhihu once in the browser, then run this.
+
+        Requires the optional extra: \033[2mpip install 'zhihu-toolkit[browser]'\033[0m
+
+        \033[2mExamples:\033[0m
+          zhihu auth import                      # auto-detect the browser
+          zhihu auth import -b firefox           # read Firefox specifically
+          zhihu auth import -p work -b chrome    # save as a named profile
+        """
+        if profile_name:
+            if profile_name.startswith("_"):
+                error("Profile names starting with '_' are reserved for internal use.")
+                raise SystemExit(1)
+            if Path(profile_name).name != profile_name:
+                error("Profile names must be a plain name (no path separators).")
+                raise SystemExit(1)
+
+        from zhihu_cli.content.handlers.browser_cookies import collect_headers
+
+        # Snapshot the current state so a failed login check can be rolled back.
+        # The legacy headers.json counts as pre-existing state: save_headers()
+        # migrates it into a profile, so the migrated profile is not ours to delete.
+        previous_headers = cache_manager.load_headers()
+        previous_active = cache_manager.get_active_profile()
+        pre_existing_profiles = set(cache_manager.list_profiles())
+        legacy_headers_existed = cache_manager.header_file.exists()
+
+        # When the import targets a named profile that already exists, remember what
+        # it held — a failed import must not cost the user those credentials.
+        previous_target: dict[str, str] | None = None
+        if profile_name and profile_name in pre_existing_profiles:
+            target_file = cache_manager.profiles_dir / f"{profile_name}.json"
+            if target_file.exists():
+                previous_target = json.loads(target_file.read_text())
+
+        try:
+            browser, headers = collect_headers(browser_name)
+        except RuntimeError as e:
+            error(f"{e}")
+            raise SystemExit(1)
+
+        cache_manager.save_headers(headers, profile_name=profile_name)
+        reload_session()
+
+        saved = cache_manager.get_active_profile() or "default"
+        cookie_header = headers["Cookie"]
+        count = len(cookie_header.split("; ")) if cookie_header else 0
+        noun = "cookie" if count == 1 else "cookies"
+
+        if no_verify:
+            success(f"Imported {count} {noun} from {browser} into profile '{saved}' (not verified).")
+            return
+
+        # Verify the imported session actually works before keeping it.
+        username = None
+        verified = False
+        try:
+            resp = session.get("https://www.zhihu.com/api/v4/me", timeout=10)
+            if resp.status_code == 200:
+                me = resp.json()
+                username = me.get("name")
+                verified = True
+        except Exception:
+            verified = False
+
+        if verified:
+            as_user = f" as {f_name(username)}" if username else ""
+            success(f"Imported {count} {noun} from {browser} into profile '{saved}'{as_user}.")
+            return
+
+        # Roll back to the pre-import state. Whatever credentials were in use before
+        # always come back; a profile this command created is removed.
+        restored_target = previous_active or saved
+        migrated = legacy_headers_existed and previous_active is None and profile_name is None
+        created = saved not in pre_existing_profiles and not migrated
+        notes: list[str] = []
+
+        try:
+            if profile_name:
+                # The import landed in the named profile, replacing whatever it held.
+                if previous_target is not None:
+                    cache_manager.save_headers(previous_target, profile_name=profile_name)
+                    notes.append(f"profile '{profile_name}' was restored")
+                elif created:
+                    cache_manager.delete_profile(profile_name)
+                    notes.append(f"the new profile '{profile_name}' was removed")
+                if previous_active and previous_active != profile_name:
+                    cache_manager.switch_profile(previous_active)
+                    notes.append(f"profile '{previous_active}' is active again")
+            elif previous_active or legacy_headers_existed:
+                cache_manager.save_headers(previous_headers or {}, profile_name=restored_target)
+                notes.append("the previous credentials were restored")
+            elif created:
+                cache_manager.delete_profile(saved)
+                notes.append("the imported credentials were discarded")
+            else:
+                notes.append(f"profile '{saved}' was left holding the imported credentials")
+        except Exception as exc:
+            notes.append(f"rollback failed: {exc}")
+
+        try:
+            reload_session()
+        except Exception as exc:
+            notes.append(f"session reload failed: {exc}")
+
+        error(
+            f"The Zhihu session in {browser} is stale or not logged in "
+            f"({'; '.join(notes)}). Log in to Zhihu in {browser} and retry, or run 'zhihu auth login'."
+        )
+        raise SystemExit(1)
 
     @auth.command("status")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
