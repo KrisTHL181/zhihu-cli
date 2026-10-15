@@ -11,11 +11,11 @@ tools stay as the escape hatch for anything the typed tools do not cover, though
 The schema has to be derived from a *function signature* — ``MCPServer.add_tool``
 goes through :meth:`Tool.from_function`, which builds it with pydantic's
 ``func_metadata``, and there is no seam for a hand-written ``inputSchema``. So for
-each leaf command a function is ``exec``'d whose parameters are that command's own
-(its arguments, then its options), and the resulting ``Tool`` objects are handed
-to the ``MCPServer`` constructor. Every generated function gets its own globals
-dict holding its own frozen :class:`ToolSpec`, which is what keeps every tool from
-resolving to the last command walked.
+each leaf command a function is built whose ``__signature__`` is that command's own
+parameters (its arguments, then its options), and the resulting ``Tool`` objects are
+handed to the ``MCPServer`` constructor. Each generated body closes over its own
+frozen :class:`ToolSpec`, which is what keeps every tool from resolving to the last
+command walked.
 
 Nothing here imports :mod:`zhihu_cli.mcp.server`: the subprocess plumbing arrives
 by injection as ``invoke``.
@@ -23,6 +23,7 @@ by injection as ``invoke``.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import subprocess
 from dataclasses import dataclass
@@ -58,23 +59,23 @@ EXCLUDED_PATHS: frozenset[tuple[str, ...]] = frozenset(
     }
 )
 
-#: Click type name -> Python type expression. Keyed by the string ``type.name``
+#: Click type name -> Python type object. Keyed by the string ``type.name``
 #: rather than ``isinstance``: click 8.2+ does not export ``IntParamType``,
 #: ``BoolParamType``, or ``FloatParamType``. ``file`` and ``path`` both become
 #: ``str`` — the CLI reads the file itself, in its own process.
-_TYPE_EXPRESSIONS: dict[str, str] = {
-    "text": "str",
-    "boolean": "bool",
-    "integer": "int",
-    "integer range": "int",
-    "float": "float",
-    "path": "str",
-    "file": "str",
+_TYPE_EXPRESSIONS: dict[str, Any] = {
+    "text": str,
+    "boolean": bool,
+    "integer": int,
+    "integer range": int,
+    "float": float,
+    "path": str,
+    "file": str,
 }
 
 #: Used for a click type this module does not know. A string accepts anything,
 #: where guessing a narrower type would reject a legitimate call.
-_FALLBACK_TYPE = "str"
+_FALLBACK_TYPE: Any = str
 
 #: Cap on the CLI's own help text copied into a *required* parameter's schema.
 #: Optional parameters carry no help: the 109 required ones are the ones a model
@@ -83,11 +84,6 @@ _HELP_LIMIT = 100
 
 #: Cap on the one-line summary at the head of a tool's description.
 _DESCRIPTION_LIMIT = 120
-
-#: Name of the global the generated body calls through. Parameter names can never
-#: collide with it: click names never start with an underscore, and the MCP SDK
-#: rejects an underscore-prefixed parameter outright.
-_RUNNER_NAME = "_zhihu_execute"
 
 #: click's "no default was given" sentinel. Click 8.4 defines it as
 #: ``click.core.UNSET`` and does not re-export it at the package root, so it is
@@ -103,7 +99,8 @@ class ParamSpec:
     :param kwarg: the name the model uses in the tool call.
     :param click_name: the name click stores the parsed value under.
     :param is_argument: whether this is a positional argument rather than an option.
-    :param annotation: the Python type expression for the generated signature.
+    :param annotation: the Python type for the generated signature — a real object
+        such as ``str`` or ``list[str] | None``, not source text.
     :param default: the value shown in the schema; ``None`` when the parameter is
         required. This is the *exposed* default, so click's "no default given"
         sentinel is normalized to ``None``.
@@ -119,7 +116,7 @@ class ParamSpec:
     kwarg: str
     click_name: str
     is_argument: bool
-    annotation: str
+    annotation: Any
     default: Any = None
     required: bool = False
     is_flag: bool = False
@@ -132,7 +129,7 @@ class ParamSpec:
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """Everything one generated tool needs, frozen so an ``exec``'d body can bind it.
+    """Everything one generated tool needs, frozen so a generated body can close over it.
 
     :param path: the command path as it is spelled on the command line, e.g.
         ``("config", "app-version", "set")`` — hyphens intact, since this is what
@@ -303,16 +300,16 @@ def _param_spec(param: click.Parameter, kwarg: str) -> ParamSpec:
     variadic = is_argument and param.nargs == -1
     multiple = bool(getattr(param, "multiple", False))
 
-    annotation = _type_expression(param)
+    annotation = _annotation_for(param)
     if multiple or variadic:
-        annotation = f"list[{annotation}]"
+        annotation = list[annotation]
 
     raw_default = param.default
     if param.required:
         default: Any = None
     elif _is_unset(raw_default) or raw_default is None:
         default = None
-        annotation = f"{annotation} | None"
+        annotation = annotation | None
     elif multiple:
         default = list(raw_default)
     else:
@@ -344,17 +341,17 @@ def _param_spec(param: click.Parameter, kwarg: str) -> ParamSpec:
     )
 
 
-def _type_expression(param: click.Parameter) -> str:
-    """Render the Python type expression for a click parameter.
+def _annotation_for(param: click.Parameter) -> Any:
+    """Resolve the Python type for a click parameter.
 
     A ``click.Choice`` becomes a ``Literal``, which is what makes pydantic publish
     an ``enum`` instead of a bare string.
 
     :param param: the click parameter.
-    :returns: the type expression, as source text.
+    :returns: the type object, ready to sit in a signature.
     """
     if isinstance(param.type, click.Choice):
-        return "Literal[" + ", ".join(repr(str(choice)) for choice in param.type.choices) + "]"
+        return Literal[tuple(str(choice) for choice in param.type.choices)]
     return _TYPE_EXPRESSIONS.get(getattr(param.type, "name", ""), _FALLBACK_TYPE)
 
 
@@ -427,7 +424,7 @@ def _build_tool(
     :returns: the tool, or ``None`` if building it failed.
     """
     try:
-        fn = _compile(spec, _make_runner(spec, invoke))
+        fn = _build_function(spec, _make_runner(spec, invoke))
         tool = Tool.from_function(fn, name=spec.name, description=spec.description)
     except Exception:
         logger.warning(
@@ -443,42 +440,40 @@ def _build_tool(
     return tool
 
 
-def _compile(spec: ToolSpec, runner: Callable[..., str]) -> Callable[..., str]:
+def _build_function(spec: ToolSpec, runner: Callable[..., str]) -> Callable[..., str]:
     """Build the function whose signature becomes the tool's JSON Schema.
 
+    Required parameters come first: Python does not allow a defaulted parameter
+    before a bare one, and click is free to declare them in any order. Everything is
+    passed by keyword, so the reordering is invisible to the body. Both
+    ``__signature__`` and ``__annotations__`` are set: pydantic reads
+    ``inspect.signature``, while the SDK's ``Context`` / ``Resolve(...)`` scan goes
+    through ``typing.get_type_hints`` and sees only ``__annotations__``. Both hold
+    real type objects, so neither reader evaluates source text.
+
     :param spec: the command to expose.
-    :param runner: the callable bound as the generated function's ``_RUNNER_NAME`` global.
+    :param runner: the callable the generated body closes over.
     :returns: the generated function.
     """
-    namespace: dict[str, Any] = {_RUNNER_NAME: runner, "Literal": Literal, "__name__": spec.name}
-    source = _source(spec)
-    exec(compile(source, f"<zhihu-mcp:{spec.name}>", "exec"), namespace)
-    return namespace[spec.name]
-
-
-def _source(spec: ToolSpec) -> str:
-    """Render the source of one generated tool function.
-
-    Required parameters come first: Python does not allow a defaulted parameter
-    before a bare one, and click is free to declare them in any order. Everything
-    is passed by keyword, so the reordering is invisible to the body.
-
-    :param spec: the command to expose.
-    :returns: source defining exactly one function.
-    """
     ordered = sorted(spec.params, key=lambda param: not param.required)
-    declared = [
-        f"{param.kwarg}: {param.annotation}"
-        if param.required
-        else f"{param.kwarg}: {param.annotation} = {param.default!r}"
+    parameters = [
+        inspect.Parameter(
+            param.kwarg,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            annotation=param.annotation,
+            default=inspect.Parameter.empty if param.required else param.default,
+        )
         for param in ordered
     ]
-    forwarded = ", ".join(f"{param.kwarg}={param.kwarg}" for param in spec.params)
-    return (
-        f"def {spec.name}({', '.join(declared)}) -> str:\n"
-        f"    {spec.description!r}\n"
-        f"    return {_RUNNER_NAME}({forwarded})\n"
-    )
+
+    def body(**values: Any) -> str:
+        return runner(**values)
+
+    body.__name__ = spec.name
+    body.__doc__ = spec.description
+    body.__signature__ = inspect.Signature(parameters, return_annotation=str)
+    body.__annotations__ = {param.kwarg: param.annotation for param in ordered} | {"return": str}
+    return body
 
 
 def _make_runner(
