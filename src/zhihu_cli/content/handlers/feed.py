@@ -128,21 +128,33 @@ def _parse_feed_items(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
             yield parsed
 
 
-def stream_recommend_feed(limit: int = PAGE_SIZE, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+# Both feed endpoints ignore ``limit`` and return a fixed handful of items per
+# page (the recommend feed measures at ~5-6). Use ``max_pages`` to bound a walk —
+# ``max_items=pages * PAGE_SIZE`` overshoots by roughly the ratio between the two.
+def stream_recommend_feed(
+    limit: int = PAGE_SIZE, max_items: int | None = None, max_pages: int | None = None
+) -> Iterable[dict[str, Any]]:
     url = "https://www.zhihu.com/api/v3/feed/topstory/recommend?desktop=true"
-    return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items)
+    return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items, max_pages=max_pages)
 
 
-def stream_follow_feed(limit: int = PAGE_SIZE, max_items: int | None = None) -> Iterable[dict[str, Any]]:
+def stream_follow_feed(
+    limit: int = PAGE_SIZE, max_items: int | None = None, max_pages: int | None = None
+) -> Iterable[dict[str, Any]]:
     url = "https://www.zhihu.com/api/v3/moments?desktop=true"
-    return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items)
+    return stream_handler(url, _parse_feed_items, limit=limit, max_items=max_items, max_pages=max_pages)
 
 
 def fetch_feed(
-    feed_type: str = "recommend", limit: int = PAGE_SIZE, max_items: int | None = None
+    feed_type: str = "recommend",
+    limit: int = PAGE_SIZE,
+    max_items: int | None = None,
+    max_pages: int | None = None,
 ) -> list[dict[str, Any]]:
     stream = (
-        stream_recommend_feed(limit, max_items) if feed_type == "recommend" else stream_follow_feed(limit, max_items)
+        stream_recommend_feed(limit, max_items, max_pages)
+        if feed_type == "recommend"
+        else stream_follow_feed(limit, max_items, max_pages)
     )
     return list(stream)
 

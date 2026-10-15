@@ -16,6 +16,11 @@ PAGE_SIZE: int = 20
 Page size is an API-level detail, not a user-facing knob: the CLI exposes only
 ``-n/--max`` (a cap on the *total* number of items).  This module owns the
 value so every handler paginates identically.
+
+It is a *request*, not a guarantee — several endpoints cap their own page size
+and ignore ``limit`` entirely (the recommend/moments feeds return ~5-6 items
+per page).  Anything that needs a page count should bound the walk with
+``max_pages`` rather than dividing an item budget by this number.
 """
 
 
@@ -56,8 +61,8 @@ class PageStream(Iterator[Any]):
     :ivar totals: Total number of items reported by the API, or ``None`` when the
         API never reported a (non-zero) total.
     :ivar yielded: Number of items produced so far.
-    :ivar truncated: Whether pagination stopped early because ``max_items`` was
-        reached.
+    :ivar truncated: Whether pagination stopped early because ``max_items`` or
+        ``max_pages`` was reached.
     """
 
     def __init__(self, source: Iterator[Any], stats: _StreamStats) -> None:
@@ -102,7 +107,7 @@ class PageStream(Iterator[Any]):
 
     @property
     def truncated(self) -> bool:
-        """Whether the stream stopped early because ``max_items`` was reached."""
+        """Whether the stream stopped early because ``max_items`` or ``max_pages`` was reached."""
         return self._stats.truncated
 
 
@@ -113,6 +118,7 @@ def _paginate(
     delay: float,
     limit: int | None,
     max_items: int | None,
+    max_pages: int | None,
     skip_app_headers: bool,
     stats: _StreamStats,
 ) -> Iterator[Any]:
@@ -123,12 +129,21 @@ def _paginate(
 
     api_totals = 0
     yielded_count = 0
+    pages_fetched = 0
     stopped_by_limit = False
 
     while current_url and (max_items is None or yielded_count < max_items):
+        if max_pages is not None and pages_fetched >= max_pages:
+            # Capping by page count is still an intentional early stop, so it must
+            # set ``truncated`` — otherwise the incomplete-stream warning fires on
+            # a stream that ended exactly where it was asked to.
+            stats.truncated = True
+            break
+
         resp = session.get(current_url, skip_app_headers=skip_app_headers)
         resp.raise_for_status()
         data = resp.json()
+        pages_fetched += 1
 
         paging_raw = data.get("paging", {})
         # Some endpoints (e.g. next-content-render) return paging as a
@@ -178,6 +193,7 @@ def stream_handler(
     delay: float = 1.0,
     limit: int | None = None,
     max_items: int | None = None,
+    max_pages: int | None = None,
     skip_app_headers: bool = False,
 ) -> PageStream:
     """Paginate a Zhihu API endpoint, yielding parsed items one by one.
@@ -193,6 +209,12 @@ def stream_handler(
     :param max_items: Optional cap on the total number of items yielded.  When
         reached, pagination stops early without issuing the incomplete-stream
         warning.
+    :param max_pages: Optional cap on the number of *pages fetched*.  Prefer this
+        over ``max_items`` when the caller means "N pages": endpoints do not
+        necessarily honour ``limit`` (the recommend feed returns ~5-6 items per
+        page however large ``limit`` is), so multiplying a page count by a
+        nominal page size silently over-fetches several times over.  Reaching the
+        cap sets ``truncated``, like ``max_items`` does.
     :param skip_app_headers: When :data:`True`, omit the ``x-app-za`` /
         ``x-app-version`` app-identity headers.  Needed for endpoints
         (e.g. the articles list) that return 500 when ``x-app-za`` is
@@ -208,6 +230,7 @@ def stream_handler(
         delay,
         limit,
         max_items,
+        max_pages,
         skip_app_headers,
         stats,
     )
