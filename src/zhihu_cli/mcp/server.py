@@ -1,17 +1,27 @@
 """MCP server bridging the ``zhihu`` CLI to AI agents.
 
-Rather than reimplementing each command group as a typed MCP tool, this server
-exposes the CLI itself through two tools:
+Every leaf command of the CLI is exposed as its own typed MCP tool, generated from
+the Click command tree at startup by :mod:`zhihu_cli.mcp.generate`. The model sees
+real parameter names, types, defaults, and enums rather than having to spell a
+command line from memory. The commands that can never work over MCP — the
+full-screen TUIs under ``chat`` and ``interact``, and the endless streams such as
+``chat bot`` and ``tools loop`` — are excluded by name; see
+:data:`zhihu_cli.mcp.generate.EXCLUDED_PATHS`.
+
+Two hand-written tools remain as an escape hatch:
 
 * :func:`zhihu_help` — walks the command tree via ``--help`` so the model can
-  discover commands and options at runtime.
-* :func:`zhihu_run` — executes any command and returns its output.
+  discover details the generated schema does not carry.
+* :func:`zhihu_run` — executes an arbitrary command line, for anything the typed
+  tools do not cover.
 
 Commands run as subprocesses, which keeps the heavy imports (``curl_cffi``,
-``lxml``) and any crash outside this process. Interactive commands are not
-listed by hand: every command is run under a timeout, and one that opens a
-full-screen TUI or streams indefinitely is killed and reported back to the
-model as such — see :func:`_looks_like_tui`.
+``lxml``) and any crash outside this process. Nothing here bounds how long a
+command may run: how long to wait is the MCP client's decision, and this server
+never kills a call of its own accord. The one case it must refuse rather than run
+is a command that can never finish at all — a full-screen terminal UI would hang
+until the client abandoned the call — so :func:`zhihu_run` rejects an excluded
+path *before* spawning anything; see :func:`_excluded_path`.
 
 Run over stdio, then register it with an MCP client::
 
@@ -28,51 +38,37 @@ import sys
 from pathlib import Path
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
-# ── tuning ─────────────────────────────────────────────────────────────────
+from zhihu_cli.mcp.generate import EXCLUDED_PATHS, generate_tools
 
-#: Default ceiling for a single command, in seconds.
-DEFAULT_TIMEOUT = 120
-
-#: Longer ceilings for command paths that legitimately take minutes (batch
-#: scraping, media downloads, analytics over a whole library). Matched by prefix.
-SLOW_TIMEOUTS: dict[tuple[str, ...], int] = {
-    ("scrape",): 900,
-    ("download",): 900,
-    ("tools",): 600,
-}
-
-#: Terminal control sequences a TUI emits when it takes over the screen. Textual
-#: enters the alternate screen buffer on mount, which is what these select. Their
-#: presence in the captured stderr identifies a full-screen TUI without needing a
-#: hand-maintained list of which commands are interactive.
-_TUI_MARKERS = ("\x1b[?1049h", "\x1b[?47h")
+# ── instructions ───────────────────────────────────────────────────────────
 
 _INSTRUCTIONS = """\
-Wraps the `zhihu` CLI (Zhihu scraping, publishing, and analysis).
+Wraps the `zhihu` CLI (Zhihu scraping, publishing, and analysis) as one typed tool
+per command: `zhihu_search_question`, `zhihu_browse_following_users`,
+`zhihu_publish_article`, and so on. A tool's name is its command path with `_` for
+every space and hyphen, so `zhihu browse following users` is
+`zhihu_browse_following_users`.
 
-Workflow:
-1. Call `zhihu_help` with no arguments to see the command groups.
-2. Call `zhihu_help` again with a command path (e.g. "search question") to see
-   that command's options.
-3. Call `zhihu_run` with the assembled command line.
+Prefer the typed tools. Each one names its own arguments, types, and allowed
+values, and its description ends with the exact command line it maps to. Most read
+commands take a `json` argument — set it to `true` for parseable output instead of
+styled text.
 
-Always append `--json` when the subcommand supports it — nearly every read
-command does, and it yields parseable output instead of styled text:
-`zhihu_run('search question "rust 异步" --json')`. Commands that do not support
-`--json` (publish, config, convert) return plain text.
+Two escape hatches remain:
+- `zhihu_help(path)` prints the CLI's own `--help` for any command path, for
+  detail the typed schema does not carry.
+- `zhihu_run(args)` runs an arbitrary command line, for anything the typed tools do
+  not cover.
 
-Every command runs under a timeout (120s, longer for scrape/download/tools). If
-one is killed for exceeding it, read the error: when it reports a full-screen
-terminal UI the command can never work over MCP, so do not retry it — ask the
-user to run it in their own terminal. When the error is ambiguous, the command
-may just be slow, and a larger `timeout_seconds` is worth trying once.
+How long a command may run is the client's decision, not this server's: a call
+returns when the command finishes. Some commands can never finish over MCP — the
+full-screen TUIs (`chat interactive`, `interact comment interactive`) and the endless
+streams (`chat bot`, `listen messages`, `listen notifications`, `tools loop`). Those
+are refused before they run, so do not retry them; ask the user to run one in their
+own terminal instead.
 """
-
-mcp = MCPServer(
-    name="zhihu",
-    instructions=_INSTRUCTIONS,
-)
 
 
 # ── launcher resolution ────────────────────────────────────────────────────
@@ -99,13 +95,14 @@ def _launcher() -> list[str]:
 # ── invocation helpers ─────────────────────────────────────────────────────
 
 
-def _invoke(tokens: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+def _invoke(tokens: list[str]) -> subprocess.CompletedProcess[str]:
     """Run the CLI with ``tokens`` and capture its output.
 
+    Nothing here bounds how long the command may run: it returns when it exits, and
+    deciding when to give up on it is the client's call, not this server's.
+
     :param tokens: CLI arguments, already split.
-    :param timeout: seconds to wait before killing the process.
     :returns: the completed process.
-    :raises subprocess.TimeoutExpired: if the command outlives ``timeout``.
     """
     env = {
         **os.environ,
@@ -117,75 +114,51 @@ def _invoke(tokens: list[str], timeout: int) -> subprocess.CompletedProcess[str]
         [*_launcher(), *tokens],
         capture_output=True,
         text=True,
-        timeout=timeout,
         env=env,
+        # This process's own stdin is the JSON-RPC pipe when serving over stdio, so
+        # the child is given /dev/null rather than a handle onto the protocol stream.
+        stdin=subprocess.DEVNULL,
     )
 
 
-def _decode(raw: str | bytes | None) -> str:
-    """Normalize possibly-binary captured output to text.
+def _excluded_path(tokens: list[str]) -> tuple[str, ...] | None:
+    """Find the excluded command path ``tokens`` starts with, if any.
 
-    :param raw: stdout/stderr captured by :func:`_invoke`, or ``None``.
-    :returns: the decoded text, empty when ``raw`` is ``None``.
-    """
-    if isinstance(raw, bytes):
-        return raw.decode("utf-8", "replace")
-    return raw or ""
+    Nothing kills a subprocess, so a command that opens a full-screen terminal UI —
+    or streams until interrupted — would hang until the client abandoned the call.
+    Refusing it up front is the only cheap answer, and it costs no subprocess.
 
-
-def _looks_like_tui(stderr: str) -> bool:
-    """Report whether a killed command had taken over the terminal.
-
-    Textual renders its full UI even when stdout is a pipe, so a TUI cannot be
-    detected up front — but its escape sequences land in the captured stderr,
-    which distinguishes it from a command that was merely slow.
-
-    :param stderr: stderr captured before the command was killed.
-    :returns: ``True`` if the command opened a full-screen terminal UI.
-    """
-    return any(marker in stderr for marker in _TUI_MARKERS)
-
-
-def _killed_reason(tokens: list[str], exc: subprocess.TimeoutExpired, timeout: int) -> str:
-    """Explain why a command was killed for exceeding its timeout.
-
-    A full-screen TUI is a dead end that retrying cannot fix, so it is called
-    out explicitly; anything else is reported as ambiguous, since a command that
-    is merely slow may well succeed with a larger budget.
+    The match is a plain comparison of the leading tokens against each excluded
+    path, so an option that trails the path (``chat interactive --foo``) still
+    matches, while one that precedes it (``--profile x chat interactive``) does not.
+    That is the intended trade: these commands are reached by their bare path, and
+    the generated tools cannot hit this at all, since those paths are never
+    generated.
 
     :param tokens: CLI arguments, already split.
-    :param exc: the exception raised by :func:`_invoke`.
-    :param timeout: the timeout that expired, in seconds.
-    :returns: a message fragment to append to the error.
+    :returns: the excluded path that was asked for, or ``None``.
     """
-    if _looks_like_tui(_decode(exc.stderr)):
-        return (
-            ". This command opened a full-screen terminal UI, which can never complete "
-            "when driven over MCP — do not retry it, ask the user to run it in their own "
-            "terminal instead."
-        )
-    return (
-        f". It may be an interactive command waiting for input, or one that streams "
-        f"indefinitely, or simply one that needs more than {timeout}s. Check its help "
-        f"with zhihu_help first; if it looks interactive, ask the user to run it in "
-        f"their own terminal rather than retrying with a longer timeout."
-    )
+    for path in EXCLUDED_PATHS:
+        if tuple(tokens[: len(path)]) == path:
+            return path
+    return None
 
 
-def _timeout_for(tokens: list[str]) -> int:
-    """Pick a timeout for the given command.
+# ── server ─────────────────────────────────────────────────────────────────
 
-    :param tokens: CLI arguments, already split.
-    :returns: timeout in seconds.
-    """
-    path = tuple(t for t in tokens if not t.startswith("-"))
-    for prefix, seconds in SLOW_TIMEOUTS.items():
-        if path[: len(prefix)] == prefix:
-            return seconds
-    return DEFAULT_TIMEOUT
+# One typed tool per leaf command, generated from the Click tree here rather than
+# registered afterwards: `MCPServer.add_tool` derives the JSON Schema from a
+# function signature, so the tools have to be built before the constructor runs.
+# Generation is best-effort — a CLI that cannot be imported costs the typed tools,
+# not the server.
+mcp = MCPServer(
+    name="zhihu",
+    instructions=_INSTRUCTIONS,
+    tools=generate_tools(invoke=_invoke),
+)
 
 
-# ── tools ──────────────────────────────────────────────────────────────────
+# ── hand-written escape hatches ────────────────────────────────────────────
 
 
 @mcp.tool()
@@ -197,25 +170,20 @@ def zhihu_help(path: str = "") -> str:
     :param path: space-separated command path, e.g. ``"search"`` or
         ``"search question"``. Empty for the top level.
     :returns: the CLI's help text.
+    :raises ToolError: if the command exits non-zero. Only ``ToolError`` carries
+        its message to the client: the SDK turns any other exception into a generic
+        ``UnexpectedToolError`` and discards the text.
     """
     tokens = shlex.split(path)
     command = f"zhihu {' '.join(tokens)} --help".strip()
-    try:
-        proc = _invoke([*tokens, "--help"], DEFAULT_TIMEOUT)
-    except subprocess.TimeoutExpired as exc:
-        raise ValueError(
-            f"`{command}` timed out after {DEFAULT_TIMEOUT}s" + _killed_reason(tokens, exc, DEFAULT_TIMEOUT)
-        ) from None
+    proc = _invoke([*tokens, "--help"])
     if proc.returncode != 0:
-        raise ValueError(
-            f"`zhihu {' '.join(tokens)} --help` exited with code {proc.returncode}.\n"
-            f"{proc.stderr.strip() or '(no stderr)'}"
-        )
+        raise ToolError(f"`{command}` exited with code {proc.returncode}.\n{proc.stderr.strip() or '(no stderr)'}")
     return proc.stdout
 
 
 @mcp.tool()
-def zhihu_run(args: str, timeout_seconds: int | None = None) -> str:
+def zhihu_run(args: str) -> str:
     """Run a zhihu CLI command and return its output.
 
     Always add ``--json`` when the subcommand supports it — most read commands
@@ -227,27 +195,28 @@ def zhihu_run(args: str, timeout_seconds: int | None = None) -> str:
 
     :param args: the command line to run, without the leading ``zhihu``. Quote
         arguments that contain spaces.
-    :param timeout_seconds: override the default timeout (120s, longer for
-        scrape/download/tools). Only raise it when a command legitimately needs
-        more time.
     :returns: the command's stdout.
-    :raises ValueError: if the command times out or exits non-zero.
+    :raises ToolError: if no command is given, if the command is one that can never
+        finish over MCP (a full-screen terminal UI or an endless stream), or if it
+        exits non-zero. Only ``ToolError`` carries its message to the client, where
+        any other exception is reported as a bare ``UnexpectedToolError``.
     """
     tokens = shlex.split(args)
     if not tokens:
-        raise ValueError("No command given. Call zhihu_help() to discover commands.")
+        raise ToolError("No command given. Call zhihu_help() to discover commands.")
 
-    timeout = timeout_seconds or _timeout_for(tokens)
+    blocked = _excluded_path(tokens)
+    if blocked is not None:
+        raise ToolError(
+            f"`zhihu {' '.join(blocked)}` opens a full-screen terminal UI (or streams until "
+            f"interrupted) and can never run over MCP: nothing here can display it or stop it, "
+            f"so the call would hang until it was abandoned. Nothing was run — ask the user to "
+            f"run it in their own terminal instead."
+        )
 
-    try:
-        proc = _invoke(tokens, timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise ValueError(
-            f"`zhihu {' '.join(tokens)}` was killed after {timeout}s{_killed_reason(tokens, exc, timeout)}"
-        ) from None
-
+    proc = _invoke(tokens)
     if proc.returncode != 0:
-        raise ValueError(
+        raise ToolError(
             f"`zhihu {' '.join(tokens)}` exited with code {proc.returncode}.\n{proc.stderr.strip() or '(no stderr)'}"
         )
 

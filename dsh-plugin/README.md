@@ -86,11 +86,14 @@ plugin_manager   action=remove_bundle   target=@kristhl181/dsh-plugin-zhihu
 - **Read commands take `--json`.** The agent is instructed to use it, so results come back
   parseable instead of as styled terminal text. `publish`, `config`, and `convert` print
   plain text and are passed through as-is.
-- **Long jobs are allowed to finish.** Scrape and download get up to 15 minutes, analysis
-  tools 10, everything else 2 — the same ceilings the CLI applies to itself.
-- **Full-screen terminal UIs cannot work here.** `browse`, interactive `chat`, and
-  `listen` take over the screen. The server notices and asks you to run them yourself
-  rather than retrying them.
+- **No deadline is imposed here.** A command runs until it finishes; how long to wait
+  before giving up is the MCP client's decision, not the server's. Nothing is killed
+  mid-run.
+- **Commands that can never finish are refused before they run.** `chat interactive`
+  and `interact comment interactive` take over the screen; `listen messages`,
+  `listen notifications`, `chat bot`, and `tools loop` stream until interrupted. None
+  can finish over MCP, so the server rejects those paths up front and asks you to run
+  them yourself rather than retrying them.
 - **Nothing is sandboxed.** Every command group is reachable, so `publish`, `interact`,
   `chat`, and `agora` are as available as reads. If you want the agent kept read-only, the
   Harness tool-approval and permission settings are the right place to enforce that.
