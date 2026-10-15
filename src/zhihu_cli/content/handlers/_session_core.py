@@ -180,12 +180,21 @@ class ZhihuSession(_requests.Session):
                     if not _is_captcha_endpoint(path):
                         mode = self.captcha_handler
                         if mode == "auto":
-                            result = handle_captcha(self, captcha_error)
-                            if result == "resolved":
-                                # Retry the original request once after verification
-                                resp = super().request(method, url, **kwargs)
-                            # For "skipped" or "cancelled", return the original
-                            # 403 response so the caller can handle it appropriately.
+                            if _can_prompt_user():
+                                result = handle_captcha(self, captcha_error)
+                                if result == "resolved":
+                                    # Retry the original request once after verification
+                                    resp = super().request(method, url, **kwargs)
+                                # For "skipped" or "cancelled", return the original
+                                # 403 response so the caller can handle it appropriately.
+                            else:
+                                # ``handle_captcha`` prompts through ``input()``. With no
+                                # terminal to read from it would block forever (or die with
+                                # EOFError), and either way it consumes the 403 so the
+                                # caller can no longer tell "captcha" from "this item is
+                                # unavailable". Degrade to the "ignore" behaviour instead:
+                                # hand the raw 403 back and let the caller decide.
+                                _print_non_interactive_captcha_warning(captcha_error)
                         elif mode == "prompt":
                             _print_captcha_warning(captcha_error)
 
@@ -265,6 +274,48 @@ def _print_captcha_warning(captcha_error: dict) -> None:
     redirect = captcha_error.get("redirect", "")
     print(file=sys.stderr)
     print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)", file=sys.stderr)
+    if redirect:
+        print(f"  Verify at: {redirect}", file=sys.stderr)
+    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
+    print(file=sys.stderr)
+
+
+def _can_prompt_user() -> bool:
+    """Whether an interactive captcha prompt could actually reach a user.
+
+    Both a readable stdin and a visible stderr are required: ``handle_captcha``
+    reads a choice from stdin and prints instructions to stderr. Under cron,
+    ``nohup``, or a redirected pipeline neither is a terminal, and prompting
+    would block forever instead of telling anyone anything.
+    """
+    try:
+        return sys.stdin.isatty() and sys.stderr.isatty()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_non_interactive_captcha_warned = False
+
+
+def _print_non_interactive_captcha_warning(captcha_error: dict) -> None:
+    """Warn that a captcha went unhandled because nothing can prompt.
+
+    Printed at most once per process — a captcha window lasts many requests and
+    repeating this on every one of them would bury the rest of the output.
+    """
+    global _non_interactive_captcha_warned
+    if _non_interactive_captcha_warned:
+        return
+    _non_interactive_captcha_warned = True
+
+    redirect = captcha_error.get("redirect", "")
+    print(file=sys.stderr)
+    print(
+        "  ⚠️  Zhihu risk control triggered, but this process has no terminal to "
+        "prompt on.\n"
+        "      Leaving the 403 unhandled so the caller can stop and report it.",
+        file=sys.stderr,
+    )
     if redirect:
         print(f"  Verify at: {redirect}", file=sys.stderr)
     print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
