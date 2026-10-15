@@ -153,11 +153,18 @@ class CacheManager:
 
     @make_thread_safe
     def delete_profile(self, name: str) -> None:
+        """Delete a profile, clearing the active pointer if it named this one.
+
+        :param name: The profile to delete. Missing profiles are a no-op.
+        """
+        # Read the active pointer BEFORE unlinking: get_active_profile() verifies
+        # the profile file exists, so calling it after the unlink would report
+        # None and leave the pointer dangling at a profile that is now gone.
+        active = self.get_active_profile()
         path = self._resolve_profile_path(name)
         if path.exists():
             path.unlink()
-        active = self.get_active_profile()
-        if active == name:
+        if active is not None and self._resolve_profile_path(active) == path:
             if self.active_profile_file.exists():
                 self.active_profile_file.unlink()
 
