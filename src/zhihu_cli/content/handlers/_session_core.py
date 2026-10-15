@@ -199,6 +199,15 @@ class ZhihuSession(_requests.Session):
                     zse_headers.update(user_headers)
                     kwargs["headers"] = zse_headers
 
+                # Read the gate's resolution counter immediately before the
+                # send — deliberately not at request entry.  A resolution that
+                # completed *before* this send already applies to the request
+                # (post-resolution cookies went out with it), so a 403 on it is
+                # a genuine new challenge and must still prompt; only a
+                # resolution that completes *after* the send leaves us holding
+                # a stale 403.
+                epoch_at_send = captcha_gate.epoch
+
                 resp = super().request(method, url, **kwargs)
 
                 # Post-response captcha / risk-control handling
@@ -223,6 +232,16 @@ class ZhihuSession(_requests.Session):
                                     # Re-entrant: this request came from the resolver
                                     # thread's own resolution flow — never prompt twice.
                                     pass
+                                elif captcha_gate.epoch != epoch_at_send:
+                                    # A resolution completed while our request was in
+                                    # flight, so this 403 was produced before it and is
+                                    # stale.  We never parked at the gate, so the wait
+                                    # branch below cannot see us: without this the
+                                    # thread would become a *second* resolver and prompt
+                                    # the user for a challenge that was just answered.
+                                    # Re-send once through ``super().request`` (bypassing
+                                    # this block) so a second captcha cannot recurse.
+                                    resp = super().request(method, url, **kwargs)
                                 elif captcha_gate.try_begin():
                                     try:
                                         result = resolve_captcha(self, captcha_error)

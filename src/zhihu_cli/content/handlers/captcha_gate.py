@@ -18,7 +18,11 @@ The gate turns that into "pause everything, prompt exactly once, resume":
   becomes the resolver; it runs the interactive flow while the gate is active.
 * When it finishes, :meth:`CaptchaGate.finish` clears the gate and wakes every
   parked thread.  A thread whose own request had already been 403'd re-sends
-  that request once; a thread that had not sent yet simply proceeds.
+  that request once; a thread that had not sent yet simply proceeds.  A thread
+  that never parked — its request was still in flight when the resolution
+  completed — detects the stale 403 through :attr:`CaptchaGate.epoch` and
+  re-sends once too, instead of prompting the user for the same challenge a
+  second time.
 * The gate is **re-entrant for the resolver thread**: ``handle_captcha``
   issues nested requests on the same session (the appeal API, then the
   unhuman URL to harvest the post-challenge cookies), and those must not
@@ -90,10 +94,10 @@ class CaptchaGate:
     """A one-resolver-at-a-time gate shared by every session in the process.
 
     The gate is a single :class:`threading.Condition` plus the id of the
-    thread currently resolving.  The condition is only ever held for short,
-    lock-free state transitions — never across I/O or the interactive prompt,
-    which is why :meth:`acquire` can be called from the hot path of every
-    request.
+    thread currently resolving, plus :attr:`epoch` — a counter of completed
+    resolutions.  The condition is only ever held for short, lock-free state
+    transitions — never across I/O or the interactive prompt, which is why
+    :meth:`acquire` can be called from the hot path of every request.
 
     :param timeout: Default wait timeout in seconds for :meth:`acquire`, or
         ``None`` to follow ``ZHIHU_CAPTCHA_TIMEOUT`` /
@@ -103,6 +107,7 @@ class CaptchaGate:
     def __init__(self, timeout: float | None = None) -> None:
         self._cond = threading.Condition()
         self._resolver_tid: int | None = None
+        self._epoch = 0
         self._timeout = timeout
 
     @property
@@ -110,6 +115,26 @@ class CaptchaGate:
         """Whether a resolution is currently in progress (diagnostics/tests)."""
         with self._cond:
             return self._resolver_tid is not None
+
+    @property
+    def epoch(self) -> int:
+        """Count of resolutions that have completed since process start.
+
+        A caller reads this *immediately before* sending a request and compares
+        the value again when that request comes back as a captcha: if it moved,
+        a resolution finished while this request was in flight, so the 403 is
+        stale (it was produced with the pre-resolution cookies) and must be
+        re-sent rather than raised — and, crucially, rather than prompting for
+        a challenge the user has already answered.
+
+        Reading it *before* the send (never at request entry) is what keeps a
+        genuine new challenge promptable: a resolution that completed before
+        the send already applies to the request, so its 403 is real.
+
+        :returns: The number of completed resolutions.
+        """
+        with self._cond:
+            return self._epoch
 
     def is_resolver(self) -> bool:
         """Whether the calling thread is the current resolver.
@@ -175,12 +200,18 @@ class CaptchaGate:
         """Mark the resolution done and wake every parked thread.
 
         A no-op when called by a thread that does not own the gate (or when
-        the gate is disabled), so it is always safe to put in a ``finally``.
+        the gate is disabled — :meth:`try_begin` never claims ownership then,
+        so the ownership check below fails and :attr:`epoch` stays put), so it
+        is always safe to put in a ``finally``.
         """
         with self._cond:
             if self._resolver_tid != threading.get_ident():
                 return
             self._resolver_tid = None
+            # Only a genuine release counts as a completed resolution: this is
+            # what tells an in-flight request that its 403 predates a
+            # resolution (see ``epoch``).
+            self._epoch += 1
             self._cond.notify_all()
 
 

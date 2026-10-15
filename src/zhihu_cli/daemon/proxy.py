@@ -459,6 +459,13 @@ class DaemonProxySession:
 
         msg = self._build_request_msg(method, url, kwargs)
 
+        # Read the gate's resolution counter immediately before the send —
+        # deliberately not at request entry.  A resolution that completed
+        # *before* this send already applies to the request, so a captcha
+        # reply on it is a genuine new challenge and must still prompt; only
+        # one that completes *after* the send makes the reply stale.
+        epoch_at_send = captcha_gate.epoch
+
         try:
             resp_data = self._send_recv(msg)
         except DaemonNotRunningError:
@@ -466,7 +473,7 @@ class DaemonProxySession:
         except (ConnectionError, OSError, json.JSONDecodeError) as e:
             raise DaemonConnectionError(f"IPC error: {e}") from e
 
-        return self._process_response(resp_data, method, url, kwargs)
+        return self._process_response(resp_data, method, url, kwargs, epoch_at_send=epoch_at_send)
 
     # ── internal helpers ───────────────────────────────────────────────
 
@@ -506,6 +513,7 @@ class DaemonProxySession:
         url: str,
         original_kwargs: dict[str, Any],
         *,
+        epoch_at_send: int | None = None,
         allow_captcha_handling: bool = True,
     ) -> DaemonProxyResponse:
         """Turn one daemon reply into a response, handling captchas on the way.
@@ -514,6 +522,12 @@ class DaemonProxySession:
         :param method: HTTP method of the request that produced it.
         :param url: URL of the request that produced it.
         :param original_kwargs: Caller kwargs of that request.
+        :param epoch_at_send: Value of :attr:`CaptchaGate.epoch` read
+            immediately before that request was sent, so a captcha reply can
+            be recognised as stale (a resolution completed while it was in
+            flight).  ``None`` — the default — means the caller has no such
+            timestamp, which disables only the stale-403 shortcut; the reply is
+            then handled exactly as before it existed.
         :param allow_captcha_handling: When ``False``, a ``captcha_required``
             reply is turned into a synthetic 403 instead of re-entering the
             resolution flow.  The post-gate retry sets this so a *second*
@@ -533,7 +547,7 @@ class DaemonProxySession:
         if resp_type == MSG_CAPTCHA_REQUIRED:
             if not allow_captcha_handling:
                 return _synthetic_403(resp_data.get("captcha_error", {}), url)
-            return self._handle_captcha_via_daemon(resp_data, method, url, original_kwargs)
+            return self._handle_captcha_via_daemon(resp_data, method, url, original_kwargs, epoch_at_send=epoch_at_send)
 
         if resp_type == MSG_ERROR:
             error_type = resp_data.get("error_type", "DaemonRequestError")
@@ -587,6 +601,8 @@ class DaemonProxySession:
         method: str,
         url: str,
         original_kwargs: dict[str, Any],
+        *,
+        epoch_at_send: int | None = None,
     ) -> DaemonProxyResponse:
         """Handle a captcha that the daemon detected.
 
@@ -597,14 +613,22 @@ class DaemonProxySession:
         The :data:`~zhihu_cli.content.handlers.captcha_gate.captcha_gate`
         coordinates threads: the first thread to see the challenge becomes the
         resolver, the rest park in the gate and re-send their own stale 403
-        once it clears.  A resolver is *not* required to succeed — giving up
-        still releases the gate, and everyone falls back to the 403.
+        once it clears.  A thread that never parked — its reply came back
+        after a resolution from someone else already finished — spots the
+        same staleness through :attr:`CaptchaGate.epoch` and re-sends too,
+        instead of becoming a second resolver.  A resolver is *not* required
+        to succeed — giving up still releases the gate, and everyone falls
+        back to the 403.
 
         :param captcha_data: The ``captcha_required`` message.
         :param method: HTTP method of the blocked request.
         :param url: URL of the blocked request.
         :param original_kwargs: Caller kwargs of the blocked request, used to
             re-send it after the gate clears.
+        :param epoch_at_send: :attr:`CaptchaGate.epoch` as read immediately
+            before the blocked request was sent.  ``None`` means unknown, which
+            skips the stale-403 shortcut but leaves every other branch
+            unchanged.
         :returns: The retried response, or a synthetic 403 when the challenge
             was skipped, cancelled, timed out, or nothing can prompt.
         """
@@ -637,6 +661,25 @@ class DaemonProxySession:
             # the resolution flow — never prompt twice.
             return _synthetic_403(captcha_error, url)
 
+        if epoch_at_send is not None and captcha_gate.epoch != epoch_at_send:
+            # A resolution completed while our request was in flight, so this
+            # reply was produced before it and is stale.  We never parked at
+            # the gate, so the wait branch below cannot see us: without this
+            # the thread would become a *second* resolver and prompt the user
+            # for a challenge that was just answered.  Re-send once with
+            # ``allow_captcha_handling=False`` (the same non-recursion guard as
+            # the waiter branch) so a second captcha yields a synthetic 403.
+            resend_epoch = captcha_gate.epoch
+            resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
+            return self._process_response(
+                resp_data,
+                method,
+                url,
+                original_kwargs,
+                epoch_at_send=resend_epoch,
+                allow_captcha_handling=False,
+            )
+
         if captcha_gate.try_begin():
             try:
                 return self._resolve_captcha_interactively(captcha_error, pending, method, url, original_kwargs)
@@ -649,12 +692,14 @@ class DaemonProxySession:
             # ``allow_captcha_handling=False`` is the non-recursion guard — a
             # second captcha on the retry yields a synthetic 403 instead of
             # re-entering this method and waiting again.
+            resend_epoch = captcha_gate.epoch
             resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
             return self._process_response(
                 resp_data,
                 method,
                 url,
                 original_kwargs,
+                epoch_at_send=resend_epoch,
                 allow_captcha_handling=False,
             )
 
