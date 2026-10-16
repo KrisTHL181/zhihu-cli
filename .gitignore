@@ -1,6 +1,10 @@
 *.json
 
 !dsh-plugin/**/*.json
+# Packaged glyph reference table for Yanxuan decoding (regenerate with
+# tools/gen_yanxuan_font_table.py)
+!src/zhihu_cli/glyph_table/*.json
+!src/zhihu_cli/glyph_table/*.bin
 *.png
 __pycache__
 

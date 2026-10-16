@@ -5,10 +5,16 @@ and assembles them for terminal reading.
 
 Also supports parsing paid-column section pages
 (``/market/paid_column/{id}/section/{id}``) via SSR state extraction.
+
+Paid-column sections ship the body with a per-response glyph-substitution
+cipher; :func:`_parse_manuscript_from_ssr` removes it with the subset font
+that came with the response.  See
+:mod:`zhihu_cli.content.utils.yanxuan_font`.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from collections.abc import Iterable
@@ -176,19 +182,82 @@ def _extract_ssr_state(html: str) -> dict[str, Any]:
         raise ValueError(f"Failed to parse SSR state JSON: {e}") from e
 
 
+#: Matches one ``<p>…</p>`` paragraph of the SSR ``manuscript`` field.
+_PARAGRAPH_RE = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
+
+#: Matches any HTML tag left inside a paragraph once it has been extracted.
+_TAG_RE = re.compile(r"<[^>]+>")
+
+#: The trailing watermark paragraph of every manuscript body.
+_WATERMARK_PREFIX = "备案号"
+
+
+def _paragraphs_from_manuscript(manuscript: str, p_tag_list: list[str]) -> list[str]:
+    """Build the body paragraphs of a manuscript, in reading order.
+
+    The SSR payload carries the body twice: ``manuscript`` as one HTML blob with
+    one ``<p>`` per paragraph, and ``pTagList`` as a list of paragraph fragments.
+    ``manuscript`` is the one that is actually populated, so it wins, and
+    ``pTagList`` is only a fallback.  The trailing ``备案号:`` watermark
+    paragraph is dropped.
+
+    :param manuscript: Value of the ``manuscript`` field.
+    :param p_tag_list: Value of the ``pTagList`` field.
+    :returns: Paragraph plain texts, watermark excluded.
+    """
+    if manuscript:
+        fragments = _PARAGRAPH_RE.findall(manuscript)
+    else:
+        fragments = list(p_tag_list)
+
+    paragraphs: list[str] = []
+    for fragment in fragments:
+        text = html.unescape(_TAG_RE.sub("", fragment)).strip()
+        if text:
+            paragraphs.append(text)
+
+    while paragraphs and paragraphs[-1].startswith(_WATERMARK_PREFIX):
+        paragraphs.pop()
+    return paragraphs
+
+
+def _decode_manuscript(paragraphs: list[str], font_base64: str, bold_base64: str) -> list[str]:
+    """Undo the per-response glyph-substitution cipher on *paragraphs*.
+
+    The subset font that draws the substituted glyphs travels with the response,
+    so it is the only thing that can decode them — see
+    :mod:`zhihu_cli.content.utils.yanxuan_font` for the mechanism.  The regular
+    font carries the body; the bold one is the fallback when it is absent.
+
+    :param paragraphs: Body paragraphs, still scrambled.
+    :param font_base64: Value of the ``font.base64`` field.
+    :param bold_base64: Value of the ``font.bold_base64`` field.
+    :returns: The paragraphs with substituted characters resolved.  When no font
+        is shipped the paragraphs come back untouched.
+    """
+    payload = font_base64 or bold_base64
+    if not payload:
+        return paragraphs
+
+    # Imported here rather than at module scope: the decoder pulls in Pillow.
+    from zhihu_cli.content.utils.yanxuan_font import decode_manuscript
+
+    return [decode_manuscript(paragraph, payload) for paragraph in paragraphs]
+
+
 def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Parse manuscript content from a paid-column section SSR state.
 
-    Extracts metadata (title, author, brand) and segment list from the
-    ``__connectedAutoFetch.manuscript.data.manuscriptData`` subtree.
+    Extracts metadata (title, author, brand) and the paragraph list from the
+    ``__connectedAutoFetch.manuscript.data.manuscriptData`` subtree, undoing the
+    font-substitution cipher that scrambles the body — see
+    :mod:`zhihu_cli.content.utils.yanxuan_font`.
 
     .. note::
 
-       The manuscript text is **font-scrambled** (a custom substitution
-       cipher where glyphs are swapped via an obfuscated font file).
-       Descrambling requires decoding the ``font.base64`` / ``pFont.base64``
-       fields — this is not yet implemented.  Returned segments contain
-       the scrambled text as-is.
+       The obfuscation is an anti-scraping layer, not a paywall: the full text
+       is delivered (``authentication_result`` is true and ``truncate_ratio`` is
+       1), so decoding the shipped glyphs recovers the manuscript as published.
 
     :param state: Parsed SSR state dict.
     :returns: Tuple of ``(meta, segments)`` — same shape as
@@ -215,24 +284,19 @@ def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], l
     meta["like_count"] = str(md.get("like_count", 0))
 
     # ── segments ──────────────────────────────────────────────────────────
-    segments: list[dict[str, Any]] = []
-    ptags = md.get("pTagList", [])
+    font = md.get("font") or {}
+    paragraphs = _paragraphs_from_manuscript(md.get("manuscript") or "", md.get("pTagList") or [])
+    paragraphs = _decode_manuscript(paragraphs, font.get("base64") or "", font.get("bold_base64") or "")
 
-    for i, p_html in enumerate(ptags):
-        # Strip HTML tags to get the (possibly scrambled) plain text
-        text = re.sub(r"<[^>]+>", "", p_html).strip()
-        # Skip the vip yxcode watermark paragraph
-        if text.startswith("备案号:") or text.startswith("备案号："):
-            continue
-        if text:
-            segments.append(
-                {
-                    "id": str(i),
-                    "type": "paragraph",
-                    "text": text,
-                    "marks": [],
-                }
-            )
+    segments: list[dict[str, Any]] = [
+        {
+            "id": str(i),
+            "type": "paragraph",
+            "text": text,
+            "marks": [],
+        }
+        for i, text in enumerate(paragraphs)
+    ]
 
     return meta, segments
 

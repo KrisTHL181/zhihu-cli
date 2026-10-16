@@ -91,7 +91,7 @@ Issues = "https://github.com/KrisTHL181/zhihu-cli/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-zhihu_cli = ["prompts/*.txt", "nlp_tools/*.txt"]
+zhihu_cli = ["prompts/*.txt", "nlp_tools/*.txt", "glyph_table/*.bin", "glyph_table/*.json"]
 
 [tool.setuptools_scm]
 fallback_version = "0.1.0"
