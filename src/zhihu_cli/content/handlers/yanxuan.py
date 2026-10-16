@@ -18,6 +18,7 @@ import html
 import json
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -245,7 +246,22 @@ def _decode_manuscript(paragraphs: list[str], font_base64: str, bold_base64: str
     return [decode_manuscript(paragraph, payload) for paragraph in paragraphs]
 
 
-def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], list[dict[str, Any]]]:
+@dataclass(frozen=True)
+class DecodeOutcome:
+    """Which decoder produced the manuscript body, and how it went.
+
+    :param backend: ``"local"`` or ``"server"``.
+    :param warning: User-facing message when the server path was attempted and
+        failed, otherwise ``None``.
+    """
+
+    backend: str
+    warning: str | None
+
+
+def _parse_manuscript_from_ssr(
+    state: dict[str, Any], *, server_decode: bool = False
+) -> tuple[dict[str, str], list[dict[str, Any]], DecodeOutcome]:
     """Parse manuscript content from a paid-column section SSR state.
 
     Extracts metadata (title, author, brand) and the paragraph list from the
@@ -260,8 +276,11 @@ def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], l
        1), so decoding the shipped glyphs recovers the manuscript as published.
 
     :param state: Parsed SSR state dict.
-    :returns: Tuple of ``(meta, segments)`` — same shape as
-              :func:`fetch_yanxuan_segments`.
+    :param server_decode: When true, try Zhihu's own decode endpoint first and
+        fall back to the local glyph decoder on any failure.
+    :returns: Tuple of ``(meta, segments, outcome)``.  *meta* and *segments*
+              have the same shape as :func:`fetch_yanxuan_segments`; *outcome*
+              reports which decoder was used.
     """
     ms = state["__connectedAutoFetch"]["manuscript"]
     md = ms["data"]["manuscriptData"]
@@ -286,7 +305,24 @@ def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], l
     # ── segments ──────────────────────────────────────────────────────────
     font = md.get("font") or {}
     paragraphs = _paragraphs_from_manuscript(md.get("manuscript") or "", md.get("pTagList") or [])
-    paragraphs = _decode_manuscript(paragraphs, font.get("base64") or "", font.get("bold_base64") or "")
+
+    # The server path needs only ``font.type``, so it is a sibling of
+    # ``_decode_manuscript`` rather than a mode of it — that keeps the
+    # "no font payload -> return untouched" guard from swallowing it.
+    outcome = DecodeOutcome("local", None)
+    if server_decode:
+        try:
+            from zhihu_cli.content.utils.yanxuan_server_decode import decode_texts
+
+            paragraphs = decode_texts(paragraphs, font.get("type") or "")
+            outcome = DecodeOutcome("server", None)
+        except Exception as exc:  # broad on purpose; BaseException still propagates
+            outcome = DecodeOutcome("local", f"--server-decode failed ({exc}); used the local glyph decoder.")
+
+    # ``paragraphs`` is only rebound on full success, so a failed server decode
+    # can never yield empty or partial text.
+    if outcome.backend != "server":
+        paragraphs = _decode_manuscript(paragraphs, font.get("base64") or "", font.get("bold_base64") or "")
 
     segments: list[dict[str, Any]] = [
         {
@@ -298,7 +334,7 @@ def _parse_manuscript_from_ssr(state: dict[str, Any]) -> tuple[dict[str, str], l
         for i, text in enumerate(paragraphs)
     ]
 
-    return meta, segments
+    return meta, segments, outcome
 
 
 def _fetch_paid_column_section_page(url: str) -> str:
@@ -317,8 +353,8 @@ def _fetch_paid_column_section_page(url: str) -> str:
 
 
 def fetch_paid_column_section_segments(
-    url: str,
-) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    url: str, *, server_decode: bool = False
+) -> tuple[dict[str, str], list[dict[str, Any]], DecodeOutcome]:
     """Fetch and parse a paid-column section page into segments.
 
     This is the SSR-based equivalent of :func:`fetch_yanxuan_segments`
@@ -327,8 +363,11 @@ def fetch_paid_column_section_segments(
     manuscript data.
 
     :param url: Full URL of the paid-column section page.
-    :returns: Tuple of ``(meta, segments)`` with the same shape as
-              :func:`fetch_yanxuan_segments`.
+    :param server_decode: When true, decode the body with Zhihu's own endpoint
+        instead of the local glyph table, falling back on any failure.
+    :returns: Tuple of ``(meta, segments, outcome)`` — *meta* and *segments*
+              have the same shape as :func:`fetch_yanxuan_segments`, and
+              *outcome* reports which decoder produced the body.
     :raises ValueError: If the URL does not match the expected pattern.
     :raises requests.HTTPError: If the page fetch fails.
     """
@@ -338,7 +377,7 @@ def fetch_paid_column_section_segments(
 
     html = _fetch_paid_column_section_page(url)
     state = _extract_ssr_state(html)
-    return _parse_manuscript_from_ssr(state)
+    return _parse_manuscript_from_ssr(state, server_decode=server_decode)
 
 
 def fetch_yanxuan_segments(

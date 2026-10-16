@@ -58,6 +58,7 @@ from zhihu_cli.output import (
     print_json,
     set_json_mode,
     success,
+    warning,
 )
 
 
@@ -719,6 +720,13 @@ def register_browse(main_group):
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output segments as JSON")
     @click.option("--output", "-o", type=str, default="", help="Save to file")
+    @click.option(
+        "--server-decode",
+        "server_decode",
+        is_flag=True,
+        default=False,
+        help="Decode with Zhihu's own endpoint (falls back to the local glyph table)",
+    )
     def browse_yanxuan(
         url_or_id: str,
         offset: int,
@@ -727,6 +735,7 @@ def register_browse(main_group):
         reading_mode: bool,
         output_json: bool,
         output: str,
+        server_decode: bool,
     ) -> None:
         """Read Zhihu Yanxuan (盐选) premium content in the terminal.
 
@@ -736,13 +745,16 @@ def register_browse(main_group):
         """
         set_json_mode(output_json)
 
+        decode = None
         # Paid column section URLs use SSR page parsing
         if is_paid_column_section_url(url_or_id):
-            meta, segments = fetch_paid_column_section_segments(url_or_id)
+            meta, segments, decode = fetch_paid_column_section_segments(url_or_id, server_decode=server_decode)
             # Honour max_items as a cap on returned segments
             if max_items is not None and len(segments) > max_items:
                 segments = segments[:max_items]
         else:
+            if server_decode:
+                warning("--server-decode only applies to paid-column section URLs; using the default path.")
             url_token = extract_url_token(url_or_id)
             meta, segments = fetch_yanxuan_segments(
                 url_token,
@@ -750,6 +762,9 @@ def register_browse(main_group):
                 max_segments=max_items,
                 max_pages=max_pages,
             )
+
+        if decode and decode.warning:
+            warning(decode.warning)
 
         if output_json:
             print_json({"meta": meta, "segments": segments})

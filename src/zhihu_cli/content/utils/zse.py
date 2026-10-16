@@ -537,8 +537,18 @@ class ZSECipher:
 
         return data[:-pad]
 
-    def encrypt(self, text: str) -> str:
-        seed = 12  # matches the Rust implementation
+    def encrypt(self, text: str, *, seed: int = 12) -> str:
+        """Encrypt *text* into a ZSE v4 payload.
+
+        :param text: The plaintext to encrypt.
+        :param seed: Header seed byte; ``12`` matches the Rust implementation,
+            which is what every signature call site wants.  Zhihu's
+            ``manuscript/decode`` endpoint expects ``91``.
+        :returns: The custom-encoded ciphertext.
+        :raises ValueError: If *seed* does not fit in one byte.
+        """
+        if not 0 <= seed <= 255:
+            raise ValueError("seed must fit in one byte")
 
         # Build plaintext
         plain = bytearray()
