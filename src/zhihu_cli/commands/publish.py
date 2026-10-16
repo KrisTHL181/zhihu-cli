@@ -153,7 +153,13 @@ def register_publish(main_group: click.Group) -> None:
         default=None,
         help="Markdown file for the detail / 补充说明 (use '-' for stdin)",
     )
-    @click.option("--topic", "-t", "topics", multiple=True, help="Topic ID (repeatable)")
+    @click.option(
+        "--topic",
+        "-t",
+        "topics",
+        multiple=True,
+        help="Topic ID or URL token (repeatable); the topic name is resolved automatically",
+    )
     @click.option("--image", "-i", "images", multiple=True, help="Image to attach (repeatable)")
     def publish_question_cmd(
         title: str, detail_file: str | None, topics: tuple[str, ...], images: tuple[str, ...]
@@ -163,24 +169,27 @@ def register_publish(main_group: click.Group) -> None:
         The detail is optional and read as Markdown; unlike the other
         publish commands nothing is read from stdin unless --detail-file
         is given explicitly, so a bare title works.
+
+        --topic takes topic ids or URL tokens — not names — and each one is
+        resolved against the topic API before anything is published.
         """
         if not title.strip():
             error("Title cannot be empty.")
             raise SystemExit(1)
 
+        detail = _read_content(detail_file) if detail_file else ""
         try:
             image_infos = _upload_images(images, source="question")
-        except (FileNotFoundError, RuntimeError) as e:
+            resp = create_question(
+                title.strip(),
+                detail,
+                topic_ids=list(topics) or None,
+                image_infos=image_infos or None,
+            )
+        except (FileNotFoundError, RuntimeError, ValueError) as e:
             error(f"{e}")
             raise SystemExit(1)
 
-        detail = _read_content(detail_file) if detail_file else ""
-        resp = create_question(
-            title.strip(),
-            detail,
-            topic_ids=list(topics) or None,
-            image_infos=image_infos or None,
-        )
         _report_published(resp, "question", title.strip())
 
     @publish.command("upload-image")

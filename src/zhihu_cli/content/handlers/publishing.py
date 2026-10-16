@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.content.handlers.requests import fetch_json, session
 from zhihu_cli.content.utils import generate_trace_context
 from zhihu_cli.content.utils.html2markdown import calculate_text_length
 from zhihu_cli.content.utils.markdown2html import markdown2html
 
 PUBLISH_API: str = "https://www.zhihu.com/api/v4/content/publish"
 CONTENT_DRAFTS_API: str = "https://www.zhihu.com/api/v4/content/drafts"
-QUESTIONS_API: str = "https://www.zhihu.com/api/v4/questions"
+TOPIC_API: str = "https://www.zhihu.com/api/v4/topics/{topic_id}"
 
 
 def _create_content_draft(action: str) -> str:
@@ -395,6 +395,76 @@ def publish_pin(
     return resp.json()
 
 
+def resolve_topic(topic_id: str) -> dict[str, str]:
+    """Resolve a topic id into the topic object the publish API expects.
+
+    ``--topic`` only carries an id, while ``content/publish`` wants the
+    topic's *name* next to its token, so the name is looked up here.  A
+    topic that cannot be resolved raises rather than being dropped: a typo
+    in ``--topic`` must not silently publish an untagged question.
+
+    :param topic_id: Zhihu topic id or ``url_token``, e.g. ``"19551706"``.
+    :returns: ``{"topic_token", "topic_name", "topic_id"}``, ready to go
+        into :func:`_build_question_payload`.
+    :raises ValueError: If the topic cannot be fetched or carries no name.
+    """
+    try:
+        topic = fetch_json(TOPIC_API.format(topic_id=topic_id))
+        name = topic.get("name", "") if isinstance(topic, dict) else ""
+    except Exception as e:
+        # Broad on purpose: a 404, a risk-control block and a connection
+        # error all mean the same thing here — this topic is unknown.
+        raise ValueError(f"Unknown topic id: {topic_id!r}") from e
+
+    if not name:
+        raise ValueError(f"Unknown topic id: {topic_id!r}")
+    return {"topic_token": topic_id, "topic_name": str(name), "topic_id": ""}
+
+
+def _build_question_payload(
+    title: str, html: str, topics: list[dict[str, str]], *, text_length: int | None = None
+) -> dict[str, Any]:
+    """Build the ``content/publish`` body for a new question.
+
+    Kept separate from :func:`create_question` so the payload — the part
+    that has to be exactly right — can be asserted without any network.
+    Two details are load-bearing and easy to "fix" back into breakage:
+
+    * ``extra_info`` must **not** carry a ``publisher`` key.  The server
+      branches on that field's value, and ``"pc"`` sends it down a path
+      that never parses the title, answering with a misleading
+      "问题标题长度不符合要求" for every title.
+    * ``topic.topics`` must hold topic *objects*, not bare token strings.
+
+    :param title: Question title.
+    :param html: Body HTML for ``hybrid``.  When empty the ``hybrid`` key
+        is omitted entirely — that is the shape the mobile app sends for a
+        question with no detail.
+    :param topics: Topic objects from :func:`resolve_topic`.
+    :param text_length: Pre-computed word count.  When omitted it is
+        measured from *html*; pass it when the body had media appended
+        after the count was taken.
+    :returns: The full request body, ``{"action": "question", "data": ...}``.
+    """
+    data: dict[str, Any] = {
+        "title": {"title": title},
+        "topic": {"topics": topics},
+        "extra_info": {
+            "extra_tag": "fakeurl://publisher_no_animation",
+            "publish_type": "question",
+            "editState": "true",
+        },
+        "questionConfig": {"type": "0"},
+        "draft": {"disabled": 1},
+    }
+    if html:
+        data["hybrid"] = {
+            "html": html,
+            "textLength": calculate_text_length(html) if text_length is None else text_length,
+        }
+    return {"action": "question", "data": data}
+
+
 def create_question(
     title: str,
     detail: str = "",
@@ -405,42 +475,39 @@ def create_question(
 ) -> dict[str, Any]:
     """Create a new question (提问).
 
-    Zhihu takes two different routes here: a plain question goes to the
-    ``questions`` endpoint, while a question with images has to go through
-    ``content/publish`` with an explicit HTML body.
+    Both the plain and the with-images cases go through
+    ``content/publish`` with ``action="question"``; ``/api/v4/questions``
+    is not a usable creation route, and any payload carrying
+    ``extra_info.publisher`` makes the server skip parsing the title (see
+    :func:`_build_question_payload`).  *topic_ids* are resolved to topic
+    objects via :func:`resolve_topic` before publishing, so an unknown
+    topic aborts the request instead of posting an untagged question.
+
+    Business failures — including the daily question cap — come back as
+    HTTP 400 with a JSON body and are returned as-is, so the caller can
+    print the server's own message.
 
     :param title: Question title.
     :param detail: Markdown question detail (补充说明). Optional.
-    :param topic_ids: Topic IDs to tag the question with.
+    :param topic_ids: Topic ids or ``url_token``s to tag the question with.
     :param image_infos: Image dicts from
         :func:`~zhihu_cli.content.handlers.upload_image.upload_image`.
     :param html: Pre-converted HTML detail (avoids re-conversion).
+    :returns: API response dict.
+    :raises ValueError: If any topic id cannot be resolved.
     """
-    # The questions endpoint takes the same HTML shape its own API returns
-    # in the ``detail`` field, so both routes share one conversion.
     if html is None:
         html = markdown2html(detail, scene="answer") if detail.strip() else ""
 
+    # The word count has always covered the detail text only, so it is
+    # measured before the image tags are appended to the body.
+    text_length = calculate_text_length(html)
     if image_infos:
-        resp = session.post(
-            PUBLISH_API,
-            json={
-                "action": "question",
-                "data": {
-                    "title": {"title": title},
-                    "topic": {"topics": list(topic_ids) if topic_ids else []},
-                    "hybrid": {"html": html + build_image_html(image_infos), "textLength": calculate_text_length(html)},
-                    "extra_info": {"publisher": "pc"},
-                    "questionConfig": {"type": "0"},
-                    "draft": {"disabled": 1},
-                },
-            },
-        )
-        return resp.json()
+        html += build_image_html(image_infos)
 
-    payload: dict[str, Any] = {"title": title, "detail": html}
-    if topic_ids:
-        payload["topic_url_tokens"] = list(topic_ids)
-    resp = session.post(QUESTIONS_API, json=payload)
-    resp.raise_for_status()
+    # dict.fromkeys dedupes while preserving order, so a repeated --topic
+    # costs one lookup rather than one request per occurrence.
+    topics = [resolve_topic(topic_id) for topic_id in dict.fromkeys(topic_ids or [])]
+
+    resp = session.post(PUBLISH_API, json=_build_question_payload(title, html, topics, text_length=text_length))
     return resp.json()
