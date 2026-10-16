@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from typing import Any
 
@@ -14,10 +16,10 @@ QUESTIONS_API: str = "https://www.zhihu.com/api/v4/questions"
 def _create_content_draft(action: str) -> str:
     """Create an empty content draft and return its ``content_id``.
 
-    Pins must be published against a draft, and the draft has to exist
-    before the publish call carries the body.
+    New articles and pins must be published against a draft, and the draft
+    has to exist before the publish call carries the body.
 
-    :param action: Content type the draft is for, e.g. ``"pin"``.
+    :param action: Content type the draft is for, e.g. ``"article"`` or ``"pin"``.
     :returns: The draft's ``content_id``, as a string.
     :raises ValueError: If the response carries no ``content_id``.
     """
@@ -276,6 +278,7 @@ def publish_article(
                     "publisher": "pc",
                     "pc_business_params": pc_business_params,
                 },
+                "draft": {"disabled": 1, "id": _create_content_draft("article")},
                 "hybrid": {"html": html, "textLength": text_length},
                 "title": {"title": title},
             },
