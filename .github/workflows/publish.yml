@@ -25,10 +25,37 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: true   # SLSA 签名，需要 id-token: write
+      - name: Generate release notes
+        id: notes
+        continue-on-error: true   # 笔记生成失败也不能挡住 release，脚本自己保证写出可用文件
+        timeout-minutes: 5        # 没有它，卡死的 urllib 会一直等到 job 的 6 小时上限
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_BASE: ${{ vars.LLM_API_BASE }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          GH_TOKEN: ${{ github.token }}   # 仅用于拉取已合并 PR 的说明，取不到就退化成纯 commit 列表
+        run: |
+          # 同一次运行里失败的步骤可能留下半截文件，先清掉
+          rm -f release_notes.md
+          # 用 GITHUB_REF 派生 tag：tag 名里可能有斜杠，GITHUB_REF_NAME 会被截断
+          TAG="${GITHUB_REF#refs/tags/}"
+          python .github/scripts/release_notes.py --tag "$TAG" --output release_notes.md
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.whl \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          TAG="${GITHUB_REF#refs/tags/}"
+          # 上面的步骤只是兜底，绝不让 release 变成空 body
+          if [ ! -s release_notes.md ]; then
+            printf '> Release notes could not be generated for this tag.\n' > release_notes.md
+            {
+              echo "### Release notes"
+              echo
+              echo "The notes script produced no output, so this release carries a placeholder body."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # --verify-tag 是一道便宜的自检：tag 对不上时直接失败，而不是让 gh 在默认分支 HEAD 上新建一个
+          gh release create "$TAG" dist/*.tar.gz dist/*.whl \
+            --title "$TAG" \
+            --verify-tag \
+            --notes-file release_notes.md

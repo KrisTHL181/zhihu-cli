@@ -16,6 +16,8 @@ content_metrics
 *egg-info
 dist
 build
+# 本地预览发行说明时由 .github/scripts/release_notes.py 写出
+release_notes.md
 .claude
 CLAUDE.md
 .swp
