@@ -25,15 +25,17 @@ needs no assumption about how the server treats whitespace — a newline-joined
 assembly would additionally require the server to preserve newlines, which has
 never been observed.
 
-The normalisation is not hypothetical: on a real section the server returns the
-CJK radical-block look-alikes (``⽩`` U+2F69, ``⻓`` U+2ED3, ``⼩`` U+2F29, …)
-where the local decoder returns the unified ideograph, because the local path
-folds them through
-:func:`~zhihu_cli.content.utils.yanxuan_font.normalize_lookalikes` and this path
-does not.  The substitution stays length-preserving, so the reassembly is exact
-and only the codepoints differ; the trade is accepted deliberately, because
-folding them here — ``normalize_lookalikes`` itself loads the glyph table —
-would defeat the point of an independent, table-free path.
+The server does not return the same codepoints as the local path: on a real
+section it answers with the CJK radical-block look-alikes (``⽩`` U+2F69, ``⻓``
+U+2ED3, ``⼩`` U+2F29, …) where the local path yields the unified ideograph.  Both
+paths therefore fold the decoded string through
+:func:`~zhihu_cli.content.utils.yanxuan_font.normalize_lookalikes` — the local one
+inside ``decode_manuscript_report``, this one at the end of
+:func:`decode_texts` — so ``--server-decode`` is byte-identical to the default
+path.  Folding does not reintroduce the staleness risk that motivated the
+table-free design: the look-alike map is stable Unicode data (an NFKC pass over
+the compatibility blocks plus a fixed radical list), not the glyph raster
+matching that goes stale whenever Zhihu changes the typeface.
 
 This module must stay importable without ``curl_cffi`` or ``lxml``: the heavy
 import happens inside :func:`_build_session`, so :func:`decode_texts` is the
@@ -198,7 +200,9 @@ def decode_texts(paragraphs: list[str], font_type: str, *, timeout: float = 20.0
     :param font_type: Value of the response's ``font.type``.
     :param timeout: Per-request timeout in seconds.
     :returns: The paragraphs with substituted characters resolved, one per
-        input paragraph.
+        input paragraph, folded through
+        :func:`~zhihu_cli.content.utils.yanxuan_font.normalize_lookalikes` so
+        that they match the local path byte for byte.
     :raises ServerDecodeError: If *font_type* is empty, or if any request,
         reply or length invariant fails.
     """
@@ -216,11 +220,20 @@ def decode_texts(paragraphs: list[str], font_type: str, *, timeout: float = 20.0
     if len(whole) != len(joined):
         raise ServerDecodeError("total length changed")
 
+    # Fold the look-alikes exactly as the local path does, so that both paths
+    # agree byte for byte.  Imported here rather than at module level so that
+    # this module stays importable without the glyph-table stack.
+    from zhihu_cli.content.utils.yanxuan_font import normalize_lookalikes
+
+    folded = normalize_lookalikes(whole)
+    if len(folded) != len(whole):
+        raise ServerDecodeError("look-alike folding changed the length")
+
     # Slice the decoded text back into paragraphs at the original boundaries.
     out: list[str] = []
     cursor = 0
     for paragraph in paragraphs:
         end = cursor + len(paragraph)
-        out.append(whole[cursor:end])
+        out.append(folded[cursor:end])
         cursor = end
     return out
