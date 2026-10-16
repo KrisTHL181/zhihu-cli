@@ -281,12 +281,19 @@ def _resolve_user_agent(headers: dict[str, str]) -> str:
     return headers.get("User-Agent", "")
 
 
-def _build_direct_session() -> ZhihuSession:
-    """Build a direct :class:`ZhihuSession` from the active profile headers.
+def _build_direct_session(profile_name: str | None = None) -> ZhihuSession:
+    """Build a direct :class:`ZhihuSession` from a profile's headers.
 
     This is the original (non-daemon) session factory.
+
+    :param profile_name: Profile whose headers to load.  ``None`` — the default —
+        keeps the historical behaviour of using the *active* profile, so every
+        existing caller is unaffected.  Naming a profile builds a session for a
+        profile that is not active, which is what
+        :func:`zhihu_cli.content.handlers.requests.use_profile` relies on.
+    :returns: A session carrying that profile's headers.
     """
-    hdrs = cache_manager.load_headers()
+    hdrs = cache_manager.load_headers(profile_name)
     ua = _resolve_user_agent(hdrs)
     sess = ZhihuSession(
         impersonate=get_browser(ua),

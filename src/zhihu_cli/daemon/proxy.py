@@ -221,6 +221,28 @@ class DaemonProxyResponse:
         return True  # Always truthy (match requests.Response behaviour)
 
 
+def _build_context_session() -> Any:
+    """Build a direct session honouring an enclosing ``use_profile()``.
+
+    The streaming and daemon-failure paths build their own session rather than
+    asking :func:`~zhihu_cli.content.handlers.requests._get_session` for one, so
+    they must read the pinned profile themselves — otherwise a
+    ``with use_profile("alt"): download_video(...)`` would silently authenticate
+    as the *active* profile.
+
+    Both imports stay inside the body on purpose: this module's import graph is
+    deliberately light (the daemon exists so the CLI never imports
+    ``_session_core``), and a module-level import would undo that.
+
+    :returns: A direct :class:`ZhihuSession` for the pinned profile, or for the
+        active one when nothing is pinned.
+    """
+    from zhihu_cli.content.handlers._session_core import _build_direct_session
+    from zhihu_cli.content.handlers.requests import _context_profile
+
+    return _build_direct_session(_context_profile())
+
+
 class DaemonProxySession:
     """Drop-in replacement for :class:`ZhihuSession` that proxies requests
     through the background daemon.
@@ -560,9 +582,7 @@ class DaemonProxySession:
         """Create a temporary direct :class:`ZhihuSession` for non-streaming
         fallback requests.
         """
-        from zhihu_cli.content.handlers._session_core import _build_direct_session
-
-        direct = _build_direct_session()
+        direct = _build_context_session()
         try:
             resp = direct.request(method, url, **kwargs)
             body = getattr(resp, "content", b"") or b""
@@ -589,9 +609,7 @@ class DaemonProxySession:
         response — callers use ``iter_lines()`` to consume the stream and
         MUST call ``.close()`` when done to release the underlying session.
         """
-        from zhihu_cli.content.handlers._session_core import _build_direct_session
-
-        direct = _build_direct_session()
+        direct = _build_context_session()
         resp = direct.request(method, url, **kwargs)
         return _StreamResponse(resp, direct)
 
