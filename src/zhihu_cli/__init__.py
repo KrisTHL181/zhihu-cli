@@ -62,18 +62,22 @@ if TYPE_CHECKING:
         get_inbox,
         get_item_stats,
         get_my_url_token,
+        get_rate_limit,
         list_collection_contents,
         list_collections,
         list_drafts,
+        rate_limit,
         scrape_answer_page,
         scrape_answers,
         scrape_article,
         scrape_pin,
         scrape_question_data,
         scrape_zvideo,
+        set_rate_limit,
         stream_follow_feed,
         stream_read_history,
         stream_recommend_feed,
+        use_direct_session,
         use_profile,
     )
     from zhihu_cli.content import (
@@ -143,6 +147,11 @@ __all__ = [
     "get_draft",
     "draft_to_markdown",
     "use_profile",
+    # request pacing and direct-session pinning, defined in zhihu_cli.api
+    "set_rate_limit",
+    "get_rate_limit",
+    "rate_limit",
+    "use_direct_session",
 ]
 
 #: Exceptions, bound at import time by the imports above: they never take the

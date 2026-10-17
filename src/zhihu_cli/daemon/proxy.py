@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.captcha_gate import captcha_gate, resolve_captcha
+from zhihu_cli.content.utils import rate_limit
 from zhihu_cli.daemon.protocol import (
     MSG_CAPTCHA_REQUIRED,
     MSG_CAPTCHA_RESOLVED,
@@ -394,7 +395,7 @@ class DaemonProxySession:
         except DaemonNotRunningError:
             pass
 
-    def _send_config(self, key: str, value: str) -> None:
+    def _send_config(self, key: str, value: Any) -> None:
         """Propagate a configuration change to the daemon (best-effort)."""
         try:
             self._send_recv(
@@ -478,6 +479,14 @@ class DaemonProxySession:
         # send ``captcha_resolved``.  The wait is bounded, so a timed-out
         # thread simply sends and gets the daemon's 403.
         captcha_gate.acquire()
+        # Client-side pacing, after the gate for the same reason as in
+        # ``ZhihuSession.request``: threads parked on a captcha must not
+        # consume slots they will not use.  This is the same process-global
+        # limiter the direct paths use — never a second one.  When the daemon
+        # is running and also limits (its shared session is the server-side
+        # chokepoint), absolute slot reservation makes the stacked waits
+        # ``max`` rather than a sum.
+        rate_limit.limiter.acquire()
 
         msg = self._build_request_msg(method, url, kwargs)
 

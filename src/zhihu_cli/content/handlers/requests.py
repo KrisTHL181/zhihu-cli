@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 # ── lightweight (stdlib-only) imports ──────────────────────────────────────
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.utils import rate_limit
 from zhihu_cli.errors import AuthError
 
 if TYPE_CHECKING:
@@ -228,6 +229,10 @@ def _build_session() -> Any:
     (socket, json).  The direct path triggers a full import of
     :mod:`_session_core` (curl_cffi + lxml, ~200 ms).
     """
+    # Resolve the persistent/env limit before any request can be sent.  This
+    # is a no-op after ``main`` pinned an explicit ``--qps``/``ZHIHU_QPS``.
+    rate_limit.configure_from_config()
+
     # ── check daemon config ──────────────────────────────────────────
     try:
         config = cache_manager.get_config()
@@ -252,6 +257,12 @@ def _build_session() -> Any:
 
             # Ensure daemon session matches active profile
             proxy._send_reload()
+
+            # Give the daemon the *persistent* cap, so an account-wide limit
+            # survives across client processes.  Deliberately not the client's
+            # explicit ``--qps``: that option is documented as local to this
+            # invocation and must not rewrite the shared daemon's setting.
+            proxy._send_config("qps", cache_manager.get_qps())
 
             _inject_app_headers(proxy)
             return proxy
@@ -317,6 +328,10 @@ def reload_session() -> None:
 
             _session._send_reload()
             _session._send_config("captcha_handler", _session.captcha_handler)
+            # Re-push the persisted rate limit: ``config qps set`` already does
+            # so, but a reload is the natural point to re-sync a daemon that
+            # was restarted or missed the earlier message.
+            _session._send_config("qps", cache_manager.get_qps())
         else:
             # Direct reload: rebuild the session
             sess = _build_session()
@@ -427,3 +442,117 @@ def use_profile(name: str) -> Iterator[None]:
     finally:
         _ctx_session.reset(session_token)
         _ctx_profile.reset(profile_token)
+
+
+# ── rate limiting (per-invocation and account-wide) ────────────────────────
+#
+# The limiter itself lives in :mod:`zhihu_cli.content.utils.rate_limit`; this
+# module owns only the integration points so callers (``main``, ``config``,
+# and the public API) never need to know about process globals.
+
+
+def set_rate_limit(qps: float) -> None:
+    """Apply a per-invocation request rate limit to this process.
+
+    This is the ``--qps`` / ``ZHIHU_QPS`` path: it configures the in-process
+    limiter and pins it so building a session later does not replace it with
+    the persisted value.  It deliberately does **not** contact the daemon —
+    ``--qps`` is documented as local to the invocation, and pushing it would
+    silently tighten every other client on the machine.  Use
+    ``zhihu config qps set`` for the account-wide, daemon-enforced cap.
+
+    :param qps: Requests per second; ``<= 0`` disables limiting.
+    """
+    rate_limit.set_explicit_qps(qps)
+
+
+def push_rate_limit_to_daemon(qps: float | None = None) -> None:
+    """Best-effort push of a rate limit to a running daemon.
+
+    Called after ``config qps set``/``clear`` so a long-lived daemon picks up
+    the new persistent value immediately instead of only at its next start.
+    There is no daemon most of the time, and that is a normal outcome, not an
+    error: every failure (no socket, connection reset, protocol mismatch) is
+    swallowed.  The value is already persisted in ``config.json``, so a later
+    daemon start or ``reload_session`` will apply it anyway.
+
+    Reuses the process-wide session when it is already a
+    :class:`DaemonProxySession`; otherwise it opens an ephemeral one.  The
+    ephemeral connection is closed on every path so a one-off config command
+    does not leave a socket behind.
+
+    :param qps: Value to send.  ``None`` means "read the persisted value",
+        which is what the config setter wants after writing it.
+    """
+    value = cache_manager.get_qps() if qps is None else qps
+
+    try:
+        from zhihu_cli.daemon.proxy import DaemonProxySession
+    except ImportError:
+        return
+
+    sess = _session
+    ephemeral = not isinstance(sess, DaemonProxySession)
+    if ephemeral:
+        try:
+            sess = DaemonProxySession()
+            sess._test_connection()
+        except Exception:
+            return
+
+    try:
+        sess._send_config("qps", value)
+    except Exception:
+        # Includes connection errors ``_send_config`` itself does not catch.
+        pass
+    finally:
+        if ephemeral:
+            try:
+                sess.close()
+            except Exception:
+                pass
+
+
+@contextmanager
+def use_direct_session(profile: str | None = None) -> Iterator[Any]:
+    """Pin a *direct* :class:`ZhihuSession` for the duration of the block.
+
+    This is the supported replacement for reaching into the private
+    ``_ctx_session`` ContextVar from an out-of-tree consumer.  It is for the
+    cases that genuinely cannot use the daemon: a second profile, requests
+    the daemon protocol cannot relay, or a caller that needs the session
+    object itself.
+
+    Differences from :func:`use_profile` are intentional:
+
+    * it always builds a direct session, even for the active profile — the
+      daemon path cannot be forced through a ContextVar pin when the pinned
+      value would be the proxy's own global;
+    * the session is closed on exit rather than cached, because callers that
+      need pinning are usually one-shot and the (curl_cffi) session is
+      expensive to leak;
+    * the qps configuration is resolved here too, so a library caller that
+      never went through :func:`_build_session` still gets the persisted cap.
+
+    The pin is a :class:`~contextvars.ContextVar`, so it is thread-local and
+    restored exactly (nested blocks work).  As with :func:`use_profile`, it
+    does not cross a thread boundary: start workers inside the block.
+
+    :param profile: Profile whose headers to use, or ``None`` for the active
+        profile.
+    :returns: A context manager yielding the direct session.
+    """
+    from zhihu_cli.content.handlers._session_core import _build_direct_session
+
+    sess = _build_direct_session(profile)
+    _inject_app_headers(sess)
+    rate_limit.configure_from_config()
+    token = _ctx_session.set(sess)
+    try:
+        yield sess
+    finally:
+        _ctx_session.reset(token)
+        try:
+            sess.close()
+        except Exception:
+            pass

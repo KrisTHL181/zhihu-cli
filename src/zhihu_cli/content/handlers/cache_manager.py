@@ -1,5 +1,6 @@
 import functools
 import json
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -229,6 +230,49 @@ class CacheManager:
     def set_start_date(self, date_str: str) -> None:
         config = self.get_config()
         config["default_start_date"] = date_str
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
+
+    def get_qps(self) -> float:
+        """Return the persisted global request rate limit (``0.0`` = unlimited).
+
+        Stored under ``rate_limit.qps``.  The nested object leaves room for
+        future limiter knobs (burst, per-host overrides) without another
+        top-level key.  Anything malformed — a missing section, a non-numeric
+        string, NaN/inf, or a negative number — is reported as ``0.0`` (no
+        limiting) so a hand-edited config cannot make requests hang.
+        """
+        config = self.get_config()
+        section = config.get("rate_limit", {})
+        if not isinstance(section, dict):
+            return 0.0
+        try:
+            qps = float(section.get("qps", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+        if not math.isfinite(qps) or qps < 0:
+            return 0.0
+        return qps
+
+    def set_qps(self, qps: float) -> None:
+        """Persist the global request rate limit (``0.0`` = unlimited).
+
+        Clamps negative and non-finite values to ``0.0``, matching
+        :func:`zhihu_cli.content.utils.rate_limit._coerce_qps`: the CLI accepts
+        any float, and a value the limiter would reject must not be stored as
+        something that reads differently next time.
+        """
+        try:
+            value = float(qps)
+        except (TypeError, ValueError):
+            value = 0.0
+        if not math.isfinite(value) or value < 0:
+            value = 0.0
+        config = self.get_config()
+        section = config.get("rate_limit")
+        if not isinstance(section, dict):
+            section = {}
+        section["qps"] = value
+        config["rate_limit"] = section
         self._atomic_write(self.config_file, json.dumps(config, indent=2))
 
     def get_smoothing(self) -> str:

@@ -113,6 +113,26 @@ def _register_item(config_group: click.Group, item: _Item) -> None:
 #  Item declarations
 # ═══════════════════════════════════════════════════════════════════════
 
+
+def _set_qps(value: float) -> None:
+    """Persist the rate limit, then tell a running daemon about it.
+
+    Order is deliberate: the config file is the source of truth.  Pushing
+    first would leave a daemon-limited process with a stale persisted value
+    if the write failed.  The push is best-effort (no daemon is normal), so a
+    config command never fails because of IPC.  ``clear`` lands here too via
+    ``_Item.default``, which is exactly right: resetting to 0 must also lift
+    the daemon's cap.
+    """
+    cache_manager.set_qps(value)
+    # Imported here, not at module level: ``handlers.requests`` pulls in the
+    # session factory, and config commands that appear in ``--help`` should
+    # not pay for it.
+    from zhihu_cli.content.handlers import requests as requests_module
+
+    requests_module.push_rate_limit_to_daemon(value)
+
+
 _CONFIG_ITEMS: list[_Item] = [
     _Item(
         name="user-agent",
@@ -187,6 +207,31 @@ value, e.g.:
 
   zhihu config app-za set \\
     "OS=Android&Release=14&Model=Generic&VersionName=10.95.0&Product=com.zhihu.android".""",
+    ),
+    _Item(
+        name="qps",
+        display="Global request rate limit",
+        label="QPS",
+        getter=cache_manager.get_qps,
+        setter=_set_qps,
+        default=0.0,
+        param_type=float,
+        param_name="qps",
+        group_help="""Manage the global request rate limit (requests/second).
+
+The limit applies to every request this tool sends.  A positive value is
+enforced by the relevant process: direct invocations pace themselves, and
+when the background daemon is running the value is pushed to it so all
+clients sharing that daemon are capped as one account.  ``0`` (the default)
+means unlimited.
+
+\033[2mExamples:\033[0m
+  zhihu config qps set 2      # at most 2 requests per second, account-wide
+  zhihu config qps show
+  zhihu config qps clear      # back to unlimited
+
+A per-invocation \033[2m--qps\033[0m / \033[2mZHIHU_QPS\033[0m overrides this value for
+one command without touching the persisted setting or the daemon.""",
     ),
     _Item(
         name="app-version",

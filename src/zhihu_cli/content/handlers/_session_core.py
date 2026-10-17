@@ -29,6 +29,7 @@ from zhihu_cli.content.handlers import get_user_agent
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.captcha import detect_captcha
 from zhihu_cli.content.handlers.captcha_gate import captcha_gate, resolve_captcha
+from zhihu_cli.content.utils import rate_limit
 
 ZSE93 = "101_3_3.0"
 
@@ -167,7 +168,13 @@ class ZhihuSession(_requests.Session):
             ``skip_app_headers`` (suppress ``x-app-version``/``x-app-za``).
         :returns: The response, retried once when a captcha was resolved.
         """
+        # Order matters: the captcha gate can park many threads, so waiting
+        # there first keeps the rate limiter's slots from being consumed by
+        # threads that are not actually about to send.  This is the single
+        # chokepoint for direct sessions, the daemon server's shared session,
+        # and every ``_stream_direct`` fallback — no other call site needed.
         captcha_gate.acquire()
+        rate_limit.limiter.acquire()
         skip_app = kwargs.pop("skip_app_headers", False)
 
         saved_version = None

@@ -44,6 +44,7 @@ from zhihu_cli.content.handlers._session_core import (
 )
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.captcha import detect_captcha
+from zhihu_cli.content.utils import rate_limit
 from zhihu_cli.daemon.protocol import (
     MSG_CAPTCHA_REQUIRED,
     MSG_CAPTCHA_RESOLVED,
@@ -152,6 +153,14 @@ class DaemonServer:
             sess.captcha_handler = "ignore"
 
             self._session = sess
+            # The daemon is the account-wide chokepoint: every client that
+            # goes through it shares this session's ``request``, so pacing it
+            # here limits the account, not one process.  Deliberately the
+            # *persistent* config only — the daemon must not inherit
+            # ``ZHIHU_QPS`` from whichever client happened to start it.  A
+            # client's ``--qps`` stays client-local; only
+            # ``zhihu config qps set`` reaches this process, via SET_CONFIG.
+            rate_limit.limiter.configure(cache_manager.get_qps())
 
     def _write_pid_file(self) -> None:
         self.PID_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -305,6 +314,12 @@ class DaemonServer:
         The ``user_agent`` key rebuilds the entire session and must NOT
         be called inside ``_session_lock`` (``threading.Lock`` is
         non-reentrant — doing so would deadlock).
+
+        ``qps`` is the account-wide rate limit: it configures the same
+        process-global limiter that :meth:`ZhihuSession.request` calls, so it
+        needs no session mutation and thus no ``_session_lock``.  Clients send
+        it here only for the *persistent* value (``zhihu config qps set`` /
+        ``clear``); a per-invocation ``--qps`` stays local to that client.
         """
         key = msg.get("key")
         value = msg.get("value")
@@ -322,6 +337,16 @@ class DaemonServer:
                 return build_pong(msg_id)
             except Exception as e:
                 return build_error(msg_id, type(e).__name__, str(e))
+        elif key == "qps":
+            # ``configure`` clamps non-finite/negative values to unlimited,
+            # but a value that is not a number at all is a client bug worth
+            # reporting rather than silently interpreting as "off".
+            try:
+                qps = float(value)
+            except (TypeError, ValueError):
+                return build_error(msg_id, "InvalidConfig", f"Invalid qps value: {value!r}")
+            rate_limit.limiter.configure(qps)
+            return build_pong(msg_id)
         else:
             return build_error(msg_id, "UnknownConfig", f"Unknown config key: {key}")
 

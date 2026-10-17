@@ -27,11 +27,27 @@ from zhihu_cli.extensions import discover_extensions
 
 @click.group()
 @click.version_option(package_name="zhihu-toolkit", prog_name="zhihu")
-def main() -> None:
+@click.option(
+    "--qps",
+    type=float,
+    default=None,
+    envvar="ZHIHU_QPS",
+    help="Global request rate limit (requests/second; 0 disables).",
+)
+def main(qps: float | None) -> None:
     """zhihu — Zhihu scraping, automation, and analysis toolkit.
 
     Authenticate once with \033[1mzhihu auth paste\033[0m, then use any command.
     """
+    # Per-invocation limit only: this configures the client process and is
+    # never pushed to the daemon (that would make a supposedly local option
+    # rewrite the shared account-wide setting).  ``zhihu config qps set`` is
+    # the persistent, daemon-enforced counterpart.  The import stays inside
+    # the branch so ``--help`` and shell completion do not pay for it.
+    if qps is not None:
+        from zhihu_cli.content.utils import rate_limit
+
+        rate_limit.set_explicit_qps(qps)
 
 
 # ── register built-in command groups ───────────────────────────────────────

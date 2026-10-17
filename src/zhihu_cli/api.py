@@ -109,6 +109,11 @@ __all__ = [
     "draft_to_markdown",
     # ── profile selection ──────────────────────────────────────────────────
     "use_profile",
+    # ── request pacing ─────────────────────────────────────────────────────
+    "set_rate_limit",
+    "get_rate_limit",
+    "rate_limit",
+    "use_direct_session",
 ]
 
 # ── plumbing ───────────────────────────────────────────────────────────────
@@ -531,3 +536,75 @@ def use_profile(name: str) -> Iterator[None]:
         raise
     except Exception as exc:
         raise _normalize(exc) from exc
+
+
+# ── request pacing ─────────────────────────────────────────────────────────
+
+
+def set_rate_limit(qps: float) -> None:
+    """Set this process's request rate limit (requests/second).
+
+    ``0`` disables limiting.  This is the per-invocation knob: it affects
+    requests made by this process only.  Use ``zhihu config qps set`` for a
+    persisted, account-wide limit that a running daemon enforces.
+
+    :param qps: Requests per second; non-positive values mean unlimited.
+    """
+    from zhihu_cli.content.handlers.requests import set_rate_limit as _set
+
+    _set(qps)
+
+
+def get_rate_limit() -> float:
+    """Return this process's current request rate limit (``0.0`` = unlimited)."""
+    from zhihu_cli.content.utils.rate_limit import limiter
+
+    return limiter.qps
+
+
+@contextmanager
+def rate_limit(qps: float) -> Iterator[None]:
+    """Apply *qps* for the duration of a block, then restore the previous value::
+
+        from zhihu_cli import rate_limit, fetch_hot_list
+
+        with rate_limit(1):
+            fetch_hot_list()
+
+    Restoring in ``finally`` matters for long-lived library use: a raised
+    request error must not leave the process permanently throttled at an
+    unexpected rate.
+
+    :param qps: Requests per second; ``<= 0`` disables limiting within the
+        block.
+    """
+    previous = get_rate_limit()
+    set_rate_limit(qps)
+    try:
+        yield
+    finally:
+        set_rate_limit(previous)
+
+
+@contextmanager
+def use_direct_session(profile: str | None = None) -> Iterator[Any]:
+    """Pin a direct (non-daemon) session for the duration of a block::
+
+        from zhihu_cli import use_direct_session
+
+        with use_direct_session("alt") as session:
+            # session.request(...) sends as that profile, bypassing the daemon
+            ...
+
+    The session is closed on exit.  This is the supported alternative to
+    reaching into the handlers' private ``_ctx_session`` ContextVar when a
+    caller needs the session object itself; see
+    :func:`zhihu_cli.content.handlers.requests.use_direct_session`.
+
+    :param profile: Profile whose headers to use, or ``None`` for the active
+        profile.
+    """
+    from zhihu_cli.content.handlers.requests import use_direct_session as _use_direct
+
+    with _use_direct(profile) as session_:
+        yield session_
