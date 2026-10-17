@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import warnings
 from collections.abc import Callable, Iterable, Iterator
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.wait import wait
 
@@ -34,14 +34,6 @@ def _set_query_param(url: str, key: str, value: Any) -> str:
     query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != key]
     query.append((key, str(value)))
     return urlunparse(parts._replace(query=urlencode(query)))
-
-
-def should_suppress_incomplete_warning() -> bool:
-    """Check if the environment variable to suppress incomplete stream warnings is set."""
-    import os
-
-    env = os.getenv("ZHIHU_CLI_SUPPRESS_INCOMPLETE_WARNING", "0") == "1"
-    return env or (Path.home() / ".zhihu-cli" / "suppress-incomplete-warning").exists()
 
 
 class _StreamStats:
@@ -87,7 +79,7 @@ class PageStream(Iterator[Any]):
             totals = self._stats.totals
             if totals is not None and self._stats.yielded < totals and not self._stats.truncated:
                 missing = totals - self._stats.yielded
-                if not should_suppress_incomplete_warning():
+                if not cache_manager.get_suppress_incomplete_warning():
                     warnings.warn(
                         f"API reported {totals} total items but only {self._stats.yielded} were returned "
                         f"(missing {missing}).",

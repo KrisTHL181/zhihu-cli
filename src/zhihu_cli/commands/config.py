@@ -248,6 +248,26 @@ default is ``10.95.0``.  If Zhihu starts returning ``data:
 null`` for mobile endpoints, bump this to a recent version
 string.""",
     ),
+    _Item(
+        name="suppress-incomplete-warning",
+        display="Incomplete-stream warning suppression",
+        label="Suppress incomplete-stream warnings",
+        getter=cache_manager.get_suppress_incomplete_warning,
+        setter=cache_manager.set_suppress_incomplete_warning,
+        default=False,
+        param_type=click.BOOL,
+        fmt=lambda value: "on" if value else "off",
+        group_help="""Manage whether the incomplete-stream warning is printed.
+
+When a paginated API reports a total higher than the number of items it
+actually serves, browse/download prints a warning naming the missing count.
+The usual cause is Zhihu hiding deleted or restricted items, not a bug.
+
+The warning is on by default; set this to true to silence it:
+
+  zhihu config suppress-incomplete-warning set true
+  zhihu config suppress-incomplete-warning clear   # back to warning""",
+    ),
 ]
 
 

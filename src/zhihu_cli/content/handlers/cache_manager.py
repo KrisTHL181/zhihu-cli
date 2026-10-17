@@ -328,6 +328,21 @@ class CacheManager:
         config["plot_dpi"] = dpi
         self._atomic_write(self.config_file, json.dumps(config, indent=2))
 
+    def get_suppress_incomplete_warning(self) -> bool:
+        """Return whether incomplete-pagination warnings are suppressed.
+
+        Stored as a plain bool under ``suppress_incomplete_warning``.  Anything
+        other than an explicit JSON ``true`` reads as ``False``, so a malformed
+        or hand-edited value keeps the warning visible.
+        """
+        return self.get_config().get("suppress_incomplete_warning", False) is True
+
+    def set_suppress_incomplete_warning(self, enabled: bool) -> None:
+        """Persist whether incomplete-pagination warnings are suppressed."""
+        config = self.get_config()
+        config["suppress_incomplete_warning"] = bool(enabled)
+        self._atomic_write(self.config_file, json.dumps(config, indent=2))
+
     # ── question cache ──────────────────────────────────────────────────
 
     @make_thread_safe
