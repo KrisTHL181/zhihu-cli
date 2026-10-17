@@ -128,6 +128,7 @@ def scrape_answers(
                 "comment": ans.get("comment_count", 0),
                 "favorite": ans.get("favlists_count", 0),
                 "created_time": int(ans.get("created_time", 0) or 0),
+                "updated_time": int(ans.get("updated_time", 0) or 0),
                 "content": content,
                 "is_collapsed": bool(ans.get("is_collapsed", False)),
                 "collapse_reason": ans.get("collapse_reason") or "",
@@ -253,15 +254,18 @@ def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, An
         elif isinstance(author_ref, dict):
             author_name = author_ref.get("name", "unknown")
 
-    # Resolve created date from entity timestamps
+    # Resolve created/updated timestamps from entity timestamps
     created_ts = answer_data.get("created_time") or answer_data.get("created") or answer_data.get("createdTime")
     if not created_ts:
         created_ts = question_data.get("created")
+    updated_ts = answer_data.get("updated_time") or answer_data.get("updatedTime") or answer_data.get("updated")
+    if isinstance(created_ts, (int, float)) and created_ts > 1e12:
+        created_ts = created_ts / 1000
+    if isinstance(updated_ts, (int, float)) and updated_ts > 1e12:
+        updated_ts = updated_ts / 1000
     created_date = "unknown"
     if created_ts:
         try:
-            if isinstance(created_ts, (int, float)) and created_ts > 1e12:
-                created_ts = created_ts / 1000
             created_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
         except (ValueError, OSError):
             pass
@@ -274,6 +278,8 @@ def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, An
         "comment": answer_data.get("commentCount", 0),
         "favorite": answer_data.get("favlistsCount", 0),
         "created": created_date,
+        "created_time": fmt_time(created_ts),
+        "updated_time": fmt_time(updated_ts),
     }
 
     content_html = answer_data.get("content", "")

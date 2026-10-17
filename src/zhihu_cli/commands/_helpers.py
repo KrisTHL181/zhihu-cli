@@ -9,7 +9,7 @@ from typing import Any
 
 import click
 
-from zhihu_cli.content.handlers import get_type_and_id
+from zhihu_cli.content.handlers import fmt_time, get_type_and_id
 from zhihu_cli.output import (
     blank,
     echo,
@@ -116,6 +116,36 @@ def _save_json_output(data: Any, output_path: str, label: str = "items") -> None
 # ── Display helpers ────────────────────────────────────────────────────────
 
 
+def _format_time_pair(created: Any, updated: Any = None) -> str:
+    """Format a creation/update timestamp pair for terminal display.
+
+    :param created: Creation time, either already formatted (e.g. from
+        :func:`~zhihu_cli.content.handlers.fmt_time`) or raw epoch seconds.
+    :param updated: Optional update time, in the same accepted forms.
+    :returns: ``"<created> (updated: <updated>)"`` when the update time
+        differs from the creation time, otherwise whichever timestamp is
+        available, or an empty string when neither is.
+    """
+
+    def _normalize(value: Any) -> str:
+        if value is None or value == "" or value == 0:
+            return ""
+        if isinstance(value, (int, float)):
+            value = fmt_time(value)
+        text = str(value).strip()
+        if text in ("unknown", "unknown time"):
+            return ""
+        return text
+
+    created_str = _normalize(created)
+    updated_str = _normalize(updated)
+    if not created_str:
+        return updated_str
+    if updated_str and updated_str != created_str:
+        return f"{created_str} (updated: {updated_str})"
+    return created_str
+
+
 def _display_following_items(items: list[dict], totals: int | None = None) -> None:
     """Display a list of following/followed items in terminal mode."""
     for i, item in enumerate(items, 1):
@@ -154,7 +184,11 @@ def _display_following_items(items: list[dict], totals: int | None = None) -> No
             a_cnt = item.get("answer_count", 0)
             f_cnt = item.get("follower_count", 0)
             ctime = item.get("created_time", "")
-            stats = f"{f_label('answers:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}  {f_label('created:')} {f_meta(ctime)}"
+            utime = item.get("updated_time", "")
+            stats = (
+                f"{f_label('answers:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}  "
+                f"{f_label('created:')} {f_meta(_format_time_pair(ctime, utime))}"
+            )
             echo(f"  {item_index(i)} {f_bold(title[:120])}")
             echo(f"    {f_dim(stats)}")
             echo(f"    {f_url(item.get('url', ''))}")
@@ -181,6 +215,9 @@ def _display_following_items(items: list[dict], totals: int | None = None) -> No
             a_cnt = item.get("answer_count", 0)
             f_cnt = item.get("follower_count", 0)
             stats = f"{f_label('items:')} {f_num(a_cnt)}  {f_label('followers:')} {f_num(f_cnt)}"
+            time_pair = _format_time_pair(item.get("created_time"), item.get("updated_time"))
+            if time_pair:
+                stats += f"  {f_label('created:')} {f_meta(time_pair)}"
             echo(f"  {item_index(i)} {f_bold(title)} {f_tag('collection')}")
             if creator_name:
                 echo(f"    {f_label('by')} {f_name(creator_name)}")

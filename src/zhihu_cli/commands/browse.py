@@ -7,6 +7,7 @@ import click
 
 from zhihu_cli.commands._helpers import (
     _display_following_items,
+    _format_time_pair,
     _parse_item_url,
     _resolve_answer_id,
     _resolve_url_token,
@@ -183,8 +184,12 @@ def register_browse(main_group):
             with console.pager(styles=True, links=True):
                 console.print(Markdown(question_md))
                 for i, ans in enumerate(answers, 1):
+                    time_str = _format_time_pair(ans.get("created_time"), ans.get("updated_time"))
+                    time_part = f" created: {time_str}" if time_str else ""
                     console.print(
-                        f"\n--- Answer #{i} (ID: {ans['id']}) by {ans['author']} (+{ans['vote']} votes, {ans['comment']} comments, {ans['favorite']} favorites) ---"
+                        f"\n--- Answer #{i} (ID: {ans['id']}) by {ans['author']} "
+                        f"(+{ans['vote']} votes, {ans['comment']} comments, "
+                        f"{ans['favorite']} favorites){time_part} ---"
                     )
                     tag = _collapse_tag(ans)
                     if tag:
@@ -198,13 +203,15 @@ def register_browse(main_group):
                 vote = ans["vote"]
                 comment = ans["comment"]
                 favorite = ans["favorite"]
+                time_str = _format_time_pair(ans.get("created_time"), ans.get("updated_time"))
+                time_part = f" {f_label('created:')} {f_meta(time_str)}" if time_str else ""
                 echo(
                     f"\n{f_bold('--- Answer')} #{i} "
                     f"({f_label('ID:')} {ans_id}) "
                     f"{f_bold('by')} {f_name(author)} "
                     f"({f_green('+' + str(vote))} {f_meta('votes')}, "
                     f"{f_num(comment)} {f_meta('comments')}, "
-                    f"{f_num(favorite)} {f_meta('favorites')}) ---"
+                    f"{f_num(favorite)} {f_meta('favorites')}){time_part} ---"
                 )
                 tag = _collapse_tag(ans)
                 if tag:
@@ -228,11 +235,16 @@ def register_browse(main_group):
 
         title = metadata.get("title", "untitled")
         author = metadata.get("author", "unknown")
-        created = metadata.get("created", "unknown")
+        created = metadata.get("created_time") or metadata.get("created")
+        updated = metadata.get("updated_time")
+        created_pair = _format_time_pair(created, updated) or "unknown time"
         upvotes = metadata.get("vote", 0)
         comments = metadata.get("comment", 0)
         favorites = metadata.get("favorite", 0)
-        header = f"# {title}\n\n**Author:** {author} | **Date:** {created} | **Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
+        header = (
+            f"# {title}\n\n**Author:** {author} | **Created:** {created_pair} | "
+            f"**Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
+        )
 
         _print_reading(header, markdown, reading_mode)
 
@@ -254,7 +266,12 @@ def register_browse(main_group):
         upvotes = stats.get("voteup_count", 0)
         comments = stats.get("comment_count", 0)
         favorites = stats.get("favlists_count", 0)
-        header = f"# {title}\n\n**Author:** {author} | **Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
+        created = _format_time_pair(metadata.get("created_time"), metadata.get("updated_time"))
+        created_part = f" | **Created:** {created}" if created else ""
+        header = (
+            f"# {title}\n\n**Author:** {author}{created_part} | "
+            f"**Upvotes:** {upvotes} | **Comments:** {comments} | **Favorites:** {favorites}"
+        )
 
         _print_reading(header, markdown, reading_mode)
 
@@ -275,11 +292,14 @@ def register_browse(main_group):
 
         title = metadata.get("title", "untitled")
         author = metadata.get("author", {}).get("name", "unknown")
-        created = metadata.get("created_time", "unknown")
+        created = _format_time_pair(metadata.get("created_time"), metadata.get("updated_time")) or "unknown"
         stats = metadata.get("stats", {})
         upvotes = stats.get("voteup_count", 0)
         comments = stats.get("comment_count", 0)
-        header = f"# {title}\n\n**Author:** {author} | **Date:** {created} | **Upvotes:** {upvotes} | **Comments:** {comments}"
+        header = (
+            f"# {title}\n\n**Author:** {author} | **Created:** {created} | "
+            f"**Upvotes:** {upvotes} | **Comments:** {comments}"
+        )
 
         _print_reading(header, markdown, reading_mode)
 
@@ -525,6 +545,9 @@ def register_browse(main_group):
             if excerpt:
                 echo(f"    {f_dim(f'preview: {excerpt[:200]}')}")
             echo(f"    {f_label('author=')}{f_name(author)}  {f_label('votes=')}{f_num(item.get('voteup_count', 0))}")
+            time_str = _format_time_pair(item.get("created_time"), item.get("updated_time"))
+            if time_str:
+                echo(f"    {f_label('created:')} {f_meta(time_str)}")
             if url:
                 echo(f"    {f_label('link:')} {f_url(url)}")
             blank()
@@ -592,6 +615,9 @@ def register_browse(main_group):
                 if follower_count:
                     parts.append(f"{f_num(follower_count)} {f_dim('followers')}")
                 echo(f"    {'  '.join(parts)}")
+            time_str = _format_time_pair(item.get("created_time"))
+            if time_str:
+                echo(f"    {f_label('created:')} {f_meta(time_str)}")
             if url:
                 echo(f"    {f_url(url)}")
             blank()
