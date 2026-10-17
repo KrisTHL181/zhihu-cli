@@ -18,11 +18,13 @@ import re
 import sys
 import threading
 from contextlib import nullcontext
+from http.cookiejar import CookieJar
 from typing import Any
 from urllib.parse import urlparse
 
 from curl_cffi import CurlHttpVersion
 from curl_cffi import requests as _requests
+from curl_cffi.requests.cookies import Cookies
 from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import get_user_agent
@@ -110,16 +112,22 @@ class ZhihuSession(_requests.Session):
         return self._zse_cipher
 
     def _get_dc0(self) -> str:
+        # The jar wins once it holds cookies: libcurl replaces an explicit
+        # ``Cookie`` header with the jar's contents, and a CAPTCHA resolution
+        # refreshes ``d_c0`` on the jar only.  Sessions built without a
+        # (seeded) jar keep using the static header, as before.
+        try:
+            value = self.cookies.get("d_c0")
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+
         cookie_header = self.headers.get("Cookie", "")
         if isinstance(cookie_header, str):
             for part in cookie_header.split("; "):
                 if part.startswith("d_c0="):
                     return part[5:]
-        # curl_cffi Cookies may yield strings (names) when iterated
-        try:
-            return str(self.cookies.get("d_c0", ""))
-        except Exception:
-            pass
         return ""
 
     def _build_sign_source(self, method: str, url: str, kwargs: dict) -> str | None:
@@ -288,7 +296,43 @@ def _resolve_user_agent(headers: dict[str, str]) -> str:
     return headers.get("User-Agent", "")
 
 
-def _build_direct_session(profile_name: str | None = None) -> ZhihuSession:
+def _seed_cookie_jar(jar: CookieJar, cookie_header: str) -> None:
+    """Seed *jar* from a profile's ``Cookie`` header.
+
+    Necessary because libcurl replaces an explicit ``Cookie`` header with the
+    jar's contents as soon as the jar is non-empty — an unseeded jar would drop
+    the profile's authentication cookies.  Names already present are left
+    untouched so values updated by the server (e.g. a refreshed ``d_c0`` after
+    a CAPTCHA) win over the stale header.
+
+    :param jar: The session's cookie jar.
+    :param cookie_header: Raw ``Cookie`` header value, ``name=value; ...``.
+    """
+    if not cookie_header:
+        return
+    try:
+        # ``Cookies(jar)`` keeps the very same jar object (``else: self.jar =
+        # cookies``), so ``set`` below mutates the jar the session uses.
+        cookies = Cookies(jar)
+        existing = {cookie.name for cookie in jar}
+        for part in cookie_header.split("; "):
+            name, sep, value = part.partition("=")
+            if not sep or not name or name in existing:
+                continue
+            cookies.set(name, value, domain=".zhihu.com", path="/")
+            existing.add(name)
+    except Exception:
+        # Seeding is best-effort: a malformed cookie header must not stop the
+        # session from being built (the static header still applies if the jar
+        # stays empty).
+        pass
+
+
+def _build_direct_session(
+    profile_name: str | None = None,
+    cookies: CookieJar | None = None,
+    timeout: float | None = None,
+) -> ZhihuSession:
     """Build a direct :class:`ZhihuSession` from a profile's headers.
 
     This is the original (non-daemon) session factory.
@@ -298,17 +342,30 @@ def _build_direct_session(profile_name: str | None = None) -> ZhihuSession:
         existing caller is unaffected.  Naming a profile builds a session for a
         profile that is not active, which is what
         :func:`zhihu_cli.content.handlers.requests.use_profile` relies on.
+    :param cookies: Jar the session should use.  When given, the session keeps
+        this exact object (curl_cffi does not copy it) and the profile's cookies
+        are seeded into it, so several sessions can share live cookie state.
+        ``None`` keeps the historical per-session jar.
+    :param timeout: Default request timeout in seconds.  ``None`` keeps
+        curl_cffi's default.
     :returns: A session carrying that profile's headers.
     """
     hdrs = cache_manager.load_headers(profile_name)
     ua = _resolve_user_agent(hdrs)
-    sess = ZhihuSession(
-        impersonate=get_browser(ua),
-        http_version=CurlHttpVersion.V3,
-    )
+    kwargs: dict[str, Any] = {
+        "impersonate": get_browser(ua),
+        "http_version": CurlHttpVersion.V3,
+    }
+    if cookies is not None:
+        kwargs["cookies"] = cookies
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    sess = ZhihuSession(**kwargs)
     sess.headers.update(hdrs)
     if ua:
         sess.headers["User-Agent"] = ua
+    if cookies is not None:
+        _seed_cookie_jar(cookies, hdrs.get("Cookie", ""))
     return sess
 
 

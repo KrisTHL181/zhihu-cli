@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     # The names must exist for type checkers even though, at runtime, they are
     # resolved through __getattr__ (PEP 562) rather than bound here.
     from zhihu_cli.api import (
+        direct_sessions,
         draft_to_markdown,
         fetch_article_item,
         fetch_child_comments,
@@ -152,6 +153,7 @@ __all__ = [
     "get_rate_limit",
     "rate_limit",
     "use_direct_session",
+    "direct_sessions",
 ]
 
 #: Exceptions, bound at import time by the imports above: they never take the

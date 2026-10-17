@@ -24,6 +24,7 @@ from __future__ import annotations
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
+from http.cookiejar import CookieJar
 from typing import TYPE_CHECKING, Any
 
 # ── lightweight (stdlib-only) imports ──────────────────────────────────────
@@ -32,7 +33,7 @@ from zhihu_cli.content.utils import rate_limit
 from zhihu_cli.errors import AuthError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
 # ── lazy re-exports ────────────────────────────────────────────────────────
 #
@@ -67,6 +68,8 @@ def __getattr__(name: str) -> Any:
         ctx = _ctx_session.get()
         if ctx is not None:
             return ctx.headers
+        if _direct_depth:
+            return _current_thread_session().headers
         _get_session()  # ensure headers is populated
         return _headers
 
@@ -149,6 +152,43 @@ _ctx_profile: ContextVar[str | None] = ContextVar("zhihu_profile_name", default=
 _profile_session_cache: dict[str, Any] = {}
 _profile_session_lock = threading.Lock()
 
+# ── process-wide direct-per-thread scope (:func:`direct_sessions`) ──────────
+#
+# Deliberately a plain module-level depth counter rather than a ContextVar:
+# ``ThreadPoolExecutor`` workers do not inherit the submitter's contextvars, so
+# a ContextVar would make workers created anywhere inside the block silently
+# fall back to the daemon.  Every thread that calls :func:`_get_session` while
+# the depth is non-zero gets its own direct session.
+#
+# The lock is leaf-level: it guards the counters/registries below and is never
+# held across session construction, ``configure`` callbacks, or network I/O.
+_direct_lock = threading.RLock()
+
+#: Nesting depth.  ``> 0`` means "direct per-thread sessions are active".
+_direct_depth: int = 0
+
+#: Bumped by :func:`reload_session` and :func:`_close_direct_sessions`; a thread
+#: holding a session built for an older generation rebuilds on its next use.
+_direct_generation: int = 0
+
+#: Enclosing scope options; the innermost scope's entry wins.
+_direct_options_stack: list[dict[str, Any]] = []
+
+#: Per-thread cache, keyed by ``(generation, profile)``.  Created lazily so
+#: merely importing this module does not allocate a thread-local.
+_direct_thread_state = threading.local()
+
+#: Sessions built inside any active scope, so :meth:`DirectSessions.close_all`
+#: can find every thread's session.  Guarded by :data:`_live_direct_lock`.
+_live_direct_sessions: set[Any] = set()
+_live_direct_lock = threading.Lock()
+
+#: One cookie jar per profile key (``None`` = active profile), shared by every
+#: thread's session so a CAPTCHA resolved by one worker updates the cookies all
+#: the others send.  ``http.cookiejar.CookieJar`` has an internal lock, making
+#: concurrent use safe.
+_direct_cookie_jars: dict[str | None, CookieJar] = {}
+
 
 class _LazySession:
     """Transparent proxy that builds the real session on first attribute use.
@@ -199,12 +239,19 @@ def _get_session() -> Any:
 
     Inside ``with use_profile(...)`` the pinned session short-circuits both
     paths — the global singleton is neither read nor built.
+
+    Inside ``with direct_sessions(...)`` every thread gets its own lazily-built
+    direct session; the scope's options config profile, captcha handling, and
+    timeout.  The daemon is never consulted in that mode.
     """
     global _session, _headers
 
     ctx = _ctx_session.get()
     if ctx is not None:
         return ctx
+
+    if _direct_depth:
+        return _current_thread_session()
 
     if _session is not None:
         return _session
@@ -283,6 +330,252 @@ def _build_session() -> Any:
     return session_
 
 
+def _direct_options() -> dict[str, Any]:
+    """Return the innermost direct-session scope's options (empty when none)."""
+    return _direct_options_stack[-1] if _direct_options_stack else {}
+
+
+def _thread_sessions() -> dict[tuple[int, str | None], Any]:
+    """Return (creating on first use) this thread's direct-session cache."""
+    sessions = getattr(_direct_thread_state, "sessions", None)
+    if sessions is None:
+        sessions = {}
+        _direct_thread_state.sessions = sessions  # type: ignore[attr-defined]
+    return sessions
+
+
+def _direct_cookie_jar(profile: str | None) -> CookieJar:
+    """Return the shared jar for *profile*, creating it on first use.
+
+    Creation is a bare object allocation, so taking :data:`_direct_lock` here is
+    leaf-level and safe.  The jar itself is not seeded until a session is built
+    from it (see ``_session_core._build_direct_session``).
+
+    :param profile: Profile name, or ``None`` for the active profile.
+    :returns: The process-wide jar shared by every session for that profile.
+    """
+    jar = _direct_cookie_jars.get(profile)
+    if jar is not None:
+        return jar
+    with _direct_lock:
+        jar = _direct_cookie_jars.get(profile)
+        if jar is None:
+            jar = CookieJar()
+            _direct_cookie_jars[profile] = jar
+    return jar
+
+
+def _current_thread_session() -> Any:
+    """Return this thread's direct session for the active scope, building it once.
+
+    The cache key includes :data:`_direct_generation`, so a
+    :func:`reload_session` (or :meth:`DirectSessions.close_all`) invalidates it:
+    the next call closes the thread's stale sessions and builds fresh ones.
+    Only this thread's entries are ever closed here — a worker must not close a
+    session another worker is still using.
+
+    :returns: A :class:`~zhihu_cli.content.handlers._session_core.ZhihuSession`
+        carrying the effective profile's headers and the scope's options.
+    :raises AuthError: Never directly; a profile named by ``use_profile`` is
+        validated there.
+    """
+    options = _direct_options()
+
+    profile = _ctx_profile.get()
+    if profile is None:
+        profile = options.get("profile")
+
+    generation = _direct_generation
+    key = (generation, profile)
+    sessions = _thread_sessions()
+
+    cached = sessions.get(key)
+    if cached is not None:
+        return cached
+
+    stale = [stale_key for stale_key in sessions if stale_key[0] != generation]
+    for stale_key in stale:
+        old = sessions.pop(stale_key, None)
+        if old is None:
+            continue
+        try:
+            old.close()
+        except Exception:
+            pass
+        with _live_direct_lock:
+            _live_direct_sessions.discard(old)
+
+    # Lazy import is a hard rule: a module-level import would pull curl_cffi and
+    # lxml into ``zhihu --help`` and shell completion.
+    from zhihu_cli.content.handlers._session_core import _build_direct_session
+
+    sess = _build_direct_session(
+        profile,
+        cookies=_direct_cookie_jar(profile),
+        timeout=options.get("request_timeout"),
+    )
+    _inject_app_headers(sess)
+    captcha_handler = options.get("captcha_handler")
+    if captcha_handler is not None:
+        sess.captcha_handler = captcha_handler
+    for configure in options.get("configure", ()):
+        configure(sess)
+
+    sessions[key] = sess
+    with _live_direct_lock:
+        _live_direct_sessions.add(sess)
+    return sess
+
+
+def _close_direct_sessions() -> None:
+    """Close every session registered by the direct-session scopes.
+
+    Idempotent: the registry is snapshotted and cleared before any session is
+    closed, so a concurrent or repeated call finds nothing left to do.  The
+    generation bump makes each thread rebuild on its next request even though
+    its thread-local cache still holds an entry.
+    """
+    global _direct_generation
+
+    with _live_direct_lock:
+        sessions = list(_live_direct_sessions)
+        _live_direct_sessions.clear()
+
+    with _direct_lock:
+        _direct_generation += 1
+
+    for sess in sessions:
+        try:
+            sess.close()
+        except Exception:
+            pass
+
+
+class DirectSessions:
+    """Handle yielded by :func:`direct_sessions`.
+
+    The handle is the only supported way to reach the per-thread sessions
+    without going through :func:`_get_session`; it is safe to share across the
+    worker threads of the block.
+    """
+
+    def initializer(self) -> None:
+        """Build the calling thread's session eagerly.
+
+        Intended for ``ThreadPoolExecutor(initializer=ds.initializer)``: it
+        removes the first-request latency from every worker and surfaces a
+        construction error in the pool rather than inside a task.
+
+        :raises RuntimeError: If the enclosing :func:`direct_sessions` block has
+            already exited.
+        """
+        self.current()
+
+    def current(self) -> Any:
+        """Return the calling thread's session for the active scope.
+
+        :returns: This thread's direct session, built on first call.
+        :raises RuntimeError: If no :func:`direct_sessions` scope is active in
+            this process.
+        """
+        if not _direct_depth:
+            raise RuntimeError("direct_sessions() is not active")
+        return _current_thread_session()
+
+    def close_all(self) -> None:
+        """Close every session built in the scope.  Safe to call more than once."""
+        _close_direct_sessions()
+
+
+@contextmanager
+def direct_sessions(
+    profile: str | None = None,
+    *,
+    captcha_handler: str | None = None,
+    request_timeout: float | None = None,
+    configure: Iterable[Callable[[Any], None]] = (),
+) -> Iterator[DirectSessions]:
+    """Use one direct session per thread instead of the process-wide session.
+
+    This is the supported replacement for out-of-tree scrapers that called the
+    private ``_build_direct_session`` and wrote the private ``_ctx_session``
+    ContextVar from each worker.  Inside the block every thread that resolves
+    :func:`_get_session` — including workers created by a
+    ``ThreadPoolExecutor``, which do not inherit the submitter's contextvars —
+    lazily builds and caches its own :class:`ZhihuSession`.  The daemon is never
+    contacted: each session talks to Zhihu directly, so requests from different
+    threads run concurrently instead of being serialised behind the daemon's
+    single lock::
+
+        from concurrent.futures import ThreadPoolExecutor
+        from zhihu_cli import direct_sessions
+
+        with direct_sessions(captcha_handler="ignore", request_timeout=30.0) as ds:
+            with ThreadPoolExecutor(max_workers=8, initializer=ds.initializer) as pool:
+                ...
+
+    Every session for a profile shares one cookie jar, so a CAPTCHA resolved by
+    one worker updates the cookies all the others send.
+
+    The scope is process-wide and nestable.  Only the outermost exit closes
+    sessions; a nested block contributes its own options while it is active.
+    Exit order matters in two ways:
+
+    * The block must outlive the worker pool.  Shut the pool down *inside* the
+      ``with``; a task that starts afterwards falls back to the process-wide
+      session.
+    * Sessions are closed when the block exits, **not** when a worker thread
+      ends — Python offers no reliable hook for the latter.  A long-lived pool
+      that keeps running after the block therefore holds closed sessions; keep
+      the pool's lifetime inside the scope.
+
+    :param profile: Profile whose headers every session uses, or ``None`` for
+        the active profile.  An enclosing :func:`use_profile` overrides this.
+    :param captcha_handler: ``"auto"``, ``"prompt"``, or ``"ignore"``.  ``None``
+        keeps :class:`ZhihuSession`'s default (``"auto"``).
+    :param request_timeout: Default request timeout in seconds for every
+        session.  ``None`` keeps curl_cffi's default.
+    :param configure: Callables run with each new session before it is handed
+        out, e.g. to set extra headers.  They run once per thread session.
+    :returns: A :class:`DirectSessions` handle providing the pool initializer and
+        :meth:`DirectSessions.close_all`.
+    """
+    global _direct_depth
+
+    options: dict[str, Any] = {
+        "profile": profile,
+        "captcha_handler": captcha_handler,
+        "request_timeout": request_timeout,
+        "configure": tuple(configure),
+    }
+
+    with _direct_lock:
+        outermost = _direct_depth == 0
+        # Options first: a thread that observes a non-zero depth must always
+        # find the options that go with it.
+        _direct_options_stack.append(options)
+        _direct_depth += 1
+
+    if outermost:
+        # Direct sessions bypass ``_build_session``, the usual place this is
+        # resolved, so a library caller still gets the persisted qps cap.
+        rate_limit.configure_from_config()
+
+    handle = DirectSessions()
+    try:
+        yield handle
+    finally:
+        # Decrement *before* closing: once the depth is back to zero no thread
+        # can enter ``_current_thread_session`` through ``_get_session``, so
+        # the registry snapshot below cannot miss a just-created session.
+        with _direct_lock:
+            _direct_depth -= 1
+            _direct_options_stack.pop()
+
+        if outermost:
+            handle.close_all()
+
+
 def _inject_app_headers(sess: Any) -> None:
     """Add ``x-app-version`` and ``x-app-za`` headers to *sess*.
 
@@ -309,7 +602,16 @@ def reload_session() -> None:
     sessions where one was meant.  The lock is held across the rebuild's I/O
     on purpose — that is exactly the work that must not be duplicated.
     """
-    global _session, _headers
+    global _direct_generation, _session, _headers
+
+    if _direct_depth:
+        # Scratch the per-thread sessions instead of rebuilding the global one:
+        # there is no daemon in this mode and no single session to replace.
+        hdrs = cache_manager.load_headers()
+        with _direct_lock:
+            _direct_generation += 1
+            _headers = dict(hdrs)
+        return
 
     try:
         from zhihu_cli.daemon.proxy import DaemonProxySession
@@ -423,9 +725,26 @@ def use_profile(name: str) -> Iterator[None]:
     coordinates it is one process-wide object, so a challenge resolved for one
     profile also releases threads pinned to another.
 
+    Inside :func:`direct_sessions` the pin is even cheaper: only the profile
+    *name* is pinned (``_ctx_session`` stays ``None``), and each thread builds
+    and caches its own session for it, sharing that profile's cookie jar.  The
+    per-profile session cache above is not used in that mode.
+
     :param name: Name of an existing profile.
     :raises AuthError: If no such profile exists.
     """
+    if _direct_depth:
+        if name not in cache_manager.list_profiles():
+            raise AuthError(f"Profile '{name}' does not exist")
+        session_token = _ctx_session.set(None)
+        profile_token = _ctx_profile.set(name)
+        try:
+            yield
+        finally:
+            _ctx_session.reset(session_token)
+            _ctx_profile.reset(profile_token)
+        return
+
     active = cache_manager.get_active_profile()
     if active is not None and name == active:
         # The process-wide session already *is* this profile.  ``None`` also

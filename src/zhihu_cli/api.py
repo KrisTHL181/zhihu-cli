@@ -55,7 +55,7 @@ from zhihu_cli.errors import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 __all__ = [
     "AuthError",
@@ -114,6 +114,7 @@ __all__ = [
     "get_rate_limit",
     "rate_limit",
     "use_direct_session",
+    "direct_sessions",
 ]
 
 # ── plumbing ───────────────────────────────────────────────────────────────
@@ -608,3 +609,60 @@ def use_direct_session(profile: str | None = None) -> Iterator[Any]:
 
     with _use_direct(profile) as session_:
         yield session_
+
+
+@contextmanager
+def direct_sessions(
+    profile: str | None = None,
+    *,
+    captcha_handler: str | None = None,
+    request_timeout: float | None = None,
+    configure: Iterable[Callable[[Any], None]] = (),
+) -> Iterator[Any]:
+    """Use one direct, non-daemon session per thread for the duration of a block::
+
+        from concurrent.futures import ThreadPoolExecutor
+        from zhihu_cli import direct_sessions
+
+        with direct_sessions(captcha_handler="ignore", request_timeout=30.0) as ds:
+            with ThreadPoolExecutor(max_workers=8, initializer=ds.initializer) as pool:
+                list(pool.map(work, items))
+        # every thread's session is closed here
+
+    This is the supported way to make a worker pool bypass the daemon.  The
+    process-wide daemon holds one session behind one lock, and a curl_cffi
+    session must not be shared across threads; inside the block every thread
+    that resolves the process session builds and caches its own instead.
+
+    The mode is process-wide, so workers created anywhere while the block is
+    active participate — unlike a context variable, which
+    ``ThreadPoolExecutor`` workers do not inherit.  All sessions for a profile
+    share one cookie jar, so a CAPTCHA resolved by one worker updates the
+    cookies every other worker sends.
+
+    Keep the block alive for the whole pool lifetime: sessions are closed at
+    block exit, not when a worker thread ends (there is no reliable hook for
+    the latter).  Scopes nest; only the outermost exit closes sessions.
+
+    :param profile: Profile whose headers every session uses, or ``None`` for
+        the active profile.  An enclosing :func:`use_profile` overrides this.
+    :param captcha_handler: ``"auto"``, ``"prompt"``, or ``"ignore"``.  ``None``
+        keeps the default (``"auto"``).
+    :param request_timeout: Default request timeout in seconds for every
+        session.  ``None`` keeps curl_cffi's default.
+    :param configure: Callables run with each new session before use, e.g. to
+        set extra headers.  They run once per thread session.
+    :returns: A handle exposing ``initializer`` (for
+        ``ThreadPoolExecutor``), ``current()``, and ``close_all()``.
+    :raises RuntimeError: From ``current()``/``initializer`` if called after the
+        block has exited.
+    """
+    from zhihu_cli.content.handlers.requests import direct_sessions as _direct_sessions
+
+    with _direct_sessions(
+        profile,
+        captcha_handler=captcha_handler,
+        request_timeout=request_timeout,
+        configure=configure,
+    ) as handle:
+        yield handle
