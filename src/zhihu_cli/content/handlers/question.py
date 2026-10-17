@@ -187,13 +187,49 @@ def unfollow_question(question_id: str) -> dict[str, Any]:
     return resp.json()
 
 
-def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, Any], str]:
-    """Scrape full content from a single answer page URL.
+_ANSWER_PATH_RE = re.compile(r"/answer/(\d+)/?$")
 
-    :param answer_url: full URL to a Zhihu answer page.
+
+def extract_answer_id(answer_url: str) -> str:
+    """Extract a numeric answer ID from a Zhihu answer URL or bare ID.
+
+    :param answer_url: A bare answer ID, ``/answer/<id>`` URL, or
+        ``/question/<qid>/answer/<aid>`` URL.
+    :returns: The numeric answer ID.
+    :raises ValueError: If no answer ID can be extracted.
+    """
+    candidate = answer_url.strip()
+    if candidate.isdigit():
+        return candidate
+
+    match = _ANSWER_PATH_RE.search(urlparse(candidate).path)
+    if match:
+        return match.group(1)
+
+    raise ValueError(f"Could not extract a Zhihu answer ID from {answer_url!r}")
+
+
+def _canonical_answer_url(answer_url: str) -> str:
+    """Normalise an answer reference to ``https://www.zhihu.com/answer/<id>``.
+
+    Accepts a bare numeric answer ID, a short answer URL, or a
+    ``/question/<qid>/answer/<aid>`` URL.  Anything else is returned unchanged
+    so the caller sees Zhihu's own error rather than a parse failure.
+    """
+    try:
+        return f"https://www.zhihu.com/answer/{extract_answer_id(answer_url)}"
+    except ValueError:
+        return answer_url.strip()
+
+
+def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, Any], str]:
+    """Scrape full content from a single answer page.
+
+    :param answer_url: full URL to a Zhihu answer page, or a bare answer ID.
     :param raw: when True, return raw HTML instead of converting to Markdown.
     :returns: (metadata, content) — content is Markdown by default, raw HTML if ``raw=True``.
     """
+    answer_url = _canonical_answer_url(answer_url)
     entities = get_page_state(fetch_page_html(answer_url))
 
     answers = entities.get("answers", {})

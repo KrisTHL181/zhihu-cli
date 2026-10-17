@@ -45,11 +45,11 @@ def fetch_segment_comments(
     def parser(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
         nonlocal _segment_infos
 
-        seg_infos = data.get("segment_infos", {})
+        seg_infos = data.get("segment_infos") or {}
         if seg_infos:
             _segment_infos.update(seg_infos)
 
-        for comment in data.get("data", []):
+        for comment in data.get("data") or []:
             author = comment.get("author", {})
             seg_info = _segment_infos.get(comment.get("resource_id", ""), {})
             segment_text = seg_info.get("content", "")

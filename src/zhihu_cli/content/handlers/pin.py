@@ -1,8 +1,27 @@
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
 from zhihu_cli.content.utils.html2markdown import converter
+
+_PIN_PATH_RE = re.compile(r"/pin/([^/?#]+)")
+
+
+def _canonical_pin_url(pin_url: str) -> str:
+    """Normalise a pin reference to ``https://www.zhihu.com/pin/<id>``.
+
+    Accepts a bare pin ID/token or a full ``/pin/<id>`` URL.  Other URLs are
+    returned unchanged so the caller sees Zhihu's own error.
+    """
+    candidate = pin_url.strip()
+    if candidate.startswith(("http://", "https://")):
+        match = _PIN_PATH_RE.search(urlparse(candidate).path)
+        if match:
+            return f"https://www.zhihu.com/pin/{match.group(1)}"
+        return candidate
+    return f"https://www.zhihu.com/pin/{candidate}"
 
 
 def _pick(item: dict[str, Any], *keys: str) -> Any:
@@ -126,7 +145,12 @@ def _render_body(item: dict[str, Any]) -> str:
 
 
 def scrape_pin(pin_url: str) -> tuple[dict[str, Any], str]:
-    entities = get_page_state(fetch_page_html(pin_url))
+    """Scrape a single pin page.
+
+    :param pin_url: Full URL to a Zhihu pin, or a bare pin ID.
+    :returns: ``(metadata, markdown)``.
+    """
+    entities = get_page_state(fetch_page_html(_canonical_pin_url(pin_url)))
     item = entities.get("pins", {})
     if not item:
         raise ValueError("No pins data found in entities")

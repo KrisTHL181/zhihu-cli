@@ -27,7 +27,13 @@ from zhihu_cli.content.handlers.following import (
 )
 from zhihu_cli.content.handlers.hot import fetch_hot_list
 from zhihu_cli.content.handlers.pin import scrape_pin
-from zhihu_cli.content.handlers.question import scrape_answer_page, scrape_answers, scrape_question_data
+from zhihu_cli.content.handlers.question import (
+    extract_answer_id,
+    extract_question_id,
+    scrape_answer_page,
+    scrape_answers,
+    scrape_question_data,
+)
 from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.segment_comments import fetch_segment_comments
 from zhihu_cli.content.handlers.upvoter import fetch_upvoters
@@ -210,7 +216,10 @@ def register_browse(main_group):
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def browse_answer(url: str, reading_mode: bool, output_json: bool) -> None:
-        """View a single Zhihu answer in the terminal."""
+        """View a single Zhihu answer in the terminal.
+
+        URL may be a full answer URL or a bare numeric answer ID.
+        """
         metadata, markdown = scrape_answer_page(url)
 
         if output_json:
@@ -254,7 +263,10 @@ def register_browse(main_group):
     @click.option("--reading-mode/--no-reading-mode", default=True, help="Use Rich pager for reading")
     @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
     def browse_pin(url: str, reading_mode: bool, output_json: bool) -> None:
-        """View a single Zhihu pin (想法) in the terminal."""
+        """View a single Zhihu pin (想法) in the terminal.
+
+        URL may be a full pin URL or a bare pin ID.
+        """
         metadata, markdown = scrape_pin(url)
 
         if output_json:
@@ -285,10 +297,14 @@ def register_browse(main_group):
         help="Diff output style: wikidiff (clean -/+/ ) or git (unified diff with headers)",
     )
     def browse_log(url: str, output_json: bool, sort_by: str, diff_style: str) -> None:
-        """View the edit history (log) of a Zhihu question."""
-        _, question_id = _parse_item_url(url)
-        if not question_id:
-            raise click.BadParameter(f"Cannot parse question ID from URL: {url}")
+        """View the edit history (log) of a Zhihu question.
+
+        URL may be a question URL or a bare question ID.
+        """
+        try:
+            question_id = extract_question_id(url)
+        except ValueError as e:
+            raise click.BadParameter(str(e)) from e
 
         entries = fetch_question_log(question_id, diff_style=diff_style)
         if sort_by != "default":
@@ -393,12 +409,14 @@ def register_browse(main_group):
         Segment comments are anchored to specific text spans within the
         answer, shown together with the highlighted passage they annotate.
 
-        URL must point to a Zhihu answer.
+        URL may be an answer URL or a bare answer ID.
         """
         set_json_mode(output_json)
 
-        _, item_id = _parse_item_url(url)
-        answer_id = _resolve_answer_id(item_id)
+        try:
+            answer_id = extract_answer_id(url)
+        except ValueError as e:
+            raise click.BadParameter(str(e)) from e
 
         info(f"Fetching segment comments for answer {answer_id} ...")
         comments = list(fetch_segment_comments(answer_id, limit=PAGE_SIZE, max_items=max_items))

@@ -1,7 +1,27 @@
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 from zhihu_cli.content.handlers import fmt_time
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state
+
+_ZVIDEO_PATH_RE = re.compile(r"/zvideo/(\d+)")
+
+
+def _canonical_zvideo_url(zvideo_url: str) -> str:
+    """Normalise a zvideo reference to ``https://www.zhihu.com/zvideo/<id>``.
+
+    Accepts a bare numeric zvideo ID or a full ``/zvideo/<id>`` URL.  Anything
+    else is returned unchanged so the caller sees Zhihu's own error.
+    """
+    candidate = zvideo_url.strip()
+    if candidate.isdigit():
+        return f"https://www.zhihu.com/zvideo/{candidate}"
+
+    match = _ZVIDEO_PATH_RE.search(urlparse(candidate).path)
+    if match:
+        return f"https://www.zhihu.com/zvideo/{match.group(1)}"
+    return candidate
 
 
 def parse_zvideo_metadata(item: dict[str, Any], author_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -145,10 +165,11 @@ def _resolve_author(author_ref: str, users: dict[str, Any]) -> dict[str, Any] | 
 def scrape_zvideo(zvideo_url: str) -> tuple[dict[str, Any], str]:
     """Scrape a Zhihu zvideo page.
 
-    Returns (metadata, markdown_content) where markdown_content embeds
-    the zvideo metadata and a link to the best-quality video URL.
+    :param zvideo_url: Full URL to a zvideo, or a bare numeric zvideo ID.
+    :returns: (metadata, markdown_content) where markdown_content embeds
+        the zvideo metadata and a link to the best-quality video URL.
     """
-    entities = get_page_state(fetch_page_html(zvideo_url))
+    entities = get_page_state(fetch_page_html(_canonical_zvideo_url(zvideo_url)))
     items = entities.get("zvideos", {})
     if not items:
         raise ValueError("No zvideo data found in page entities")

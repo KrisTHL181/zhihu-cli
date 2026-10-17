@@ -138,7 +138,10 @@ def download_question(url: str, output_dir: str, output_json: bool, with_media: 
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--with-media", is_flag=True, default=False, help="Download images/videos alongside Markdown")
 def download_pin(url: str, output_dir: str, output_json: bool, with_media: bool) -> None:
-    """Download a single Zhihu pin as Markdown."""
+    """Download a single Zhihu pin as Markdown.
+
+    URL may be a full pin URL or a bare pin ID.
+    """
     metadata, markdown = scrape_pin(url)
     if with_media:
         markdown, n = download_media_files(markdown, output_dir)
@@ -163,7 +166,10 @@ def download_pin(url: str, output_dir: str, output_json: bool, with_media: bool)
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON")
 @click.option("--no-download-video", is_flag=True, default=False, help="Skip downloading the video file")
 def download_video(url: str, output_dir: str, output_json: bool, no_download_video: bool) -> None:
-    """Download a Zhihu zvideo and its metadata."""
+    """Download a Zhihu zvideo and its metadata.
+
+    URL may be a full zvideo URL or a bare numeric zvideo ID.
+    """
     set_json_mode(output_json)
     metadata, markdown = scrape_zvideo(url)
     filepath = _save_markdown(metadata, markdown, output_dir)
