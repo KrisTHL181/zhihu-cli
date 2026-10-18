@@ -21,6 +21,7 @@ keeps the process-wide session.  See its docstring for why it does not go throug
 
 from __future__ import annotations
 
+import sys
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -95,7 +96,7 @@ def __getattr__(name: str) -> Any:
 def fetch_page_html(url: str) -> str:
     """Fetch a Zhihu page as HTML (uses the global session)."""
     url = url.replace("http://", "https://")
-    response = _get_session().get(url)
+    response = _check_auth_expired(_get_session().get(url))
     if response.status_code == 403 and "zh-zse-ck" in response.text:
         raise RuntimeError(f"Zhihu returned an HTML zh-zse-ck risk-control challenge for {url}")
     response.raise_for_status()
@@ -104,7 +105,7 @@ def fetch_page_html(url: str) -> str:
 
 def fetch_json(url: str) -> Any:
     """Fetch a URL and decode its JSON response."""
-    response = _get_session().get(url)
+    response = _check_auth_expired(_get_session().get(url))
     response.raise_for_status()
     return response.json()
 
@@ -189,6 +190,61 @@ _live_direct_lock = threading.Lock()
 #: concurrent use safe.
 _direct_cookie_jars: dict[str | None, CookieJar] = {}
 
+# ── expired-login detection ────────────────────────────────────────────────
+#
+# A stale ``z_c0`` ticket makes Zhihu answer 401 with one of these markers
+# instead of the anonymous response.  Anonymous requests get a different body
+# (code 101 / "request headers malformed"), so seeing a marker means "this
+# profile was logged in once and no longer is" — worth a one-line hint, since
+# the raw traceback ends in a bare ``HTTP Error 401`` that says nothing.
+
+#: Response bodies that mean the saved login ticket is no longer valid.
+_AUTH_EXPIRED_MARKERS = ("ERR_TICKET_NOT_EXIST", "ZERR_NO_AUTH_TOKEN")
+
+#: HTTP verbs whose response is inspected for an expired login.  ``get`` et al.
+#: are wrapped rather than ``request`` alone because curl_cffi's ``get`` calls
+#: the concrete session's ``request`` directly, bypassing this proxy.
+_AUTH_CHECKED_VERBS = frozenset({"get", "post", "put", "patch", "delete", "head", "request"})
+
+#: Profiles already reported, so one broken login prints one hint rather than
+#: one per request.
+_auth_warned_profiles: set[str] = set()
+_auth_warn_lock = threading.Lock()
+
+
+def _warn_auth_expired() -> None:
+    """Print (once per profile) that Zhihu rejected the saved login."""
+    profile = _context_profile() or cache_manager.get_active_profile()
+    key = profile or ""
+    with _auth_warn_lock:
+        if key in _auth_warned_profiles:
+            return
+        _auth_warned_profiles.add(key)
+
+    label = f"profile '{profile}'" if profile else "the active profile"
+    print(file=sys.stderr)
+    print(f"  ⚠️  Zhihu rejected the saved login for {label} (HTTP 401).", file=sys.stderr)
+    print("      Run 'zhihu auth login' to sign in again, or 'zhihu auth import' to", file=sys.stderr)
+    print("      reuse a browser session. 'zhihu profile switch <name>' uses another profile.", file=sys.stderr)
+    print(file=sys.stderr)
+
+
+def _check_auth_expired(response: Any) -> Any:
+    """Warn when *response* shows the saved login ticket is no longer valid.
+
+    :param response: A response object (curl_cffi or daemon proxy).
+    :returns: *response*, unchanged, so this can wrap a call in place.
+    """
+    if getattr(response, "status_code", None) != 401:
+        return response
+    try:
+        body = response.text
+    except Exception:  # noqa: BLE001 - streaming responses have no ``.text``
+        return response
+    if isinstance(body, str) and any(marker in body for marker in _AUTH_EXPIRED_MARKERS):
+        _warn_auth_expired()
+    return response
+
 
 class _LazySession:
     """Transparent proxy that builds the real session on first attribute use.
@@ -209,7 +265,14 @@ class _LazySession:
     __slots__ = ()
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(_get_session(), name)
+        attr = getattr(_get_session(), name)
+        if name in _AUTH_CHECKED_VERBS:
+
+            def checked(*args: Any, **kwargs: Any) -> Any:
+                return _check_auth_expired(attr(*args, **kwargs))
+
+            return checked
+        return attr
 
     def __setattr__(self, name: str, value: Any) -> None:
         setattr(_get_session(), name, value)
