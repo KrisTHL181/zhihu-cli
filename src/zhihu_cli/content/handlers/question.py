@@ -1,3 +1,7 @@
+"""Question and answer fetching, page-state parsing, and vote/thank actions."""
+
+from __future__ import annotations
+
 import re
 from collections.abc import Iterable
 from datetime import datetime
@@ -27,11 +31,19 @@ QUESTION_API_URL = (
     "?include=detail,answer_count,comment_count,follower_count,author,"
     "voteup_count,voting,can_vote,visit_count,relationship"
 )
-_QUESTION_PATH_RE = re.compile(r"/(?:question|questions)/(\d+)/?$")
+_QUESTION_PATH_RE = re.compile(r"/(?:question|questions)/(\d+)(?:/answer/\d+)?/?$")
 
 
 def extract_question_id(question_url: str) -> str:
-    """Extract a numeric question ID from a Zhihu question URL or raw ID."""
+    """Extract a numeric question ID from a Zhihu question URL or raw ID.
+
+    Both ``/question/<qid>`` and the composite
+    ``/question/<qid>/answer/<aid>`` form are accepted.
+
+    :param question_url: a question URL or a bare numeric question ID.
+    :returns: the numeric question ID.
+    :raises ValueError: if no question ID can be extracted.
+    """
     candidate = question_url.strip()
     if candidate.isdigit():
         return candidate
@@ -43,11 +55,33 @@ def extract_question_id(question_url: str) -> str:
     raise ValueError(f"Could not extract a Zhihu question ID from {question_url!r}")
 
 
+def is_http_404(exc: BaseException) -> bool:
+    """Return whether *exc* represents an HTTP 404 from either session type.
+
+    Direct sessions raise ``curl_cffi``'s ``HTTPError`` while daemon-backed
+    sessions raise :class:`~zhihu_cli.daemon.proxy.DaemonHTTPError`; both
+    expose the offending response as ``.response``.
+
+    :param exc: the exception to inspect.
+    :returns: True when the exception carries a 404 response.
+    """
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None) == 404
+
+
 def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a question entity to the metadata rendered by ``browse question``.
+
+    :param item: a question dict from the JSON API or from a page's
+        ``js-initialData``; the SSR camelCase keys are accepted alongside the
+        API's snake_case ones.
+    :returns: the display metadata dict.
+    """
     author = item.get("author", {})
     question_id = item.get("id", "")
     url = item.get("url", "")
-    if question_id and (not url or urlparse(url).netloc == "api.zhihu.com"):
+    parsed_url = urlparse(url)
+    if question_id and (not url or parsed_url.netloc == "api.zhihu.com" or parsed_url.path.startswith("/api/")):
         url = f"https://www.zhihu.com/question/{question_id}"
 
     return {
@@ -69,7 +103,14 @@ def parse_question_metadata(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_question_item(question_url: str) -> dict[str, Any]:
-    """Fetch raw question data from the JSON API."""
+    """Fetch raw question data from the JSON API.
+
+    :param question_url: a question URL (including the composite
+        ``/question/<qid>/answer/<aid>`` form) or a bare question ID.
+    :returns: the question object returned by the API.
+    :raises HTTPError: if the question resource is unavailable.  Deleted or
+        hidden questions return 404 with ``{"error": {"code": 4041, ...}}``.
+    """
     question_id = extract_question_id(question_url)
     api_url = QUESTION_API_URL.format(question_id=question_id)
 
@@ -223,6 +264,47 @@ def _canonical_answer_url(answer_url: str) -> str:
         return answer_url.strip()
 
 
+def _fetch_answer_entities(answer_url: str) -> dict[str, Any]:
+    """Fetch an answer page and return its ``js-initialData`` entity map.
+
+    :param answer_url: an answer URL, bare answer ID, or composite
+        ``/question/<qid>/answer/<aid>`` URL.
+    :returns: the page's ``entities`` dict.
+    :raises ValueError: if the page carries no answer data.
+    """
+    canonical = _canonical_answer_url(answer_url)
+    entities = get_page_state(fetch_page_html(canonical))
+    if not entities.get("answers"):
+        raise ValueError(f"No answer data found in {canonical}")
+    return entities
+
+
+def _answer_author_name(answer_data: dict[str, Any], entities: dict[str, Any]) -> str:
+    """Resolve an answer entity's author name.
+
+    :param answer_data: the answer entity from ``js-initialData``.
+    :param entities: the full entity map, used to resolve a string author ref.
+    :returns: the author's display name, or ``"unknown"``.
+    """
+    author_ref = answer_data.get("author", "")
+    if isinstance(author_ref, str):
+        return entities.get("users", {}).get(author_ref, {}).get("name", "unknown")
+    if isinstance(author_ref, dict):
+        return author_ref.get("name", "unknown")
+    return "unknown"
+
+
+def _epoch_seconds(value: Any) -> int:
+    """Normalise a timestamp (seconds or milliseconds) to integer seconds."""
+    try:
+        timestamp = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    if timestamp > 1e12:
+        timestamp /= 1000
+    return int(timestamp)
+
+
 def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, Any], str]:
     """Scrape full content from a single answer page.
 
@@ -230,29 +312,13 @@ def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, An
     :param raw: when True, return raw HTML instead of converting to Markdown.
     :returns: (metadata, content) — content is Markdown by default, raw HTML if ``raw=True``.
     """
-    answer_url = _canonical_answer_url(answer_url)
-    entities = get_page_state(fetch_page_html(answer_url))
+    entities = _fetch_answer_entities(answer_url)
+    answer_data = next(iter(entities["answers"].values()))
 
-    answers = entities.get("answers", {})
-    if not answers:
-        raise ValueError(f"No answer data found in {answer_url}")
-    answer_data = next(iter(answers.values()))
+    question_data = next(iter(entities.get("questions", {}).values()), {})
+    question_title = question_data.get("title", "untitled")
 
-    question_data = {}
-    questions = entities.get("questions", {})
-    question_title = "untitled"
-    if questions:
-        question_data = next(iter(questions.values()))
-        question_title = question_data.get("title", "untitled")
-
-    users = entities.get("users", {})
-    author_ref = answer_data.get("author", "")
-    author_name = "unknown"
-    if author_ref:
-        if isinstance(author_ref, str) and author_ref in users:
-            author_name = users[author_ref].get("name", "unknown")
-        elif isinstance(author_ref, dict):
-            author_name = author_ref.get("name", "unknown")
+    author_name = _answer_author_name(answer_data, entities)
 
     # Resolve created/updated timestamps from entity timestamps
     created_ts = answer_data.get("created_time") or answer_data.get("created") or answer_data.get("createdTime")
@@ -286,3 +352,57 @@ def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, An
     content = content_html if raw else converter.convert(content_html)
 
     return metadata, content
+
+
+def scrape_question_from_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    """Recover a question snapshot from the answer page that links to it.
+
+    Deleted or hidden questions answer 404 from the question API even though
+    their answers stay reachable.  The answer page still embeds the question
+    entity in ``js-initialData``, so it can supply the metadata and detail
+    body — but not the full answer list.
+
+    :param answer_url: an answer URL, bare answer ID, or the composite
+        ``/question/<qid>/answer/<aid>`` URL supplied to ``browse question``.
+    :param raw: when True, leave the answer body as raw HTML instead of
+        converting it to Markdown.
+    :returns: ``(question_metadata, detail_markdown, answer_item)``, where
+        *answer_item* matches the dicts yielded by :func:`scrape_answers`.
+    :raises ValueError: if the answer page has no question or answer entity.
+    """
+    entities = _fetch_answer_entities(answer_url)
+    questions = entities.get("questions", {})
+    if not questions:
+        raise ValueError(f"No question data found in {answer_url}")
+    question_data = next(iter(questions.values()))
+    answer_data = next(iter(entities["answers"].values()))
+
+    content_html = answer_data.get("content", "")
+    content = content_html if raw else converter.convert(content_html)
+
+    created_ts = _epoch_seconds(
+        answer_data.get("created_time") or answer_data.get("createdTime") or answer_data.get("created")
+    )
+    updated_ts = _epoch_seconds(
+        answer_data.get("updated_time") or answer_data.get("updatedTime") or answer_data.get("updated")
+    )
+
+    answer_item = {
+        "author": _answer_author_name(answer_data, entities),
+        "id": str(answer_data.get("id", "")),
+        "vote": answer_data.get("voteupCount", 0),
+        "comment": answer_data.get("commentCount", 0),
+        "favorite": answer_data.get("favlistsCount", 0),
+        "created_time": created_ts,
+        "updated_time": updated_ts,
+        "content": content,
+        "is_collapsed": bool(answer_data.get("isCollapsed", False)),
+        "collapse_reason": answer_data.get("collapseReason") or "",
+        "collapsed_by": answer_data.get("collapsedBy") or "",
+    }
+
+    return (
+        parse_question_metadata(question_data),
+        converter.convert(question_data.get("detail") or ""),
+        answer_item,
+    )

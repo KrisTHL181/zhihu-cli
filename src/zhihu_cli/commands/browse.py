@@ -31,9 +31,11 @@ from zhihu_cli.content.handlers.pin import scrape_pin
 from zhihu_cli.content.handlers.question import (
     extract_answer_id,
     extract_question_id,
+    is_http_404,
     scrape_answer_page,
     scrape_answers,
     scrape_question_data,
+    scrape_question_from_answer_page,
 )
 from zhihu_cli.content.handlers.question_log import fetch_question_log
 from zhihu_cli.content.handlers.segment_comments import fetch_segment_comments
@@ -147,25 +149,56 @@ def register_browse(main_group):
 
         With --collapsed, only the answers Zhihu has folded away (折叠回答)
         are listed, annotated with the reason each one was collapsed.
-        """
-        q_meta, q_detail_md = scrape_question_data(url)
 
-        # scrape_answers is a lazy generator, so answers arrive page by page.
-        # Sorting needs the full set, so only that path materializes early.
-        answers = scrape_answers(q_meta, limit=PAGE_SIZE, max_items=max_items, collapsed=collapsed)
+        When the question API answers 404 but the URL also carries an answer
+        ID (``/question/<qid>/answer/<aid>``), the question snapshot embedded
+        in that answer page is shown instead.  The full answer list is
+        unavailable in that case; only the linked answer is displayed.
+        """
+        set_json_mode(output_json)
+
+        fallback_answer = None
+        try:
+            q_meta, q_detail_md = scrape_question_data(url)
+        except Exception as exc:
+            if not is_http_404(exc):
+                raise
+            try:
+                answer_id = extract_answer_id(url)
+            except ValueError:
+                raise exc from None
+            q_meta, q_detail_md, fallback_answer = scrape_question_from_answer_page(answer_id)
+            warning(
+                "Question API returned 404; showing the snapshot embedded in the "
+                f"linked answer page. Only answer {fallback_answer['id']} is available."
+            )
+
+        if fallback_answer is not None:
+            answers = [] if collapsed or (max_items is not None and max_items <= 0) else [fallback_answer]
+        else:
+            # scrape_answers is a lazy generator, so answers arrive page by page.
+            # Sorting needs the full set, so only that path materializes early.
+            answers = scrape_answers(q_meta, limit=PAGE_SIZE, max_items=max_items, collapsed=collapsed)
         if sort_by != "default":
             _SORT_MAP = {"time": "created_time", "upvotes": "vote", "favorites": "favorite", "comments": "comment"}
             answers = _sort_items(list(answers), _SORT_MAP[sort_by])
 
         if output_json:
-            print_json({"question": q_meta, "detail_md": q_detail_md, "answers": list(answers)})
+            payload = {"question": q_meta, "detail_md": q_detail_md, "answers": list(answers)}
+            if fallback_answer is not None:
+                payload["partial"] = True
+                payload["note"] = (
+                    "Question API returned 404; the full answer list is unavailable. "
+                    "Showing the question snapshot from the linked answer page."
+                )
+            print_json(payload)
             return
 
         # Peek one item so an empty collapsed result can bail out before the
         # question header is printed, while keeping the rest of the stream lazy.
         answers_iter = iter(answers)
         first = next(answers_iter, None)
-        if first is None and collapsed:
+        if first is None and collapsed and fallback_answer is None:
             info("No collapsed answers for this question.")
             return
         answers = answers_iter if first is None else itertools.chain((first,), answers_iter)
