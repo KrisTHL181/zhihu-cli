@@ -103,10 +103,74 @@ def fetch_page_html(url: str) -> str:
     return response.text
 
 
+def _zhihu_error_detail(response: Any) -> str | None:
+    """Format Zhihu's ``{"error": {...}}`` envelope for a failed response.
+
+    Zhihu reports API failures as JSON such as
+    ``{"error": {"code": 4041, "name": "ResourceNotFoundException",
+    "message": "…"}}``.  The direct session's ``raise_for_status`` discards
+    that body, leaving only a bare ``HTTP Error 404:`` — this helper recovers
+    the server's own wording.
+
+    :param response: The failed response; its JSON body is inspected.
+    :returns: A string like ``ResourceNotFoundException (code 4041): …``, or
+        ``None`` when the body is absent or is not an error envelope.
+    """
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+
+    name = str(error.get("name") or "").strip()
+    message = str(error.get("message") or "").strip()
+    code = error.get("code")
+    if not name and not message and code is None:
+        return None
+
+    detail = name or "HTTP error"
+    if code is not None:
+        detail += f" (code {code})"
+    if message:
+        detail += f": {message}"
+    return detail
+
+
 def fetch_json(url: str) -> Any:
-    """Fetch a URL and decode its JSON response."""
+    """Fetch a URL and decode its JSON response.
+
+    When Zhihu returns a non-2xx error envelope, its ``code``/``name``/
+    ``message`` is folded into the raised HTTP error, so the caller sees why
+    the request failed instead of only the status code.
+
+    :param url: Target URL.
+    :returns: The decoded JSON payload.
+    :raises: The session's HTTP error for a non-2xx response.
+    """
     response = _check_auth_expired(_get_session().get(url))
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except Exception as exc:
+        detail = _zhihu_error_detail(response)
+        if not detail:
+            raise
+        base = str(exc).strip()
+        body = getattr(response, "text", "").strip()
+        if body and body in base:
+            # The daemon path already appends the raw body — drop it so the
+            # parsed detail replaces it rather than being repeated.
+            base = base.split(body, 1)[0]
+        base = base.rstrip(": ")
+        message = f"{base}: {detail}" if base else detail
+        try:
+            enriched = type(exc)(message, response=response)
+        except TypeError:
+            enriched = type(exc)(message)
+        raise enriched from None
     return response.json()
 
 
