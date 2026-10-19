@@ -5,9 +5,19 @@
 same ``get`` / ``post`` / ``put`` / ``delete`` / ``request`` API, plus
 ``headers``, ``cookies``, and ``captcha_handler`` attributes.
 
-When the daemon is not running, attempting to use the proxy raises
-:class:`DaemonNotRunningError`.  The session factory in ``requests.py``
+When the daemon is not running at *build* time, attempting to use the proxy
+raises :class:`DaemonNotRunningError`.  The session factory in ``requests.py``
 catches this and falls back to a direct ``ZhihuSession``.
+
+A session built while the daemon *was* running has to survive the daemon
+leaving later (idle timeout, ``zhihu daemon stop``, a crash).  A long-lived
+client — a library consumer rather than a one-shot CLI invocation — never
+rebuilds its session, so a lost daemon used to fail every subsequent request
+forever.  The proxy now heals itself: the first connection failure flips
+:attr:`DaemonProxySession._daemon_down` and the request (plus every later one)
+runs on a persistent direct session instead.  The switch is sticky for the
+life of the process; the direct session is fully functional, and re-probing a
+daemon that went away would only add a failed connect to every request.
 """
 
 from __future__ import annotations
@@ -15,6 +25,7 @@ from __future__ import annotations
 import base64
 import json
 import socket
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -31,6 +42,7 @@ from zhihu_cli.daemon.protocol import (
     MSG_RELOAD_SESSION,
     MSG_SET_CONFIG,
     DaemonConnectionError,
+    DaemonError,
     DaemonNotRunningError,
     DaemonProtocolError,
     DaemonRequestError,
@@ -239,9 +251,14 @@ def _build_context_session() -> Any:
         active one when nothing is pinned.
     """
     from zhihu_cli.content.handlers._session_core import _build_direct_session
-    from zhihu_cli.content.handlers.requests import _context_profile
+    from zhihu_cli.content.handlers.requests import _context_profile, _inject_app_headers
 
-    return _build_direct_session(_context_profile())
+    sess = _build_direct_session(_context_profile())
+    # Mirror what ``_build_session`` puts on the daemon proxy: without
+    # ``x-app-version`` / ``x-app-za`` some mobile-api endpoints answer with
+    # ``data: null``.
+    _inject_app_headers(sess)
+    return sess
 
 
 class DaemonProxySession:
@@ -252,6 +269,9 @@ class DaemonProxySession:
     the lifetime of the CLI process.  All HTTP requests, control messages,
     and pings reuse the same connection — the daemon server handles
     multiple request/response pairs per connection natively.
+
+    If the daemon exits after the connection was established, the proxy
+    degrades in place: see :meth:`_degrade_to_direct`.
 
     Usage::
 
@@ -271,6 +291,18 @@ class DaemonProxySession:
         # Cookie header on every response.  Kept in sync with the daemon's
         # actual cookie jar via _sync_cookies().
         self._cookie_dict: dict[str, str] = {}
+
+        # ── direct fallback after the daemon goes away ──
+        # A long-lived process keeps its first session for its whole life, so
+        # nothing rebuilds it when the daemon exits mid-run.  The first
+        # connection failure sets ``_daemon_down``; every request from then on
+        # (including the one that failed) goes through ``_direct`` instead.
+        # Sticky on purpose: the direct session is fully functional, and
+        # re-probing a daemon that is gone would add a failed connect to every
+        # request.
+        self._daemon_down: bool = False
+        self._direct: Any = None
+        self._direct_lock: threading.Lock = threading.Lock()
 
     # ── persistent connection management ──────────────────────────────
 
@@ -369,8 +401,9 @@ class DaemonProxySession:
                 self._cookie_dict[k] = v
 
     def close(self) -> None:
-        """Close the persistent daemon connection."""
+        """Close the persistent daemon connection and any direct fallback."""
         self._close_sock()
+        self._reset_direct_session()
 
     def _test_connection(self) -> None:
         """Ping the daemon to verify it is reachable.
@@ -389,14 +422,23 @@ class DaemonProxySession:
     # ── control messages ───────────────────────────────────────────────
 
     def _send_reload(self) -> None:
-        """Instruct the daemon to reload its session from the current profile."""
+        """Instruct the daemon to reload its session from the current profile.
+
+        Best-effort: called by :func:`requests.reload_session`, which must
+        succeed even when the daemon has gone away (it then falls back to the
+        direct session on the next request).
+        """
+        if self._daemon_down:
+            return
         try:
             self._send_recv({"id": make_msg_id(), "type": MSG_RELOAD_SESSION})
-        except DaemonNotRunningError:
+        except (DaemonError, OSError, ValueError):
             pass
 
     def _send_config(self, key: str, value: Any) -> None:
         """Propagate a configuration change to the daemon (best-effort)."""
+        if self._daemon_down:
+            return
         try:
             self._send_recv(
                 {
@@ -406,7 +448,7 @@ class DaemonProxySession:
                     "value": value,
                 }
             )
-        except DaemonNotRunningError:
+        except (DaemonError, OSError, ValueError):
             pass
 
     # ── captcha_handler property ───────────────────────────────────────
@@ -419,6 +461,10 @@ class DaemonProxySession:
     def captcha_handler(self, value: str) -> None:
         self._captcha_handler = value
         self._send_config("captcha_handler", value)
+        # Keep the direct fallback (when one already exists) in the same mode.
+        direct = self._direct
+        if direct is not None:
+            direct.captcha_handler = value
 
     # ── HTTP verb shortcuts ────────────────────────────────────────────
 
@@ -443,7 +489,7 @@ class DaemonProxySession:
     # ── main request method ────────────────────────────────────────────
 
     def request(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse | _StreamResponse:
-        """Execute an HTTP request through the daemon.
+        """Execute an HTTP request through the daemon, or directly once it is gone.
 
         :param method: HTTP method (GET, POST, PUT, DELETE, …).
         :param url: Full URL to request.
@@ -457,8 +503,12 @@ class DaemonProxySession:
                 — accepted for interface parity with
                 :class:`~zhihu_cli.content.handlers._session_core.ZhihuSession`.
         :returns: A :class:`DaemonProxyResponse`.
-        :raises DaemonNotRunningError: if the daemon is unavailable.
-        :raises DaemonConnectionError: if the IPC connection fails.
+        :raises DaemonNotRunningError: only from :meth:`_test_connection`; a
+            request that cannot reach the daemon transparently falls back to a
+            direct session instead of raising.
+        :raises DaemonConnectionError: never for connection failures — they are
+            the fallback trigger.  Kept in the contract for callers that catch
+            it defensively.
         """
         # ``skip_app_headers`` stays in kwargs — it lives in ``_WIRE_KWARGS``
         # so ``_serialize_kwargs`` forwards it and the daemon strips the
@@ -472,6 +522,13 @@ class DaemonProxySession:
         # needs it to enable curl_cffi's internal queue/curl handle.
         if kwargs.get("stream", False):
             return self._stream_direct(method, url, **kwargs)
+
+        # ── already degraded ──
+        # The daemon went away earlier in this process's life.  Skip the
+        # socket (and the gate/limiter, which the direct session applies
+        # itself) and serve the request directly.
+        if self._daemon_down:
+            return self._fallback_direct(method, url, **kwargs)
 
         # Park here — deliberately *before* ``_send_recv`` takes the socket
         # lock — while another thread resolves a captcha.  A waiter holding
@@ -499,10 +556,12 @@ class DaemonProxySession:
 
         try:
             resp_data = self._send_recv(msg)
-        except DaemonNotRunningError:
-            raise
-        except (ConnectionError, OSError, json.JSONDecodeError) as e:
-            raise DaemonConnectionError(f"IPC error: {e}") from e
+        except (DaemonError, ConnectionError, OSError, ValueError) as exc:
+            # Covers DaemonNotRunningError / DaemonConnectionError as well as
+            # raw socket errors and framing/JSON errors that escape
+            # ``_send_recv``.  A framing error also leaves the persistent
+            # socket desynchronised, which is another reason to drop it.
+            return self._degrade_to_direct(method, url, kwargs, exc)
 
         return self._process_response(resp_data, method, url, kwargs, epoch_at_send=epoch_at_send)
 
@@ -587,28 +646,105 @@ class DaemonProxySession:
 
         raise DaemonProtocolError(f"Unexpected response type: {resp_type}")
 
-    def _fallback_direct(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse:
-        """Create a temporary direct :class:`ZhihuSession` for non-streaming
-        fallback requests.
+    def _get_direct_session(self) -> Any:
+        """Return the persistent direct fallback session, building it once.
+
+        Created on first use after the daemon is lost and then reused, so the
+        long-lived client keeps one TLS/QUIC connection and one cookie jar
+        instead of paying for a handshake per request.  The mirror headers the
+        daemon path kept up to date (including a rotated ``d_c0``) are copied
+        over so the fallback starts from the same identity.
+
+        :returns: The cached :class:`ZhihuSession` for the pinned (or active)
+            profile.
         """
-        direct = _build_context_session()
-        try:
-            resp = direct.request(method, url, **kwargs)
-            body = getattr(resp, "content", b"") or b""
-            return DaemonProxyResponse(
-                {
-                    "status_code": resp.status_code,
-                    "headers": dict(resp.headers),
-                    "body_base64": base64.b64encode(body).decode("ascii") if body else "",
-                    "elapsed": getattr(resp, "elapsed", 0.0),
-                    "url": str(getattr(resp, "url", "")),
-                }
-            )
-        finally:
+        direct = self._direct
+        if direct is not None:
+            return direct
+
+        with self._direct_lock:
+            if self._direct is None:
+                direct = _build_context_session()
+                try:
+                    direct.headers.update(self.headers)
+                except Exception:
+                    pass
+                direct.captcha_handler = self._captcha_handler
+                self._direct = direct
+            return self._direct
+
+    def _reset_direct_session(self) -> None:
+        """Close and forget the direct fallback (for profile reloads/shutdown).
+
+        The next request after a profile switch builds a fresh session from
+        the new profile's headers, mirroring what the daemon does on
+        ``reload_session``.
+        """
+        with self._direct_lock:
+            direct, self._direct = self._direct, None
+        if direct is not None:
             try:
                 direct.close()
             except Exception:
                 pass
+
+    def _degrade_to_direct(
+        self,
+        method: str,
+        url: str,
+        kwargs: dict[str, Any],
+        exc: BaseException,
+    ) -> DaemonProxyResponse:
+        """Flip to direct mode and run the request that lost the daemon.
+
+        Called from :meth:`request` (and the post-captcha re-sends) after a
+        connection-level failure.  ``_daemon_down`` is sticky: subsequent
+        requests skip the socket entirely, because a daemon that has gone away
+        will not accept a reconnect.
+
+        :param method: HTTP method of the failed request.
+        :param url: URL of the failed request.
+        :param kwargs: Caller kwargs of the failed request.
+        :param exc: The connection error, reported once so the degradation is
+            visible instead of silently changing transport.
+        :returns: The direct response, shaped like a daemon reply.
+        """
+        with self._direct_lock:
+            first_failure = not self._daemon_down
+            self._daemon_down = True
+        self._close_sock()
+        if first_failure:
+            print(
+                f"  ⚠️  Lost the zhihu daemon ({exc}); falling back to direct requests for this process.",
+                file=sys.stderr,
+            )
+        return self._fallback_direct(method, url, **kwargs)
+
+    def _fallback_direct(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse:
+        """Run a non-streaming request through the persistent direct session.
+
+        Used once the daemon is gone (see :meth:`_degrade_to_direct`).  The
+        real response is re-wrapped as a :class:`DaemonProxyResponse` so
+        callers cannot tell which transport served it; cookies set by the
+        direct session are merged into the local mirror for the same reason
+        the daemon path does it.
+        """
+        direct = self._get_direct_session()
+        resp = direct.request(method, url, **kwargs)
+        try:
+            self._sync_cookies(dict(resp.cookies.get_dict()))
+        except Exception:
+            pass
+        body = getattr(resp, "content", b"") or b""
+        return DaemonProxyResponse(
+            {
+                "status_code": resp.status_code,
+                "headers": dict(resp.headers),
+                "body_base64": base64.b64encode(body).decode("ascii") if body else "",
+                "elapsed": getattr(resp, "elapsed", 0.0),
+                "url": str(getattr(resp, "url", "")),
+            }
+        )
 
     def _stream_direct(self, method: str, url: str, **kwargs: Any) -> _StreamResponse:
         """Create a temporary direct :class:`ZhihuSession` for a streaming
@@ -693,19 +829,8 @@ class DaemonProxySession:
             # reply was produced before it and is stale.  We never parked at
             # the gate, so the wait branch below cannot see us: without this
             # the thread would become a *second* resolver and prompt the user
-            # for a challenge that was just answered.  Re-send once with
-            # ``allow_captcha_handling=False`` (the same non-recursion guard as
-            # the waiter branch) so a second captcha yields a synthetic 403.
-            resend_epoch = captcha_gate.epoch
-            resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
-            return self._process_response(
-                resp_data,
-                method,
-                url,
-                original_kwargs,
-                epoch_at_send=resend_epoch,
-                allow_captcha_handling=False,
-            )
+            # for a challenge that was just answered.
+            return self._resend_after_captcha(method, url, original_kwargs)
 
         if captcha_gate.try_begin():
             try:
@@ -716,22 +841,43 @@ class DaemonProxySession:
         if captcha_gate.acquire():
             # Another thread resolved the captcha while we waited: our own
             # request already came back as a stale 403, so re-send it once.
-            # ``allow_captcha_handling=False`` is the non-recursion guard — a
-            # second captcha on the retry yields a synthetic 403 instead of
-            # re-entering this method and waiting again.
-            resend_epoch = captcha_gate.epoch
-            resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
-            return self._process_response(
-                resp_data,
-                method,
-                url,
-                original_kwargs,
-                epoch_at_send=resend_epoch,
-                allow_captcha_handling=False,
-            )
+            return self._resend_after_captcha(method, url, original_kwargs)
 
         # Gate timed out: hand back the 403 rather than hang forever.
         return _synthetic_403(captcha_error, url)
+
+    def _resend_after_captcha(
+        self,
+        method: str,
+        url: str,
+        original_kwargs: dict[str, Any],
+    ) -> DaemonProxyResponse:
+        """Re-send a request whose earlier captcha reply the gate made stale.
+
+        ``allow_captcha_handling=False`` is the non-recursion guard: a second
+        captcha on the retry yields a synthetic 403 instead of re-entering the
+        wait loop.  If the daemon disappeared while the challenge was being
+        resolved, degrade to a direct request rather than raising — the
+        caller still gets its answer.
+
+        :param method: HTTP method of the blocked request.
+        :param url: URL of the blocked request.
+        :param original_kwargs: Caller kwargs of the blocked request.
+        :returns: The retried response.
+        """
+        resend_epoch = captcha_gate.epoch
+        try:
+            resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
+        except (DaemonError, ConnectionError, OSError, ValueError) as exc:
+            return self._degrade_to_direct(method, url, original_kwargs, exc)
+        return self._process_response(
+            resp_data,
+            method,
+            url,
+            original_kwargs,
+            epoch_at_send=resend_epoch,
+            allow_captcha_handling=False,
+        )
 
     def _resolve_captcha_interactively(
         self,

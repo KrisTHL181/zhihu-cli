@@ -689,7 +689,13 @@ def reload_session() -> None:
             _session.headers = dict(hdrs)
             if hdrs.get("User-Agent"):
                 _session.headers["User-Agent"] = hdrs["User-Agent"]
+            _inject_app_headers(_session)
             _session._init_cookie_cache()
+            # If the proxy already fell back to a direct session (the daemon
+            # went away earlier in this process), that session still carries
+            # the *old* profile — drop it so the next request rebuilds from
+            # the headers loaded above.
+            _session._reset_direct_session()
 
             _session._send_reload()
             _session._send_config("captcha_handler", _session.captcha_handler)
