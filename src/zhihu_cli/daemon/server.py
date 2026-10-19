@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import faulthandler
 import os
 import signal
 import sys
@@ -97,6 +98,12 @@ class DaemonServer:
         self._requests_handled = 0
         self._start_time = time.monotonic()
         self._shutdown_event = asyncio.Event()
+        #: Why the server is stopping.  Written once by
+        #: :meth:`_request_shutdown` and reported in the exit log, so
+        #: ``daemon.log`` distinguishes an idle timeout from
+        #: ``zhihu daemon stop`` and from a signal.  ``None`` means nothing
+        #: initiated a shutdown (an abnormal exit).
+        self._shutdown_reason: str | None = None
 
     # ── public entry point ──────────────────────────────────────────────
 
@@ -108,16 +115,37 @@ class DaemonServer:
         stderr (→ daemon.log) and triggers cleanup so stale PID/socket
         files don't block a subsequent restart.
         """
+        # A fatal signal (SIGSEGV/SIGABRT/…) otherwise kills the process
+        # without leaving any closing line in daemon.log, which makes a crash
+        # indistinguishable from SIGKILL.  This dumps a traceback to the same
+        # file first.  SIGKILL cannot be observed from inside the process;
+        # its signature is simply a log with no exit line.
+        faulthandler.enable(file=sys.stderr)
         try:
             self._init_session()
             self._cleanup_stale_socket()
             asyncio.run(self._async_main())
         except KeyboardInterrupt:
-            _log("Received KeyboardInterrupt, shutting down")
+            _log(f"Daemon shutting down (PID {os.getpid()}): KeyboardInterrupt")
         except Exception:
             _log("Daemon terminated by unhandled exception", exc=True)
         finally:
             self.cleanup()
+
+    def _request_shutdown(self, reason: str) -> None:
+        """Record *reason* (first one wins) and wake the main loop.
+
+        Every shutdown trigger goes through here so the exit log names the
+        actual cause.  The first reason is kept: a ``zhihu daemon stop``
+        that is followed by ``stop_daemon()``'s SIGTERM fallback while the
+        process is exiting must not have its cause overwritten.
+
+        :param reason: Human-readable cause, e.g. ``"idle timeout (300s)"``.
+        """
+        if self._shutdown_reason is None:
+            self._shutdown_reason = reason
+            _log(f"Shutdown initiated: {reason}")
+        self._shutdown_event.set()
 
     # ── initialization ──────────────────────────────────────────────────
 
@@ -184,7 +212,9 @@ class DaemonServer:
 
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
-                loop.add_signal_handler(sig, self._handle_signal)
+                # Pass the signal number through so the shutdown log can name
+                # SIGTERM and SIGINT apart.
+                loop.add_signal_handler(sig, self._handle_signal, sig)
             except NotImplementedError:
                 pass  # Windows / restricted environments
 
@@ -216,10 +246,15 @@ class DaemonServer:
         except asyncio.CancelledError:
             pass
 
-        _log("Daemon shutting down normally")
+        _log(f"Daemon process exiting (PID {os.getpid()}), reason: {self._shutdown_reason or 'unknown'}")
 
-    def _handle_signal(self) -> None:
-        self._shutdown_event.set()
+    def _handle_signal(self, signum: int) -> None:
+        """Stop on SIGTERM/SIGINT, naming the signal in the shutdown log."""
+        try:
+            name = signal.Signals(signum).name
+        except ValueError:
+            name = str(signum)
+        self._request_shutdown(f"signal {name}")
 
     # ── connection handling ─────────────────────────────────────────────
 
@@ -289,7 +324,7 @@ class DaemonServer:
         )
 
     async def _handle_shutdown(self, msg_id: str, _msg: dict[str, Any]) -> dict[str, Any]:
-        self._shutdown_event.set()
+        self._request_shutdown("shutdown request from client (zhihu daemon stop)")
         return build_pong(msg_id)
 
     async def _handle_reload_session(self, msg_id: str, _msg: dict[str, Any]) -> dict[str, Any]:
@@ -518,8 +553,9 @@ class DaemonServer:
             return  # Disabled — never auto-exit
         while not self._shutdown_event.is_set():
             await asyncio.sleep(10)
-            if time.monotonic() - self._last_activity > self.idle_timeout:
-                self._shutdown_event.set()
+            idle_for = time.monotonic() - self._last_activity
+            if idle_for > self.idle_timeout:
+                self._request_shutdown(f"idle timeout ({self.idle_timeout}s, idle for {idle_for:.0f}s)")
                 break
 
 
