@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from types import ModuleType
 from typing import TYPE_CHECKING
+from urllib.parse import unquote
 
 if TYPE_CHECKING:
     from http.cookiejar import Cookie, CookieJar
@@ -161,13 +162,34 @@ def read_cookies(browser: str | None = None, domain: str = DOMAIN) -> tuple[str,
     raise RuntimeError(message)
 
 
+def _normalize_cookie_value(name: str, value: str) -> str:
+    """Return a cookie value in the form Zhihu's HTTP API expects.
+
+    Firefox can hold ``d_c0`` percent-encoded (``%3D%7C`` instead of ``=|``),
+    and Zhihu's ``search_v3`` endpoint rejects the encoded form with HTTP 400
+    even though other endpoints tolerate it.  The token is
+    ``<base64>|<timestamp>``, so it can never contain a literal ``%`` and
+    unquoting is safe.
+
+    :param name: The cookie name.
+    :param value: The cookie value as read from the browser.
+    :returns: The value to send — unescaped for ``d_c0``, unchanged otherwise.
+    """
+    if name == "d_c0" and "%" in value:
+        return unquote(value)
+    return value
+
+
 def cookies_to_header(cookies: list[Cookie]) -> str:
     """Render cookies as a ``Cookie`` request header value.
+
+    ``d_c0`` is unescaped when the browser stored it percent-encoded (see
+    :func:`_normalize_cookie_value`).
 
     :param cookies: The cookies to render.
     :returns: The ``name=value`` pairs joined with ``"; "``.
     """
-    return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies)
+    return "; ".join(f"{cookie.name}={_normalize_cookie_value(cookie.name, cookie.value)}" for cookie in cookies)
 
 
 def collect_headers(browser: str | None = None) -> tuple[str, dict[str, str]]:
