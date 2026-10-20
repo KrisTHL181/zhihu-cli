@@ -14,10 +14,12 @@ The index is generated, not hand-edited — regenerate it with::
 
     python -m zhihu_cli.font_reference
 
-That requires Pillow and the reference face; see ``--font``.  Importing the
-package stays cheap: ``font_reference.bin`` / ``font_reference.json`` are read
-only when :func:`load_font_reference` is first called, and generator-only
-imports (``argparse``, ``gzip``, ``sys``, ``unicodedata``, PIL) live inside the
+That requires Pillow and the reference face; see ``--font``.  The source face is
+auto-detected through Pillow's font-directory search and can be overridden with
+``--font`` / ``--face``.  Importing the package stays cheap:
+``font_reference.bin`` / ``font_reference.json`` are read only when
+:func:`load_font_reference` is first called, and generator-only imports
+(``argparse``, ``gzip``, ``sys``, ``unicodedata``, PIL) live inside the
 generator functions that use them.
 """
 
@@ -150,10 +152,30 @@ def raster_stride(grid: int) -> int:
     return (grid + 7) // 8
 
 
-#: Default reference face: ``Noto Sans CJK SC`` is face index 2 of the TTC
-#: (the TTC also carries the JP/KR/HK/TC faces).
-_DEFAULT_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-_DEFAULT_FACE = 2
+#: Filenames tried in order when ``--font`` is omitted.  :func:`PIL.ImageFont.truetype`
+#: already walks the platform font directories when the argument is a filename rather
+#: than an existing path, so no absolute location is hardcoded here.
+_REFERENCE_FONT_FILES = (
+    "NotoSansCJK-Regular.ttc",
+    "NotoSansCJKsc-Regular.otf",
+    "NotoSansCJK-Regular.otf",
+    "SourceHanSansCN-Regular.otf",
+    "SourceHanSansSC-Regular.otf",
+    "SourceHanSansCN-Regular.ttc",
+    "SourceHanSansSC-Regular.ttc",
+)
+
+#: Families whose outlines the index may be built from.  Noto Sans CJK and Source Han
+#: Sans are the same upstream typeface; ``Noto Sans SC`` is a different design and must
+#: not match.  The style must be Regular: a bold face has different outlines and would
+#: silently produce an index the decoder cannot use.
+_REFERENCE_FAMILIES = frozenset({"noto sans cjk sc", "source han sans cn", "source han sans sc"})
+
+#: Upper bound on TTC face indices probed; scanning stops at the first OSError.
+_MAX_FACES = 32
+
+#: Point size used only to read a face's name; rendering uses ``_RENDER_SIZE``.
+_PROBE_SIZE = 12
 
 #: Em size in pixels used to render every glyph.  The runtime decoder renders
 #: the obfuscated font at the same size, so the two must agree.
@@ -341,6 +363,45 @@ def _write_table(out_dir: Path, font: ImageFont.FreeTypeFont) -> None:
     print(f"  on disk : {raw_size / 1024:.0f} KB (gzipped {gz_size / 1024:.0f} KB)")
 
 
+def _find_reference_face(font: str | Path) -> tuple[Path, int] | None:
+    """Find the Regular Noto/Source Han SC face inside *font*.
+
+    :param font: Font path, or a bare filename Pillow should search for.
+    :returns: ``(resolved_path, face_index)``, or ``None`` when no face matches.
+    """
+    from PIL import ImageFont
+
+    resolved: Path | None = None
+    for index in range(_MAX_FACES):
+        # Resolve a bare filename on the first successful load: Pillow's directory
+        # search walks the font tree, so the remaining faces are opened by path.
+        try:
+            face = ImageFont.truetype(str(resolved or font), _PROBE_SIZE, index=index)
+        except OSError:
+            break
+        if resolved is None:
+            resolved = Path(face.path)
+        family, style = face.getname()
+        if family.strip().lower() in _REFERENCE_FAMILIES and style.strip().lower() == "regular":
+            return resolved, index
+    return None
+
+
+def _resolve_reference_font(font: str | Path | None) -> tuple[Path, int] | None:
+    """Locate the reference face the index is built from.
+
+    :param font: Explicit font path/filename, or ``None`` to try the known filenames.
+    :returns: ``(resolved_path, face_index)``, or ``None`` when nothing was found.
+    """
+    if font is not None:
+        return _find_reference_face(font)
+    for name in _REFERENCE_FONT_FILES:
+        found = _find_reference_face(name)
+        if found is not None:
+            return found
+    return None
+
+
 def main() -> int:
     """Regenerate the reference index in this package directory.
 
@@ -355,9 +416,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Regenerate the reference glyph table for Yanxuan font de-obfuscation."
     )
-    parser.add_argument("--font", default=_DEFAULT_FONT, help=f"reference font file (default: {_DEFAULT_FONT})")
     parser.add_argument(
-        "--face", type=int, default=_DEFAULT_FACE, help=f"face index inside a TTC (default: {_DEFAULT_FACE})"
+        "--font",
+        default=None,
+        help="reference font file or filename (auto-detected when omitted; Pillow searches the platform font directories)",
+    )
+    parser.add_argument(
+        "--face",
+        type=int,
+        default=None,
+        help="face index inside a TTC (auto-detected when omitted)",
     )
     parser.add_argument(
         "--out-dir",
@@ -366,16 +434,46 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    path = Path(args.font)
-    if not path.exists():
-        print(f"reference font not found: {path}", file=sys.stderr)
-        return 1
+    if args.face is not None:
+        if args.font is not None:
+            path, face = Path(args.font), args.face
+        else:
+            resolved = _resolve_reference_font(None)
+            if resolved is None:
+                print(
+                    "reference font not found. Install Noto Sans CJK SC (or Source Han Sans CN), "
+                    "or pass --font with the font file and --face with the TTC index.",
+                    file=sys.stderr,
+                )
+                return 1
+            path, face = resolved[0], args.face
+    else:
+        resolved = _resolve_reference_font(args.font)
+        if resolved is None:
+            if args.font is not None:
+                print(
+                    f"no Regular face of Noto Sans CJK SC / Source Han Sans CN found in {args.font}; "
+                    "pass --face to select a face index explicitly",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "reference font not found. Install Noto Sans CJK SC (or Source Han Sans CN), "
+                    "or pass --font with the font file and --face with the TTC index.",
+                    file=sys.stderr,
+                )
+            return 1
+        path, face = resolved
     if _GRID % 8:
         print("GRID must be a multiple of 8 so a raster packs into whole bytes", file=sys.stderr)
         return 1
 
-    font = ImageFont.truetype(str(path), _RENDER_SIZE, index=args.face)
-    print(f"reference face: {path} (index {args.face}), render size {_RENDER_SIZE}, grid {_GRID}")
+    try:
+        font = ImageFont.truetype(str(path), _RENDER_SIZE, index=face)
+    except OSError as exc:
+        print(f"cannot load {path} at face index {face}: {exc}", file=sys.stderr)
+        return 1
+    print(f"reference face: {path} (index {face}), render size {_RENDER_SIZE}, grid {_GRID}")
     _write_table(Path(args.out_dir), font)
     return 0
 
