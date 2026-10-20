@@ -152,12 +152,19 @@ def generate_tools(
     *,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
     exclude: frozenset[tuple[str, ...]] = EXCLUDED_PATHS,
+    include: tuple[tuple[str, ...], ...] | None = None,
 ) -> list[Tool]:
     """Build one typed MCP tool for every leaf command of the ``zhihu`` CLI.
 
     :param invoke: runs the CLI and returns the completed process; ``server._invoke``.
     :param exclude: command paths to leave out — TUI and streaming commands, which
         can never complete when driven over MCP.
+    :param include: command path prefixes to expose, e.g.
+        ``(("browse",), ("tools", "creator"))``. A leaf is exposed when its own
+        path starts with one of them, so a top-level group selects its whole
+        subtree. ``None`` exposes every leaf not in ``exclude``. A prefix that
+        matches no command is logged rather than raised, so a typo costs only
+        the tools it was meant to select, not the server.
     :returns: the tools, in command-tree order. Empty if the CLI could not be
         imported, so the server still starts with its two shell tools. A leaf that
         cannot be exposed costs exactly that one tool: ``server.py`` calls this at
@@ -171,7 +178,10 @@ def generate_tools(
     ctx = click.Context(cli)
     tools: list[Tool] = []
     claimed: dict[str, tuple[str, ...]] = {}
-    for path, command in _iter_leaves(cli, ctx, exclude=exclude):
+    matched: set[tuple[str, ...]] = set()
+    for path, command in _iter_leaves(cli, ctx, exclude=exclude, include=include):
+        if include is not None:
+            matched.update(prefix for prefix in include if path[: len(prefix)] == prefix)
         try:
             spec = _spec_for(path, command)
             _claim_name(spec, claimed)
@@ -186,6 +196,11 @@ def generate_tools(
             continue
         if tool is not None:
             tools.append(tool)
+
+    if include is not None:
+        for prefix in include:
+            if prefix not in matched:
+                logger.warning("zhihu-mcp: --groups entry %r matches no command", ".".join(prefix))
     return tools
 
 
@@ -216,6 +231,7 @@ def _iter_leaves(
     ctx: click.Context,
     path: tuple[str, ...] = (),
     exclude: frozenset[tuple[str, ...]] = EXCLUDED_PATHS,
+    include: tuple[tuple[str, ...], ...] | None = None,
 ) -> Iterator[tuple[tuple[str, ...], click.Command]]:
     """Walk a Click command tree, yielding every leaf command with its path.
 
@@ -224,18 +240,47 @@ def _iter_leaves(
     :param ctx: context used to resolve sub-commands through ``get_command``.
     :param path: the path of ``command`` within the tree.
     :param exclude: command paths to skip, subtrees included.
+    :param include: command path prefixes to restrict the walk to; ``None`` for
+        every command. Groups that cannot contain a selected leaf are pruned.
     :returns: an iterator of ``(path, command)`` pairs.
     """
     if path and path in exclude:
         return
     if isinstance(command, click.Group):
+        if include is not None and path and not _could_contain(path, include):
+            return
         for name in command.list_commands(ctx):
             child = command.get_command(ctx, name)
             if child is None:
                 continue
-            yield from _iter_leaves(child, ctx, (*path, name), exclude)
-    else:
+            yield from _iter_leaves(child, ctx, (*path, name), exclude, include)
+    elif _selected(path, include):
         yield path, command
+
+
+def _selected(path: tuple[str, ...], include: tuple[tuple[str, ...], ...] | None) -> bool:
+    """Report whether a leaf command is inside one of the exposed prefixes.
+
+    :param path: the leaf's command path.
+    :param include: the exposed prefixes, or ``None`` for no filtering.
+    :returns: whether the leaf should be exposed.
+    """
+    if include is None:
+        return True
+    return any(path[: len(prefix)] == prefix for prefix in include)
+
+
+def _could_contain(path: tuple[str, ...], include: tuple[tuple[str, ...], ...]) -> bool:
+    """Report whether the subtree at ``path`` can contain an exposed leaf.
+
+    True when ``path`` is inside an exposed prefix, or when an exposed prefix is
+    below it — the two cases in which descending is still worthwhile.
+
+    :param path: the path of a command group.
+    :param include: the exposed prefixes.
+    :returns: whether the subtree should be walked.
+    """
+    return any(path[: len(prefix)] == prefix or prefix[: len(path)] == path for prefix in include)
 
 
 def _spec_for(path: tuple[str, ...], command: click.Command) -> ToolSpec:

@@ -26,10 +26,19 @@ path *before* spawning anything; see :func:`_excluded_path`.
 Run over stdio, then register it with an MCP client::
 
     claude mcp add zhihu -- zhihu-mcp
+
+The full tool list costs a large amount of context, so ``--groups`` narrows the
+typed tools to the command subtrees named::
+
+    zhihu-mcp --groups browse,search,tools.creator
+
+The two escape hatches are left unfiltered on purpose — they exist to reach what
+the typed tools do not cover, and each costs a single tool's worth of schema.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import shlex
 import shutil
@@ -144,24 +153,9 @@ def _excluded_path(tokens: list[str]) -> tuple[str, ...] | None:
     return None
 
 
-# ── server ─────────────────────────────────────────────────────────────────
-
-# One typed tool per leaf command, generated from the Click tree here rather than
-# registered afterwards: `MCPServer.add_tool` derives the JSON Schema from a
-# function signature, so the tools have to be built before the constructor runs.
-# Generation is best-effort — a CLI that cannot be imported costs the typed tools,
-# not the server.
-mcp = MCPServer(
-    name="zhihu",
-    instructions=_INSTRUCTIONS,
-    tools=generate_tools(invoke=_invoke),
-)
-
-
 # ── hand-written escape hatches ────────────────────────────────────────────
 
 
-@mcp.tool()
 def zhihu_help(path: str = "") -> str:
     """Show the zhihu CLI command tree or a command's options.
 
@@ -182,7 +176,6 @@ def zhihu_help(path: str = "") -> str:
     return proc.stdout
 
 
-@mcp.tool()
 def zhihu_run(args: str) -> str:
     """Run a zhihu CLI command and return its output.
 
@@ -228,9 +221,76 @@ def zhihu_run(args: str) -> str:
     return proc.stdout
 
 
+# ── server ─────────────────────────────────────────────────────────────────
+
+
+def _group_prefixes(value: str) -> tuple[tuple[str, ...], ...]:
+    """Parse the ``--groups`` argument into command path prefixes.
+
+    Each comma-separated entry names a command path, written with dots
+    (``tools.creator``) or spaces (``tools creator``). The path is a prefix, so
+    ``tools`` selects the whole ``tools`` subtree; an empty entry is refused
+    instead of silently selecting everything.
+
+    :param value: the raw argument value.
+    :returns: the path prefixes, in the order given.
+    :raises argparse.ArgumentTypeError: if an entry is empty.
+    """
+    prefixes: list[tuple[str, ...]] = []
+    for entry in value.split(","):
+        tokens = tuple(entry.replace(".", " ").split())
+        if not tokens:
+            raise argparse.ArgumentTypeError(f"empty command path in {value!r}")
+        prefixes.append(tokens)
+    return tuple(prefixes)
+
+
+def _build_server(include: tuple[tuple[str, ...], ...] | None = None) -> MCPServer:
+    """Build an MCP server exposing the selected command subtrees.
+
+    One typed tool per leaf command is generated from the Click tree here rather
+    than registered afterwards: ``MCPServer.add_tool`` derives the JSON Schema
+    from a function signature, so the tools have to be built before the
+    constructor runs. Generation is best-effort — a CLI that cannot be imported
+    costs the typed tools, not the server.
+
+    :param include: command path prefixes to expose, or ``None`` for every
+        command. The hand-written escape hatches are registered either way.
+    :returns: the configured server.
+    """
+    server = MCPServer(
+        name="zhihu",
+        instructions=_INSTRUCTIONS,
+        tools=generate_tools(invoke=_invoke, include=include),
+    )
+    server.add_tool(zhihu_help)
+    server.add_tool(zhihu_run)
+    return server
+
+
+#: The unfiltered server, also what a library consumer importing ``mcp`` gets.
+mcp = _build_server()
+
+
 def main() -> None:
-    """Serve MCP over stdio."""
-    mcp.run(transport="stdio")
+    """Serve MCP over stdio, optionally restricted to selected command groups."""
+    parser = argparse.ArgumentParser(
+        prog="zhihu-mcp",
+        description="Expose the zhihu CLI to AI agents over MCP (stdio).",
+    )
+    parser.add_argument(
+        "--groups",
+        metavar="PATHS",
+        type=_group_prefixes,
+        help=(
+            "comma-separated command paths to expose as typed tools, e.g. "
+            "'browse,search,tools.creator'; each path selects its whole subtree. "
+            "Omit to expose every command. zhihu_help and zhihu_run stay unfiltered."
+        ),
+    )
+    args = parser.parse_args()
+    server = mcp if args.groups is None else _build_server(args.groups)
+    server.run(transport="stdio")
 
 
 if __name__ == "__main__":
