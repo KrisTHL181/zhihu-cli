@@ -17,7 +17,7 @@ that arrived with the response, never by a static cipher table:
    private-use ``.notdef`` probe) is *not* substituted and is left alone.  No
    ``cmap`` parsing is needed for this.
 3. Every other character is rendered, cropped to its ink box and matched against
-   the checked-in reference rasters (:mod:`zhihu_cli.glyph_table`).  The ink box
+   the checked-in reference rasters (:mod:`zhihu_cli.font_reference`).  The ink box
    relative to the glyph origin narrows the candidates, the raster Hamming
    distance decides.
 4. A match that is not clearly better than the runner-up is rejected, so an
@@ -40,7 +40,7 @@ import io
 import unicodedata
 from typing import TYPE_CHECKING, NamedTuple
 
-from zhihu_cli.glyph_table import NOTDEF_PROBE, GlyphTable, load_glyph_table, pack_raster
+from zhihu_cli.font_reference import NOTDEF_PROBE, FontReference, load_font_reference, pack_raster
 
 if TYPE_CHECKING:
     from PIL import ImageFont
@@ -111,7 +111,7 @@ class _FontDecoder:
     :param font_bytes: Raw bytes of the subset TTF.
     """
 
-    def __init__(self, table: GlyphTable, font_bytes: bytes) -> None:
+    def __init__(self, table: FontReference, font_bytes: bytes) -> None:
         self._table = table
         self._font = _load_font(font_bytes, table.render_size)
         self._cube = _load_notdef(self._font, table)
@@ -286,7 +286,7 @@ def normalize_lookalikes(text: str) -> str:
     :param text: Decoded text.
     :returns: Text with look-alike characters replaced.
     """
-    table = load_glyph_table()
+    table = load_font_reference()
     out: list[str] = []
     for char in text:
         codepoint = ord(char)
@@ -309,7 +309,7 @@ def _decoder_for(font_bytes: bytes) -> _FontDecoder:
     key = hashlib.sha256(font_bytes).hexdigest()
     decoder = _decoders.get(key)
     if decoder is None:
-        decoder = _FontDecoder(load_glyph_table(), font_bytes)
+        decoder = _FontDecoder(load_font_reference(), font_bytes)
         _decoders[key] = decoder
     return decoder
 
@@ -326,7 +326,7 @@ def _load_font(font_bytes: bytes, render_size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(io.BytesIO(font_bytes), render_size)
 
 
-def _load_notdef(font: ImageFont.FreeTypeFont, table: GlyphTable) -> int:
+def _load_notdef(font: ImageFont.FreeTypeFont, table: FontReference) -> int:
     """Render the probe codepoint every uncovered character renders as.
 
     :param font: Subset font.
@@ -338,7 +338,7 @@ def _load_notdef(font: ImageFont.FreeTypeFont, table: GlyphTable) -> int:
     return -1 if rendered is None else rendered.raster
 
 
-def _render_glyph(font: ImageFont.FreeTypeFont, char: str, table: GlyphTable) -> _RenderedGlyph | None:
+def _render_glyph(font: ImageFont.FreeTypeFont, char: str, table: FontReference) -> _RenderedGlyph | None:
     """Render *char* and reduce it to the table's feature form.
 
     The glyph is drawn at a fixed baseline origin so that its ink box is
