@@ -315,8 +315,11 @@ def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, An
     entities = _fetch_answer_entities(answer_url)
     answer_data = next(iter(entities["answers"].values()))
 
-    question_data = next(iter(entities.get("questions", {}).values()), {})
+    questions = entities.get("questions", {})
+    question_key = next(iter(questions), "")
+    question_data = questions.get(question_key, {})
     question_title = question_data.get("title", "untitled")
+    question_id = str(question_data.get("id") or question_key or "")
 
     author_name = _answer_author_name(answer_data, entities)
 
@@ -338,6 +341,7 @@ def scrape_answer_page(answer_url: str, raw: bool = False) -> tuple[dict[str, An
 
     metadata = {
         "id": str(answer_data.get("id", "")),
+        "question_id": question_id,
         "title": question_title,
         "author": author_name,
         "vote": answer_data.get("voteupCount", 0),
