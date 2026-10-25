@@ -368,9 +368,9 @@ def register_chat(main_group: click.Group) -> None:
         "-n",
         "context",
         type=int,
-        default=20,
+        default=0,
         show_default=True,
-        help="Recent messages to include as LLM context (0 = all)",
+        help="Messages of history to include as LLM context (0 = full history)",
     )
     @llm_options()
     @click.option("--dry-run", is_flag=True, default=False, help="Generate replies but do not send them")
@@ -387,7 +387,7 @@ def register_chat(main_group: click.Group) -> None:
     ) -> None:
         """Run an LLM-powered auto-reply bot for incoming private messages.
 
-        Watches real-time chat messages, builds a context from the recent
+        Watches real-time chat messages, builds a context from the
         conversation history, asks the configured LLM for a reply using the
         system prompt in SYSTEM_PROMPT_FILE, and sends it back automatically.
         Runs until interrupted (Ctrl+C).

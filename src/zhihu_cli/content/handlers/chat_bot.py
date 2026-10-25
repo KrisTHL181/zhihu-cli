@@ -33,7 +33,7 @@ def run_bot(
     url_token: str,
     system_prompt: str,
     senders: tuple[str, ...] = (),
-    history_limit: int = 20,
+    history_limit: int = 0,
     api_base: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
@@ -49,8 +49,8 @@ def run_bot(
     :param system_prompt: System prompt controlling the bot's behaviour.
     :param senders: Optional url_tokens or 32-char user hashes to restrict
         replies to.  Empty tuple means reply to every incoming text message.
-    :param history_limit: Recent messages to fetch per conversation as LLM
-        context (0 = all).
+    :param history_limit: Number of most recent messages to fetch per
+        conversation as LLM context; 0 means the full history.
     :param api_base: Optional LLM API base override.
     :param api_key: Optional LLM API key override.
     :param model: Optional LLM model override.
