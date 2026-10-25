@@ -46,6 +46,7 @@ from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+from zhihu_cli.content.handlers.risk_control import ZhihuGateError
 from zhihu_cli.errors import (
     AuthError,
     NotFoundError,
@@ -175,6 +176,9 @@ def _normalize(exc: BaseException) -> ZhihuError:
     Mapping:
 
     * already a :class:`ZhihuError` → returned unchanged
+    * :class:`~zhihu_cli.content.handlers.risk_control.ZhihuGateError` with the
+      sign-in or account-verification gate → :class:`AuthError`; with the
+      ``__zse_ck`` or risk-control gate → :class:`RateLimitError`
     * ``HTTPError`` / ``DaemonHTTPError`` with 403 → :class:`RateLimitError`
     * the same with 404 → :class:`NotFoundError`
     * any other ``HTTPError`` → :class:`ZhihuHTTPError`
@@ -186,6 +190,10 @@ def _normalize(exc: BaseException) -> ZhihuError:
     """
     if isinstance(exc, ZhihuError):
         return exc
+    if isinstance(exc, ZhihuGateError):
+        if exc.gate in ("unhuman", "signin"):
+            return AuthError(_message(exc))
+        return RateLimitError(_message(exc))
 
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if _is_http_error(exc):

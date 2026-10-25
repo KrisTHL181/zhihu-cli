@@ -1,5 +1,7 @@
 """zhihu CLI — unified entry point for all Zhihu operations."""
 
+from __future__ import annotations
+
 import click
 
 from zhihu_cli.commands.agora import register_agora
@@ -22,10 +24,34 @@ from zhihu_cli.commands.scrape import register_scrape
 from zhihu_cli.commands.search import register_search
 from zhihu_cli.commands.stats import register_stats
 from zhihu_cli.commands.tools import register_tools
+from zhihu_cli.content.handlers.risk_control import ZhihuGateError
 from zhihu_cli.extensions import discover_extensions
 
 
-@click.group()
+class _ZhihuGroup(click.Group):
+    """Click group that renders anonymous-access gates as normal CLI errors.
+
+    Handlers raise :class:`~zhihu_cli.content.handlers.risk_control.ZhihuGateError`
+    when Zhihu answers with the ``__zse_ck`` challenge, the account-verification
+    page, or a sign-in redirect.  Without this translation Click would print a
+    traceback; the gate message already says how to authenticate.
+    """
+
+    def invoke(self, ctx: click.Context) -> object:
+        """Invoke the selected command, translating access-gate failures.
+
+        :param ctx: Click context for the selected subcommand.
+        :returns: Whatever the command returns.
+        :raises click.ClickException: For a gate; Click prints its message and
+            exits with status 1.
+        """
+        try:
+            return super().invoke(ctx)
+        except ZhihuGateError as exc:
+            raise click.ClickException(str(exc)) from None
+
+
+@click.group(cls=_ZhihuGroup)
 @click.version_option(package_name="zhihu-toolkit", prog_name="zhihu")
 @click.option(
     "--qps",

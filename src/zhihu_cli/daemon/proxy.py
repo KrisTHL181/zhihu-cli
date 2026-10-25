@@ -801,6 +801,15 @@ class DaemonProxySession:
         if self._captcha_handler == "ignore":
             return _synthetic_403(captcha_error, url)
 
+        if captcha_error.get("need_login"):
+            # A login gate is not a captcha: never open the unhuman page or
+            # wait for input.  Report it once and let the caller's gate
+            # detection produce the actionable error.
+            from zhihu_cli.content.handlers._session_core import _print_non_interactive_captcha_warning
+
+            _print_non_interactive_captcha_warning(captcha_error)
+            return _synthetic_403(captcha_error, url)
+
         if self._captcha_handler == "prompt":
             from zhihu_cli.content.handlers._session_core import _print_captcha_warning
 
@@ -975,15 +984,21 @@ class _CookieProxy:
 
 
 def _synthetic_403(captcha_error: dict[str, Any], url: str) -> DaemonProxyResponse:
-    """Build a synthetic 403 response representing a captcha block."""
-    body = json.dumps(
-        {
-            "error": {
-                "code": captcha_error.get("code", 40352),
-                "message": captcha_error.get("message", "Risk control triggered"),
-            }
-        }
-    ).encode()
+    """Build a synthetic 403 response representing a captcha or login block.
+
+    ``need_login`` and ``redirect`` are preserved so the caller's gate
+    detection can distinguish a login gate from a captcha after the daemon
+    has declined to resolve it.
+    """
+    error = {
+        "code": captcha_error.get("code", 40352),
+        "message": captcha_error.get("message", "Risk control triggered"),
+    }
+    if captcha_error.get("need_login"):
+        error["need_login"] = True
+    if captcha_error.get("redirect"):
+        error["redirect"] = captcha_error["redirect"]
+    body = json.dumps({"error": error}).encode()
     return DaemonProxyResponse(
         {
             "status_code": 403,

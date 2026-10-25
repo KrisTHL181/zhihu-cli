@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 # ── lightweight (stdlib-only) imports ──────────────────────────────────────
 from zhihu_cli.content.handlers.cache_manager import cache_manager
+from zhihu_cli.content.handlers.risk_control import detect_gate
 from zhihu_cli.content.utils import rate_limit
 from zhihu_cli.errors import AuthError
 
@@ -94,11 +95,21 @@ def __getattr__(name: str) -> Any:
 
 
 def fetch_page_html(url: str) -> str:
-    """Fetch a Zhihu page as HTML (uses the global session)."""
+    """Fetch a Zhihu page as HTML (uses the global session).
+
+    :param url: Page URL.
+    :returns: The page HTML.
+    :raises ZhihuGateError: If Zhihu answers with the ``__zse_ck`` challenge,
+        the account-verification page, or a sign-in redirect.  The error
+        explains which gate fired and how to authenticate; this CLI does not
+        solve the gates.
+    :raises: The session's HTTP error for any other non-2xx response.
+    """
     url = url.replace("http://", "https://")
     response = _check_auth_expired(_get_session().get(url))
-    if response.status_code == 403 and "zh-zse-ck" in response.text:
-        raise RuntimeError(f"Zhihu returned an HTML zh-zse-ck risk-control challenge for {url}")
+    gate = detect_gate(response, url)
+    if gate is not None:
+        raise gate
     response.raise_for_status()
     return response.text
 
@@ -149,9 +160,15 @@ def fetch_json(url: str) -> Any:
 
     :param url: Target URL.
     :returns: The decoded JSON payload.
-    :raises: The session's HTTP error for a non-2xx response.
+    :raises ZhihuGateError: If the response is a login/verification gate
+        (``40353`` with ``need_login``), the ``__zse_ck`` challenge, or a
+        risk-control refusal (``40352``/``40362``).
+    :raises: The session's HTTP error for any other non-2xx response.
     """
     response = _check_auth_expired(_get_session().get(url))
+    gate = detect_gate(response, url)
+    if gate is not None:
+        raise gate
     try:
         response.raise_for_status()
     except Exception as exc:

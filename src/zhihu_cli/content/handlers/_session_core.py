@@ -233,6 +233,13 @@ class ZhihuSession(_requests.Session):
                         parsed = urlparse(url)
                         path = parsed.path
                         if not _is_captcha_endpoint(path):
+                            if captcha_error.get("need_login"):
+                                # A login gate is not a captcha: do not open the
+                                # unhuman page or wait for input.  Report it once
+                                # and let fetch_json/fetch_page_html raise a
+                                # ZhihuGateError with the next action.
+                                _print_non_interactive_captcha_warning(captcha_error)
+                                return resp
                             mode = self.captcha_handler
                             if mode == "auto":
                                 if not _can_prompt_user():
@@ -407,13 +414,19 @@ def _is_captcha_endpoint(path: str) -> bool:
 
 
 def _print_captcha_warning(captcha_error: dict) -> None:
-    """Print a brief warning that captcha was triggered (non-blocking)."""
+    """Print a brief warning that a captcha or login gate was triggered."""
     redirect = captcha_error.get("redirect", "")
     print(file=sys.stderr)
-    print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)", file=sys.stderr)
-    if redirect:
-        print(f"  Verify at: {redirect}", file=sys.stderr)
-    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
+    if captcha_error.get("need_login"):
+        print("  ⚠️  Zhihu requires an authenticated session for this request.", file=sys.stderr)
+        if redirect:
+            print(f"  Sign in at: {redirect}", file=sys.stderr)
+        print("  Run 'zhihu auth login' or 'zhihu auth import', or switch profiles.", file=sys.stderr)
+    else:
+        print(f"  ⚠️  Zhihu risk control triggered ({captcha_error.get('message', 'unknown')[:60]}...)", file=sys.stderr)
+        if redirect:
+            print(f"  Verify at: {redirect}", file=sys.stderr)
+        print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
     print(file=sys.stderr)
 
 
@@ -436,11 +449,11 @@ _non_interactive_captcha_lock = threading.Lock()
 
 
 def _print_non_interactive_captcha_warning(captcha_error: dict) -> None:
-    """Warn that a captcha went unhandled because nothing can prompt.
+    """Warn that a captcha or login gate went unhandled because nothing can prompt.
 
-    Printed at most once per process — a captcha window lasts many requests and
-    repeating this on every one of them would bury the rest of the output.  The
-    flag is claimed under a lock (several worker threads can hit a captcha at
+    Printed at most once per process — a challenge window lasts many requests
+    and repeating this on every one of them would bury the rest of the output.
+    The flag is claimed under a lock (several worker threads can hit a gate at
     the same instant); the message itself is printed outside it, so threads
     never contend on I/O.
     """
@@ -452,13 +465,23 @@ def _print_non_interactive_captcha_warning(captcha_error: dict) -> None:
 
     redirect = captcha_error.get("redirect", "")
     print(file=sys.stderr)
-    print(
-        "  ⚠️  Zhihu risk control triggered, but this process has no terminal to "
-        "prompt on.\n"
-        "      Leaving the 403 unhandled so the caller can stop and report it.",
-        file=sys.stderr,
-    )
-    if redirect:
-        print(f"  Verify at: {redirect}", file=sys.stderr)
-    print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
+    if captcha_error.get("need_login"):
+        print(
+            "  ⚠️  Zhihu requires an authenticated session for this request.\n"
+            "      Leaving the 403 for the caller to report.",
+            file=sys.stderr,
+        )
+        if redirect:
+            print(f"  Sign in at: {redirect}", file=sys.stderr)
+        print("  Run 'zhihu auth login' or 'zhihu auth import', or switch profiles.", file=sys.stderr)
+    else:
+        print(
+            "  ⚠️  Zhihu risk control triggered, but this process has no terminal to "
+            "prompt on.\n"
+            "      Leaving the 403 unhandled so the caller can stop and report it.",
+            file=sys.stderr,
+        )
+        if redirect:
+            print(f"  Verify at: {redirect}", file=sys.stderr)
+        print("  Run 'zhihu auth captcha' to resolve, or switch to a different profile.", file=sys.stderr)
     print(file=sys.stderr)
