@@ -1,0 +1,10 @@
+请根据以下信息判断该评论是否违规，并只输出投票标签。
+
+## 被举报的评论
+
+{comment}
+{images_section}
+## 举报理由
+
+{report_reason}
+{report_note}{origin_section}

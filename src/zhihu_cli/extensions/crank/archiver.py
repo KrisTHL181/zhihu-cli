@@ -35,7 +35,13 @@ from zhihu_cli.content.utils.llm_config import (
 )
 from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.output import error, warning
-from zhihu_cli.prompts import COMMIT_MESSAGE_SYSTEM_PROMPT, SERIES_NAMING_SYSTEM_PROMPT
+from zhihu_cli.prompts import (
+    COMMIT_MESSAGE_SYSTEM_PROMPT,
+    COMMIT_MESSAGE_USER_PROMPT,
+    COMMIT_STYLE_EXAMPLES,
+    SERIES_NAMING_SYSTEM_PROMPT,
+    SERIES_NAMING_USER_PROMPT,
+)
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 
@@ -70,50 +76,34 @@ def fetch_article_list(user_token: str) -> list[dict[str, Any]]:
 
 
 def build_naming_prompt(author_name: str, samples: list[tuple[str, str]]) -> str:
-    """Build the prompt for the LLM to generate a series name."""
+    """Build the dynamic user prompt for the LLM to generate a series name.
+
+    The role, task and output rules live in ``SERIES_NAMING_SYSTEM_PROMPT``;
+    ``SERIES_NAMING_USER_PROMPT`` supplies the layout. The stable part of every
+    request therefore stays one cacheable prefix, while this function fills in
+    only runtime material, ordered from the slowest-changing (the concept
+    README) to the per-author excerpts.
+    """
     serial_papers_readme = os.path.join(SERIAL_PAPERS_DIR, "README.md")
 
     concept_text = ""
     if os.path.exists(serial_papers_readme):
         concept_text = Path(serial_papers_readme).read_text(encoding="utf-8")[:3000]
 
+    concept_block = concept_text or "（暂无）"
     existing_names = _collect_existing_series_names()
+    names_block = "\n".join(f"- {n}" for n in existing_names) or "（暂无）"
 
-    samples_text = ""
-    for i, (filename, content) in enumerate(samples, 1):
-        truncated = content[:2000]
-        samples_text += f"\n### 样本 {i}: {filename}\n\n{truncated}\n"
-
-    return f"""你是一位资深的科学文献策展人，为「烈火殿·连环论文」收藏单元命名。
-
-## 连环论文的概念
-
-{concept_text}
-
-## 已有的系列名称示例
-
-{chr(10).join(f"- {n}" for n in existing_names)}
-
-## 命名任务
-
-请为以下这位民间科学家的论文系列起一个简洁的名称。格式为：
-
-**作者名-理论核心系列名**
-
-其中「理论核心系列名」应当：
-1. 捕捉该系列最核心、反复出现的主题概念
-2. 使用学术化但不失冲击力的语言，可以有书名号
-3. 2-12个汉字为佳
-4. 参考上述已有示例的风格
-
-作者名：{author_name}
-
-以下是从该作者论文中随机抽取的 {len(samples)} 篇正文节选：
-
-{samples_text}
-
-请直接输出系列名称，格式：作者名-理论核心系列名
-不要包含其他解释文字。"""
+    samples_text = "\n\n".join(
+        f"### 样本 {i}: {filename}\n\n{content[:2000]}" for i, (filename, content) in enumerate(samples, 1)
+    )
+    return SERIES_NAMING_USER_PROMPT.format(
+        concept_block=concept_block,
+        names_block=names_block,
+        author_name=author_name,
+        sample_count=len(samples),
+        samples=samples_text,
+    )
 
 
 def _collect_existing_series_names() -> list[str]:
@@ -245,49 +235,27 @@ def build_commit_message_prompt(
     samples: list[tuple[str, str]],
     recent_commits: list[str] | None = None,
 ) -> str:
-    """Build the LLM prompt for generating a git commit message."""
+    """Build the dynamic user prompt for generating a git commit message.
 
-    # Fallback style examples when the repo is unreachable
-    _default_style = [
-        '[Accept] 收容上海愚工688的非同余筛法素数对体系：将民科的"哥德巴赫之梦"彻底封存进逻辑墓碑',
-        '[Accept] 收容周克鸣的"几何构造论体系"：以初等几何公理强行重构宇宙基底和数理逻辑',
-        '[Accept] 收容王超的"量子潮水统一场论"：以佛学意识论强行贯穿物理真空，实现从室温超导到宇宙本体的降维打击',
-        '[Accept] 收容超越相对论的"广物论量子压差体系"：给爱因斯坦上一课',
-        '[Accept] 收容知乎大哲"兴趣爱好小生"的时空互洽无悖论体系：重塑宇宙时空底座',
-        '[Accept] 收容捅破宇宙的"OFIRM"创世论文：让全球头部大模型集群泪流满面的认知共创总纲',
-    ]
-    style_examples = recent_commits if recent_commits else _default_style
+    The role, task, requirements and output rules live in
+    ``COMMIT_MESSAGE_SYSTEM_PROMPT``, and ``COMMIT_MESSAGE_USER_PROMPT``
+    supplies the layout. This function fills in only the runtime material:
+    style examples, the paper being archived, and its excerpts.
+    """
+    # Fall back to the bundled examples when the repo is unreachable.
+    style_examples = recent_commits or COMMIT_STYLE_EXAMPLES
 
-    samples_text = ""
-    for i, (filename, content) in enumerate(samples, 1):
-        truncated = content[:1500]
-        samples_text += f"\n### 样本 {i}: {filename}\n\n{truncated}\n"
-
-    return f"""你是一位烈火殿（Hall of Flames）的策展人，负责为民科论文收藏撰写 git commit message。
-
-## 烈火殿 commit 风格参考
-
-{chr(10).join(f"- {m}" for m in style_examples)}
-
-## 任务
-
-请为以下新收容的民间科学家论文系列撰写一条 git commit message。
-
-- 作者名：{author_name}
-- 系列名：{series_name}
-
-以下是从该作者论文中抽取的 {len(samples)} 篇正文节选：
-
-{samples_text}
-
-要求：
-1. 使用 `[Accept]` 标签（这是首次收容该民科）
-2. 格式参考上述风格示例，可以灵活发挥
-3. 必须包含作者名（用引号括起），并提炼其理论核心
-4. 语言要有「策展人收容展品」的仪式感和幽默感
-5. 控制在 80 个汉字以内
-
-请直接输出 commit message，不要包含 `git commit -m` 等前缀，也不要包含其他解释文字。"""
+    samples_text = "\n\n".join(
+        f"### 样本 {i}: {filename}\n\n{content[:1500]}" for i, (filename, content) in enumerate(samples, 1)
+    )
+    style_block = "\n".join(f"- {m}" for m in style_examples)
+    return COMMIT_MESSAGE_USER_PROMPT.format(
+        style_block=style_block,
+        author_name=author_name,
+        series_name=series_name,
+        sample_count=len(samples),
+        samples=samples_text,
+    )
 
 
 def call_llm_for_commit_message(

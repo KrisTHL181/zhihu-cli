@@ -1,0 +1,12 @@
+## 烈火殿 commit 风格参考
+
+{style_block}
+
+## 本次收容对象
+
+- 作者名：{author_name}
+- 系列名：{series_name}
+
+以下是从该作者论文中抽取的 {sample_count} 篇正文节选：
+
+{samples}

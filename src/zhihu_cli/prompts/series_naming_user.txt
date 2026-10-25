@@ -1,0 +1,15 @@
+## 连环论文的概念
+
+{concept_block}
+
+## 已有的系列名称示例
+
+{names_block}
+
+## 本次命名对象
+
+作者名：{author_name}
+
+以下是从该作者论文中随机抽取的 {sample_count} 篇正文节选：
+
+{samples}

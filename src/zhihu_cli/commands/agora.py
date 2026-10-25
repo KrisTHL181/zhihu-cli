@@ -44,7 +44,7 @@ from zhihu_cli.output import (
     success,
     warning,
 )
-from zhihu_cli.prompts import AGORA_VOTE_SYSTEM_PROMPT
+from zhihu_cli.prompts import AGORA_VOTE_SYSTEM_PROMPT, AGORA_VOTE_USER_PROMPT
 
 
 def register_agora(main_group):
@@ -397,6 +397,9 @@ def register_agora(main_group):
 def _build_agora_vote_prompt(discussion: dict, *, image_count: int = 0) -> str:
     """Build the user prompt for LLM voting from a discussion dict.
 
+    The layout lives in ``AGORA_VOTE_USER_PROMPT``; only the optional sections
+    are assembled here so each can collapse to an empty string.
+
     :param discussion: Parsed discussion dict.
     :param image_count: How many of the comment's images accompany this prompt.
     :returns: Prompt string.
@@ -412,26 +415,20 @@ def _build_agora_vote_prompt(discussion: dict, *, image_count: int = 0) -> str:
     report_note = discussion.get("report_note", "")
 
     origin_title = discussion.get("origin_title", "")
-    origin_url = discussion.get("origin_url", "")
 
-    parts = ["## 被举报的评论\n"]
-    parts.append(f"{comment_content}\n")
-
+    images_section = ""
     if image_count:
-        parts.append(f"## 评论附带的图片\n已随本条消息提供 {image_count} 张图片（见下方），请结合图片内容判断。\n")
+        images_section = f"\n## 评论附带的图片\n已随本条消息提供 {image_count} 张图片（见下方），请结合图片内容判断。\n"
+    note_line = f"\n补充说明：{report_note}\n" if report_note else ""
+    origin_section = f"\n## 评论所在的内容\n{origin_title}\n" if origin_title else ""
 
-    parts.append("## 举报理由\n")
-    parts.append(f"{report_reason}\n")
-    if report_note:
-        parts.append(f"补充说明：{report_note}\n")
-
-    if origin_title:
-        parts.append(f"## 评论所在的内容\n{origin_title}\n")
-    if origin_url:
-        parts.append(f"链接：{origin_url}\n")
-
-    parts.append("请根据以上信息判断该评论是否违规，并只输出投票标签。")
-    return "\n".join(parts)
+    return AGORA_VOTE_USER_PROMPT.format(
+        comment=comment_content,
+        images_section=images_section,
+        report_reason=report_reason,
+        report_note=note_line,
+        origin_section=origin_section,
+    )
 
 
 def _is_image_error(exc: Exception) -> bool:
