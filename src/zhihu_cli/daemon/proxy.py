@@ -13,11 +13,12 @@ A session built while the daemon *was* running has to survive the daemon
 leaving later (idle timeout, ``zhihu daemon stop``, a crash).  A long-lived
 client — a library consumer rather than a one-shot CLI invocation — never
 rebuilds its session, so a lost daemon used to fail every subsequent request
-forever.  The proxy now heals itself: the first connection failure flips
-:attr:`DaemonProxySession._daemon_down` and the request (plus every later one)
-runs on a persistent direct session instead.  The switch is sticky for the
-life of the process; the direct session is fully functional, and re-probing a
-daemon that went away would only add a failed connect to every request.
+forever.  The proxy now heals itself: when opening a connection fails,
+:attr:`DaemonProxySession._daemon_down` is set and the request (plus every
+later one) runs on a persistent direct session instead.  The switch is sticky
+for the life of the process; the direct session is fully functional, and
+re-probing a daemon that went away would only add a failed connect to every
+request.
 """
 
 from __future__ import annotations
@@ -41,7 +42,6 @@ from zhihu_cli.daemon.protocol import (
     MSG_PONG,
     MSG_RELOAD_SESSION,
     MSG_SET_CONFIG,
-    DaemonConnectionError,
     DaemonError,
     DaemonNotRunningError,
     DaemonProtocolError,
@@ -270,8 +270,10 @@ class DaemonProxySession:
     and pings reuse the same connection — the daemon server handles
     multiple request/response pairs per connection natively.
 
-    If the daemon exits after the connection was established, the proxy
-    degrades in place: see :meth:`_degrade_to_direct`.
+    If the daemon exits after the connection was established, the next
+    request that finds it unreachable degrades in place: see
+    :meth:`_degrade_to_direct`.  A request that fails on the established
+    connection itself is not replayed.
 
     Usage::
 
@@ -334,9 +336,8 @@ class DaemonProxySession:
     def _send_recv(self, msg: dict[str, Any]) -> dict[str, Any]:
         """Send *msg* and return the response, reusing the persistent socket.
 
-        On the first call the socket is lazily connected.  If the socket
-        has been closed by the peer (e.g. daemon restart), reconnects
-        once and retries.
+        On the first call the socket is lazily connected.  Transport and
+        framing errors propagate to the caller unchanged.
 
         The entire send+recv pair is protected by a lock so that
         concurrent callers (multi-threaded use of zhihu_cli as a library)
@@ -345,20 +346,8 @@ class DaemonProxySession:
         """
         with self._lock:
             sock = self._get_sock()
-            try:
-                send_message(sock, msg)
-                return recv_message(sock)
-            except (BrokenPipeError, ConnectionResetError, OSError) as e:
-                # Socket died — reconnect once and retry
-                self._close_sock()
-                sock = self._connect()
-                self._sock = sock
-                try:
-                    send_message(sock, msg)
-                    return recv_message(sock)
-                except Exception:
-                    self._close_sock()
-                    raise DaemonConnectionError(f"IPC error after reconnect: {e}") from e
+            send_message(sock, msg)
+            return recv_message(sock)
 
     def _close_sock(self) -> None:
         """Close and clear the persistent socket."""
@@ -503,12 +492,12 @@ class DaemonProxySession:
                 — accepted for interface parity with
                 :class:`~zhihu_cli.content.handlers._session_core.ZhihuSession`.
         :returns: A :class:`DaemonProxyResponse`.
-        :raises DaemonNotRunningError: only from :meth:`_test_connection`; a
-            request that cannot reach the daemon transparently falls back to a
-            direct session instead of raising.
-        :raises DaemonConnectionError: never for connection failures — they are
-            the fallback trigger.  Kept in the contract for callers that catch
-            it defensively.
+        :raises DaemonNotRunningError: never; when the daemon cannot be
+            reached at all, the request is served by a direct session.
+        :raises DaemonError: If an established connection fails mid-exchange.
+            The request is not replayed.
+        :raises OSError: If an established socket fails mid-exchange.  Not
+            replayed.
         """
         # ``skip_app_headers`` stays in kwargs — it lives in ``_WIRE_KWARGS``
         # so ``_serialize_kwargs`` forwards it and the daemon strips the
@@ -556,12 +545,11 @@ class DaemonProxySession:
 
         try:
             resp_data = self._send_recv(msg)
-        except (DaemonError, ConnectionError, OSError, ValueError) as exc:
-            # Covers DaemonNotRunningError / DaemonConnectionError as well as
-            # raw socket errors and framing/JSON errors that escape
-            # ``_send_recv``.  A framing error also leaves the persistent
-            # socket desynchronised, which is another reason to drop it.
+        except DaemonNotRunningError as exc:
             return self._degrade_to_direct(method, url, kwargs, exc)
+        except (DaemonError, ConnectionError, OSError, ValueError):
+            self._close_sock()
+            raise
 
         return self._process_response(resp_data, method, url, kwargs, epoch_at_send=epoch_at_send)
 
@@ -865,20 +853,25 @@ class DaemonProxySession:
 
         ``allow_captcha_handling=False`` is the non-recursion guard: a second
         captcha on the retry yields a synthetic 403 instead of re-entering the
-        wait loop.  If the daemon disappeared while the challenge was being
-        resolved, degrade to a direct request rather than raising — the
-        caller still gets its answer.
+        wait loop.
 
         :param method: HTTP method of the blocked request.
         :param url: URL of the blocked request.
         :param original_kwargs: Caller kwargs of the blocked request.
         :returns: The retried response.
+        :raises DaemonError: If an established connection fails mid-exchange.
+            The request is not replayed.
+        :raises OSError: If an established socket fails mid-exchange.  Not
+            replayed.
         """
         resend_epoch = captcha_gate.epoch
         try:
             resp_data = self._send_recv(self._build_request_msg(method, url, original_kwargs))
-        except (DaemonError, ConnectionError, OSError, ValueError) as exc:
+        except DaemonNotRunningError as exc:
             return self._degrade_to_direct(method, url, original_kwargs, exc)
+        except (DaemonError, ConnectionError, OSError, ValueError):
+            self._close_sock()
+            raise
         return self._process_response(
             resp_data,
             method,

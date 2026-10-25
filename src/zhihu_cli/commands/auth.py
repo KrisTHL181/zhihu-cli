@@ -176,14 +176,11 @@ def register_auth(main_group) -> None:
         # Verify the imported session actually works before keeping it.
         username = None
         verified = False
-        try:
-            resp = session.get("https://www.zhihu.com/api/v4/me", timeout=10)
-            if resp.status_code == 200:
-                me = resp.json()
-                username = me.get("name")
-                verified = True
-        except Exception:
-            verified = False
+        resp = session.get("https://www.zhihu.com/api/v4/me", timeout=10)
+        if resp.status_code == 200:
+            me = resp.json()
+            username = me.get("name")
+            verified = True
 
         if verified:
             as_user = f" as {f_name(username)}" if username else ""
