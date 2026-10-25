@@ -171,11 +171,8 @@ def visualize_network(
     )
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fig.write_image(output_path, scale=2, width=1600, height=1200)
-        print(f"Network graph saved to: {output_path}")
-    except Exception:
-        print("Tip: kaleido is not installed, unable to save PNG. Install with: pip install kaleido")
+    fig.write_image(output_path, scale=2, width=1600, height=1200)
+    print(f"Network graph saved to: {output_path}")
 
     fig.show()
 

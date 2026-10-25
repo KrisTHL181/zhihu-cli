@@ -170,15 +170,12 @@ def _plot_daily_time_series(records: list[dict], active_metrics: list[str] | Non
 
     # ── clip to configured start-date ──────────────────────────────
     start_str = cache_manager.get_start_date()
-    try:
-        start_dt = pd.Timestamp(start_str)
-        before = len(agg)
-        agg = agg[agg["date"] >= start_dt]
-        skipped = before - len(agg)
-        if skipped > 0:
-            print(f"  Start-date filter ({start_str}): dropped {skipped} days ({before} -> {len(agg)} days)")
-    except Exception:
-        pass
+    start_dt = pd.Timestamp(start_str)
+    before = len(agg)
+    agg = agg[agg["date"] >= start_dt]
+    skipped = before - len(agg)
+    if skipped > 0:
+        print(f"  Start-date filter ({start_str}): dropped {skipped} days ({before} -> {len(agg)} days)")
 
     # ── compute smoothed trend lines (MA or EMA per config) ─────────
     trend_label = smoothing_label(7)

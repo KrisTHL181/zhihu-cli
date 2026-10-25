@@ -14,6 +14,7 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state, reload_session, session
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.daemon.proxy import DaemonHTTPError
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,8 @@ def download_media_files(markdown: str, output_dir: str, progress_callback: obje
         try:
             resp = session.get(url, timeout=30)
             resp.raise_for_status()
-        except Exception:
+        except (OSError, ValueError, DaemonHTTPError) as exc:
+            _cli_print(f"  [media] skipped {url}: {exc}")
             continue
 
         # Guess extension: Content-Type → URL path → .jpg fallback

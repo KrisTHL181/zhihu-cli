@@ -15,7 +15,7 @@ do not:
 
 * **A stable import path.** Handler modules are internal and move; this module
   is the promise.
-* **One exception type.** Everything raised out of here is a
+* **One exception type.** Everything these wrappers raise is a
   :class:`~zhihu_cli.errors.ZhihuError` subclass, the causes of which are
   documented on :func:`_normalize`.  The handlers keep raising their own
   built-in types, so the CLI is unaffected.
@@ -538,13 +538,15 @@ def use_profile(name: str) -> Iterator[None]:
     """
     from zhihu_cli.content.handlers.requests import use_profile as _use_profile
 
+    cm = _use_profile(name)
     try:
-        with _use_profile(name):
-            yield
-    except ZhihuError:
-        raise
+        cm.__enter__()
     except Exception as exc:
         raise _normalize(exc) from exc
+    try:
+        yield
+    finally:
+        cm.__exit__(None, None, None)
 
 
 # ── request pacing ─────────────────────────────────────────────────────────

@@ -290,8 +290,8 @@ def fetch_answering_with_detail(
     :param max_items: Cap on total items returned (``None`` = unlimited).
     :returns: Normalized list of answering consultation dicts, each with
         an extra ``answers`` key (list of answer message dicts) and a
-        ``_detail`` key (the raw conversation detail or ``None`` on
-        fetch failure).
+        ``_detail`` key (the raw conversation detail, or ``None`` when the
+        item has no conversation id).
     """
     items = fetch_consult_answers("answered", limit=limit, max_items=max_items)
     for item in items:
@@ -300,12 +300,8 @@ def fetch_answering_with_detail(
             item["answers"] = []
             item["_detail"] = None
             continue
-        try:
-            detail = fetch_conversation_detail(conversation_id)
-            answer_msgs = [m for m in detail.get("messages", []) if m.get("type") == "answer"]
-            item["answers"] = answer_msgs
-            item["_detail"] = detail
-        except Exception:
-            item["answers"] = []
-            item["_detail"] = None
+        detail = fetch_conversation_detail(conversation_id)
+        answer_msgs = [m for m in detail.get("messages", []) if m.get("type") == "answer"]
+        item["answers"] = answer_msgs
+        item["_detail"] = detail
     return items

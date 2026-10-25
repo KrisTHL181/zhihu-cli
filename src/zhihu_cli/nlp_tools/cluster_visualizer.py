@@ -222,12 +222,9 @@ def visualize_with_plotly(
         marker=dict(size=12, opacity=0.8, line=dict(width=1, color="White")), selector=dict(mode="markers")
     )
 
-    try:
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.write_image(output_path, scale=2, width=1200, height=800)
-        print(f"\nImage saved to: {output_path}")
-    except Exception:
-        print("\nTip: kaleido is not installed, unable to save PNG automatically.")
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.write_image(output_path, scale=2, width=1200, height=800)
+    print(f"\nImage saved to: {output_path}")
 
     fig.show()
 

@@ -279,22 +279,19 @@ def print_graph_stats(G: nx.DiGraph) -> None:
             print()
 
         # Triangles / clustering
-        try:
-            tri = nx.triangles(G)
-            tri_count = sum(tri.values()) // 3  # directed triangles
-            if tri_count > 0:
-                tri_nodes = [(n, t) for n, t in tri.items() if t > 0]
-                tri_nodes.sort(key=lambda x: -x[1])
-                print(f"  Triangles:       {tri_count}")
-                print(f"  Clustering coeff: {nx.average_clustering(G):.4f}")
-                print("  Top triangle nodes:")
-                for n, t in tri_nodes[:8]:
-                    name = G.nodes[n].get("name", n)[:24]
-                    hop = G.nodes[n].get("hop", "?")
-                    print(f"    {name:<26s} hop={hop}  △={t}")
-                print()
-        except Exception:
-            pass
+        tri = nx.triangles(G)
+        tri_count = sum(tri.values()) // 3  # directed triangles
+        if tri_count > 0:
+            tri_nodes = [(n, t) for n, t in tri.items() if t > 0]
+            tri_nodes.sort(key=lambda x: -x[1])
+            print(f"  Triangles:       {tri_count}")
+            print(f"  Clustering coeff: {nx.average_clustering(G):.4f}")
+            print("  Top triangle nodes:")
+            for n, t in tri_nodes[:8]:
+                name = G.nodes[n].get("name", n)[:24]
+                hop = G.nodes[n].get("hop", "?")
+                print(f"    {name:<26s} hop={hop}  △={t}")
+            print()
 
     # Top nodes by degree
     degrees = dict(G.degree())
@@ -559,11 +556,8 @@ def visualize_social_graph(
 
     # ── save ──────────────────────────────────────────────────────────────
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fig.write_image(output_path, scale=2, width=width, height=height)
-        print(f"Social graph saved to: {output_path}")
-    except Exception:
-        print("Tip: kaleido is not installed, unable to save PNG. Install with: pip install kaleido")
+    fig.write_image(output_path, scale=2, width=width, height=height)
+    print(f"Social graph saved to: {output_path}")
 
     fig.show()
 

@@ -1,5 +1,7 @@
 """QR code login for Zhihu. Based on login flow from zhihu-plus-plus."""
 
+from __future__ import annotations
+
 import hashlib
 import tempfile
 import time
@@ -321,7 +323,7 @@ def qr_login() -> dict[str, str]:
         except KeyboardInterrupt:
             print("\nCancelled.")
             return {}
-        except Exception:
+        except (OSError, ValueError):
             pass
 
         wait(1.0)

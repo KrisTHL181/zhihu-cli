@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 from curl_cffi import CurlHttpVersion
 from curl_cffi import requests as _requests
 from curl_cffi.requests.cookies import Cookies
+from curl_cffi.requests.exceptions import CookieConflict
 from lxml import html as lxml_html
 
 from zhihu_cli.content.handlers import get_user_agent
@@ -118,8 +119,12 @@ class ZhihuSession(_requests.Session):
         # (seeded) jar keep using the static header, as before.
         try:
             value = self.cookies.get("d_c0")
-        except Exception:
-            value = None
+        except CookieConflict:
+            candidates = [cookie for cookie in self.cookies.jar if cookie.name == "d_c0"]
+            value = next(
+                (cookie.value for cookie in candidates if cookie.domain == ".zhihu.com"),
+                candidates[0].value if candidates else None,
+            )
         if value:
             return str(value)
 
@@ -317,22 +322,19 @@ def _seed_cookie_jar(jar: CookieJar, cookie_header: str) -> None:
     """
     if not cookie_header:
         return
-    try:
-        # ``Cookies(jar)`` keeps the very same jar object (``else: self.jar =
-        # cookies``), so ``set`` below mutates the jar the session uses.
-        cookies = Cookies(jar)
-        existing = {cookie.name for cookie in jar}
-        for part in cookie_header.split("; "):
-            name, sep, value = part.partition("=")
-            if not sep or not name or name in existing:
-                continue
+    # ``Cookies(jar)`` keeps the very same jar object (``else: self.jar =
+    # cookies``), so ``set`` below mutates the jar the session uses.
+    cookies = Cookies(jar)
+    existing = {cookie.name for cookie in jar}
+    for part in cookie_header.split("; "):
+        name, sep, value = part.partition("=")
+        if not sep or not name or name in existing:
+            continue
+        try:
             cookies.set(name, value, domain=".zhihu.com", path="/")
-            existing.add(name)
-    except Exception:
-        # Seeding is best-effort: a malformed cookie header must not stop the
-        # session from being built (the static header still applies if the jar
-        # stays empty).
-        pass
+        except Exception:
+            continue
+        existing.add(name)
 
 
 def _build_direct_session(

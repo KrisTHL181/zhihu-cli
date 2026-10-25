@@ -1,6 +1,8 @@
 """Summary interface: fetch engagement stats (voteup, favorite, comment, like,
 share) for any Zhihu article / answer / pin URL."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from zhihu_cli.content.handlers import get_type_and_id
@@ -65,30 +67,28 @@ def _stats_for_answer(question_id: str, answer_id: str) -> dict[str, Any]:
 
 
 def _fetch_creator_aggr(entity_key: str, item_id: str) -> dict[str, Any] | None:
-    """Fetch aggregated metrics from creator API. Returns None if unavailable.
+    """Fetch aggregated metrics from creator API.
 
-    Only works when the authenticated user is the content author.
+    Only works when the authenticated user is the content author.  Returns
+    None when the entity has no creator type or the API answers non-200.
     """
     creator_type = _ENTITY_TO_CREATOR_TYPE.get(entity_key)
     if not creator_type:
         return None
 
-    try:
-        resp = session.get(
-            "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/aggr",
-            params={"type": creator_type, "token": item_id},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        return {
-            "share": int(data.get("share", 0)),
-            "pv": int(data.get("pv", 0)),
-            "show": int(data.get("show", 0)),
-        }
-    except Exception:
+    resp = session.get(
+        "https://www.zhihu.com/api/v4/creators/analysis/realtime/content/aggr",
+        params={"type": creator_type, "token": item_id},
+        timeout=15,
+    )
+    if resp.status_code != 200:
         return None
+    data = resp.json()
+    return {
+        "share": int(data.get("share", 0)),
+        "pv": int(data.get("pv", 0)),
+        "show": int(data.get("show", 0)),
+    }
 
 
 def get_item_stats(

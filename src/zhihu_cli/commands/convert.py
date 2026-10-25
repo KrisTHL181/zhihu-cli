@@ -110,7 +110,7 @@ def register_convert(main_group):
             # Read HTML
             try:
                 html_content = html_file.read_text(encoding="utf-8")
-            except Exception as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 warning(f"Cannot read {f_path(str(html_file))}: {exc}")
                 skipped += 1
                 continue

@@ -53,7 +53,7 @@ def is_running() -> bool:
         pid = int(DAEMON_PID_FILE.read_text().strip())
         os.kill(pid, 0)  # signal 0 = existence check only
         return True
-    except (OSError, ProcessLookupError, ValueError):
+    except (OSError, ValueError):
         cleanup_stale_files()
         return False
 
@@ -128,8 +128,8 @@ def start_daemon(idle_timeout: int = 300, foreground: bool = False) -> int:
 def stop_daemon(timeout: float = 5.0) -> bool:
     """Gracefully stop the daemon.
 
-    Sends a ``shutdown`` message over the socket first; falls back to
-    SIGTERM / SIGKILL if the socket is unresponsive.
+    Sends a ``shutdown`` message over the socket first; SIGTERM / SIGKILL
+    follow if the process is still alive afterwards.
 
     :param timeout: Seconds to wait for graceful exit.
     :returns: :data:`True` if the daemon was stopped.
@@ -140,19 +140,17 @@ def stop_daemon(timeout: float = 5.0) -> bool:
     pid = _read_pid()
 
     # Try IPC shutdown first
+    sock = None
     try:
         sock = _connect()
         send_message(sock, {"id": make_msg_id(), "type": MSG_SHUTDOWN})
         # Read acknowledgement (pong or error — either is fine)
-        try:
-            recv_message(sock)
-        except Exception:
-            pass
-        sock.close()
+        recv_message(sock)
         # Give it a moment to shut down
         _wait_for_exit(pid, min(timeout, 3.0))
-    except Exception:
-        pass
+    finally:
+        if sock is not None:
+            sock.close()
 
     # If still alive, send SIGTERM
     if pid and _pid_alive(pid):
@@ -178,13 +176,16 @@ def daemon_status() -> dict:
     """Return daemon status as a dict.
 
     When running, includes ``pid``, ``uptime_seconds``, and
-    ``requests_handled``.  When not running, only ``{"running": False}``.
+    ``requests_handled``.  When the daemon does not answer the ping, the
+    result also carries ``status: "unresponsive"`` and ``error``.  When not
+    running, only ``{"running": False}``.
     """
     if not is_running():
         return {"running": False}
 
     pid = _read_pid()
 
+    error: str | None = None
     sock = None
     try:
         sock = _connect()
@@ -198,16 +199,14 @@ def daemon_status() -> dict:
                 "uptime_seconds": pong.get("uptime_seconds", 0),
                 "requests_handled": pong.get("requests_handled", 0),
             }
-    except Exception:
-        pass
+        error = f"unexpected reply: {pong.get('type')!r}"
+    except (DaemonNotRunningError, OSError, ValueError) as exc:
+        error = str(exc)
     finally:
         if sock is not None:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            sock.close()
 
-    return {"running": True, "pid": pid}
+    return {"running": True, "pid": pid, "status": "unresponsive", "error": error}
 
 
 def cleanup_stale_files() -> None:
@@ -230,7 +229,7 @@ def _connect() -> socket.socket:
         sock.connect(str(DAEMON_SOCKET))
         sock.settimeout(_READ_TIMEOUT)
         return sock
-    except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+    except OSError as e:
         sock.close()
         raise DaemonNotRunningError(f"Daemon not available: {e}") from e
 
@@ -250,7 +249,7 @@ def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
-    except (OSError, ProcessLookupError):
+    except OSError:
         return False
 
 

@@ -49,6 +49,7 @@ def run_task() -> None:
     print(f"--- Incremental mode: fetching from {start_dt.strftime('%Y-%m-%d')} ---")
 
     new_income_data = []
+    failed_batches: list[str] = []
 
     current_dt = start_dt
     while current_dt < end_dt:
@@ -80,16 +81,27 @@ def run_task() -> None:
                     new_income_data.append({"date": row[0], "income_salt": salt_grains, "income_yuan": yuan})
                     count += 1
                 print(f"  [Success] Extracted {count} days of data")
+            elif resp.status_code >= 400:
+                print(f"  [Skip] Status code: {resp.status_code}")
+                failed_batches.append(f"{params['start_date']} -> {params['end_date']}: HTTP {resp.status_code}")
             else:
                 print(f"  [Skip] Status code: {resp.status_code}")
 
         except Exception as e:
             print(f"  [Exception] {e}")
+            failed_batches.append(f"{params['start_date']} -> {params['end_date']}: {e}")
 
         if batch_end >= end_dt - timedelta(days=1):
             break
         current_dt = batch_end + timedelta(days=1)
         wait(1.5)
+
+    if failed_batches:
+        print(f"\n[!] {len(failed_batches)} batch(es) failed:")
+        for failure in failed_batches:
+            print(f"  - {failure}")
+        if not new_income_data:
+            raise RuntimeError(f"Failed to fetch income data ({len(failed_batches)} batch(es) failed)")
 
     all_details = existing_details + new_income_data
     unique_data = {item["date"]: item for item in all_details}
@@ -111,7 +123,7 @@ def run_task() -> None:
             json.dump(output, f, ensure_ascii=False, indent=4)
 
         print("\n" + "=" * 40)
-        print("Updated!")
+        print("Updated (partial)!" if failed_batches else "Updated!")
         print(f"New days: {len(new_income_data)}")
         print(f"Total days: {len(sorted_details)}")
         print(f"Total income: {round(total_yuan, 2)} CNY")

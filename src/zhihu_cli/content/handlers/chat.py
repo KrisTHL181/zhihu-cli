@@ -289,7 +289,7 @@ def mark_inbox_read(
         automatically.
     :returns: A tuple of ``(marked, skipped)`` — *marked* is the list of
         thread dicts that were successfully processed, *skipped* is the
-        count of threads that failed (e.g. empty conversation or API error).
+        count of threads without an id or with an empty conversation.
     """
     if threads is None:
         threads, _ = get_inbox(unread_only=True)
@@ -305,14 +305,11 @@ def mark_inbox_read(
         if not tid:
             skipped += 1
             continue
-        try:
-            # Fetch just 1 message — Zhihu marks the conversation as read.
-            msgs = list(iter_chat_history(tid, max_items=1))
-            if msgs:
-                marked.append(t)
-            else:
-                skipped += 1
-        except Exception:
+        # Fetch just 1 message — Zhihu marks the conversation as read.
+        msgs = list(iter_chat_history(tid, max_items=1))
+        if msgs:
+            marked.append(t)
+        else:
             skipped += 1
 
     return marked, skipped

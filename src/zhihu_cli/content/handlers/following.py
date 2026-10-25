@@ -1,5 +1,7 @@
 """Fetch Zhihu following lists (followees, topics, questions, columns, collections)."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 from typing import Any
 
@@ -102,10 +104,7 @@ def fetch_following_topics(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = f"{TOPIC_FOLLOWING_API.format(token=url_token)}?include=data%5B*%5D.topic.introduction&offset=0"
-    try:
-        return list(stream_handler(url, _parse_following_topics, limit=limit, max_items=max_items))
-    except Exception:
-        return []
+    return list(stream_handler(url, _parse_following_topics, limit=limit, max_items=max_items))
 
 
 # ── following questions (关注的问题) ───────────────────────────────────────────
@@ -137,10 +136,7 @@ def fetch_following_questions(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = f"{MEMBER_API.format(token=url_token)}/following-questions?offset=0"
-    try:
-        return list(stream_handler(url, _parse_following_questions, limit=limit, max_items=max_items))
-    except Exception:
-        return []
+    return list(stream_handler(url, _parse_following_questions, limit=limit, max_items=max_items))
 
 
 # ── following columns (关注的专栏) ─────────────────────────────────────────────
@@ -174,10 +170,7 @@ def fetch_following_columns(
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     url = f"{MEMBER_API.format(token=url_token)}/following-columns?offset=0"
-    try:
-        return list(stream_handler(url, _parse_following_columns, limit=limit, max_items=max_items))
-    except Exception:
-        return []
+    return list(stream_handler(url, _parse_following_columns, limit=limit, max_items=max_items))
 
 
 # ── following collections (关注的收藏夹) ──────────────────────────────────────
@@ -219,7 +212,4 @@ def fetch_following_collections(
         "%2Ccreator%2Cdescription%2Cis_following%2Ccomment_count%2Ccreated_time"
         "&offset=0"
     )
-    try:
-        return list(stream_handler(url, _parse_following_collections, limit=limit, max_items=max_items))
-    except Exception:
-        return []
+    return list(stream_handler(url, _parse_following_collections, limit=limit, max_items=max_items))

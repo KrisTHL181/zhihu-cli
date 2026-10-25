@@ -94,17 +94,14 @@ def run_task() -> None:
         print(f"  Fetched {len(new_records)} records")
 
         # Also fetch first page to get updated_at
-        try:
-            first_resp = session.get(
-                f"{SCORE_URL}?start_at={start_ts}&end_at={end_ts}&limit=1&offset=0",
-                headers=headers,
-                timeout=15,
-            )
-            if first_resp.status_code == 200:
-                first_data = first_resp.json()
-                data_updated_at = first_data.get("data", {}).get("updated_at")
-        except Exception:
-            pass
+        first_resp = session.get(
+            f"{SCORE_URL}?start_at={start_ts}&end_at={end_ts}&limit=1&offset=0",
+            headers=headers,
+            timeout=15,
+        )
+        if first_resp.status_code == 200:
+            first_data = first_resp.json()
+            data_updated_at = first_data.get("data", {}).get("updated_at")
     except Exception as e:
         print(f"error: {e}")
 

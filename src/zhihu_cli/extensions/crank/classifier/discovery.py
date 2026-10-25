@@ -43,6 +43,8 @@ def discover_cranks(
     For each keyword, searches Zhihu articles, classifies them with BERT,
     then groups by author. Authors with >= min_articles and crank_ratio >= min_crank_ratio
     are returned sorted by crank ratio descending.
+
+    :raises RuntimeError: If the search fails for every keyword.
     """
     from zhihu_cli.content.handlers.search import search_articles
 
@@ -54,6 +56,8 @@ def discover_cranks(
     author_articles: dict[str, list[tuple[str, bool, float, str, str]]] = defaultdict(list)
 
     total_searched = 0
+    failed_keywords = 0
+    last_error: Exception | None = None
 
     print("=" * 60)
     print("Crank Discovery via Zhihu Search")
@@ -65,6 +69,8 @@ def discover_cranks(
             articles = search_articles(keyword, limit=20, max_items=max_per_keyword)
         except Exception as e:
             print(f"  [error] Search failed: {e}")
+            failed_keywords += 1
+            last_error = e
             continue
 
         total_searched += len(articles)
@@ -83,6 +89,9 @@ def discover_cranks(
             author_articles[author_name].append((url, is_c, prob, title, author.get("url_token", "")))
 
         wait(delay)
+
+    if keywords and failed_keywords == len(keywords):
+        raise RuntimeError(f"All {len(keywords)} keyword searches failed; last error: {last_error}")
 
     # Aggregate and filter
     results: list[DiscoveryResult] = []
@@ -121,6 +130,8 @@ def discover_cranks(
 
     print(f"\n{'=' * 60}")
     print(f"Searched {total_searched} articles")
+    if failed_keywords:
+        print(f"  [warn] {failed_keywords} of {len(keywords)} keyword searches failed")
     print(f"Found {len(results)} potential crank authors (crank_ratio >= {min_crank_ratio})")
     print(f"{'=' * 60}")
 

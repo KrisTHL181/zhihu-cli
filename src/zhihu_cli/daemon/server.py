@@ -121,6 +121,7 @@ class DaemonServer:
         # file first.  SIGKILL cannot be observed from inside the process;
         # its signature is simply a log with no exit line.
         faulthandler.enable(file=sys.stderr)
+        failed = False
         try:
             self._init_session()
             self._cleanup_stale_socket()
@@ -129,8 +130,11 @@ class DaemonServer:
             _log(f"Daemon shutting down (PID {os.getpid()}): KeyboardInterrupt")
         except Exception:
             _log("Daemon terminated by unhandled exception", exc=True)
+            failed = True
         finally:
             self.cleanup()
+        if failed:
+            raise SystemExit(1)
 
     def _request_shutdown(self, reason: str) -> None:
         """Record *reason* (first one wins) and wake the main loop.
@@ -154,13 +158,6 @@ class DaemonServer:
         active profile's headers.
         """
         with self._session_lock:
-            old = self._session
-            if old is not None:
-                try:
-                    old.close()
-                except Exception:
-                    pass
-
             hdrs = cache_manager.load_headers()
             ua = _resolve_user_agent(hdrs)
             sess = ZhihuSession(
@@ -180,7 +177,13 @@ class DaemonServer:
             # Captcha detection is done manually in _handle_http_request().
             sess.captcha_handler = "ignore"
 
+            old = self._session
             self._session = sess
+            if old is not None:
+                try:
+                    old.close()
+                except Exception:
+                    pass
             # The daemon is the account-wide chokepoint: every client that
             # goes through it shares this session's ``request``, so pacing it
             # here limits the account, not one process.  Deliberately the
@@ -285,6 +288,8 @@ class DaemonServer:
                 self._requests_handled += 1
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
             pass  # Client disconnected — normal
+        except ValueError as exc:
+            _log(f"Malformed message frame: {exc}")
         except Exception:
             _log("Unhandled exception in connection handler", exc=True)
         finally:
@@ -339,6 +344,7 @@ class DaemonServer:
             await loop.run_in_executor(None, self._init_session)
             return build_pong(msg_id)
         except Exception as e:
+            _log("Session reload failed", exc=True)
             return build_error(msg_id, type(e).__name__, str(e))
 
     async def _handle_set_config(self, msg_id: str, msg: dict[str, Any]) -> dict[str, Any]:
@@ -365,12 +371,14 @@ class DaemonServer:
                 await loop.run_in_executor(None, self._do_set_captcha_handler, value)
                 return build_pong(msg_id)
             except Exception as e:
+                _log(f"Setting config captcha_handler failed: {value!r}", exc=True)
                 return build_error(msg_id, type(e).__name__, str(e))
         elif key == "user_agent":
             try:
                 await loop.run_in_executor(None, self._init_session)
                 return build_pong(msg_id)
             except Exception as e:
+                _log("Session rebuild for user_agent failed", exc=True)
                 return build_error(msg_id, type(e).__name__, str(e))
         elif key == "qps":
             # ``configure`` clamps non-finite/negative values to unlimited,
@@ -408,7 +416,7 @@ class DaemonServer:
         try:
             resp, cookies = await loop.run_in_executor(None, self._do_request, method, url, kwargs)
         except Exception as e:
-            _log(f"HTTP request failed: {method} {url}: {e}")
+            _log(f"HTTP request failed: {method} {url}: {e}", exc=True)
             return build_error(msg_id, type(e).__name__, str(e))
 
         # Check for captcha after the request (skip captcha endpoints to
@@ -454,6 +462,7 @@ class DaemonServer:
             resp, cookies = await loop.run_in_executor(None, self._do_request, retry_method, retry_url, retry_kwargs)
             return self._build_response(msg_id, resp, cookies)
         except Exception as e:
+            _log(f"captcha retry failed: {retry_method} {retry_url}", exc=True)
             return build_error(msg_id, type(e).__name__, str(e))
 
     # ── session-level request execution ─────────────────────────────────

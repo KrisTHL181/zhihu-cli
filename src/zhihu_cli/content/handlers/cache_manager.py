@@ -207,20 +207,14 @@ class CacheManager:
                 path = self.header_file
 
         if path.exists():
-            try:
-                return json.loads(path.read_text())
-            except json.JSONDecodeError:
-                return {}
+            return json.loads(path.read_text())
         return {}
 
     # ── config management ───────────────────────────────────────────────
 
     def get_config(self) -> dict[str, Any]:
         if self.config_file.exists():
-            try:
-                return json.loads(self.config_file.read_text())
-            except json.JSONDecodeError:
-                pass
+            return json.loads(self.config_file.read_text())
         return {}
 
     def get_start_date(self) -> str:

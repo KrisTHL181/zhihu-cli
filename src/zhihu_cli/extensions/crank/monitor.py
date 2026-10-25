@@ -398,6 +398,8 @@ class CrankMonitor:
         series directory.
 
         Returns a list of raw article dicts from the API.
+
+        :raises RuntimeError: If fetching fails for every token.
         """
         tokens = self._get_all_tokens(author_entry)
         if not tokens:
@@ -413,6 +415,9 @@ class CrankMonitor:
         all_articles: list[dict[str, Any]] = []
         seen_ids: set[str] = set()  # deduplicate across tokens within this run
 
+        api_failures = 0
+        last_error: Exception | None = None
+
         for i, token in enumerate(tokens):
             label = "primary" if i == 0 else f"alias #{i}"
             print(f"  Fetching article list for {author_entry['name']} ({label}, token={token})...")
@@ -420,6 +425,8 @@ class CrankMonitor:
                 articles = fetch_article_list(token)
             except Exception as e:
                 print(f"  [error] Failed to fetch articles for token {token}: {e}", file=sys.stderr)
+                api_failures += 1
+                last_error = e
                 continue
 
             # Dedup across tokens within this run
@@ -433,6 +440,14 @@ class CrankMonitor:
                     all_articles.append(art)
 
             print(f"    → {len(articles)} articles (running total: {len(all_articles)})")
+
+        if api_failures == len(tokens):
+            raise RuntimeError(f"Failed to fetch article list for {author_entry['name']}: {last_error}")
+        if api_failures:
+            print(
+                f"  [warn] {api_failures} of {len(tokens)} token fetches failed for {author_entry['name']}",
+                file=sys.stderr,
+            )
 
         if len(tokens) > 1:
             print(f"  Combined: {len(all_articles)} unique articles across {len(tokens)} tokens")

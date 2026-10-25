@@ -121,12 +121,12 @@ def handle_captcha(
 
     # Try to get more details
     info_msg = captcha_error.get("message", "Risk control triggered")
-    block_level = 0
+    block_level: int | None = None
     try:
         info = get_captcha_info(session, session_id)
         block_level = info.get("block_level", 0)
-    except Exception:
-        pass
+    except (OSError, ValueError) as exc:
+        print(f"  ⚠️  Could not fetch captcha details: {exc}")
 
     # Build the full unhuman URL
     unhuman_url = redirect_url
@@ -179,8 +179,9 @@ def handle_captcha(
             # After verification, re-visit the unhuman page to harvest cookies
             try:
                 session.get(unhuman_url)
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                print(f"  ⚠️  Could not harvest verification cookies: {exc}")
+                return "skipped"
             return "resolved"
         else:
             print("  Invalid choice. Press Enter after completing verification.")
@@ -191,7 +192,7 @@ def _print_captcha_banner(
     session_id: str,
     unhuman_url: str,
     message: str,
-    block_level: int,
+    block_level: int | None,
 ) -> None:
     """Display a formatted banner with captcha information."""
     width = 60
@@ -203,7 +204,7 @@ def _print_captcha_banner(
     print(border)
     print(f"  Captcha type : {captcha_type}")
     print(f"  Session ID   : {session_id[:32]}...")
-    print(f"  Block level  : {block_level}")
+    print(f"  Block level  : {'unknown' if block_level is None else block_level}")
     if message:
         print(f"  Message      : {message}")
     print()

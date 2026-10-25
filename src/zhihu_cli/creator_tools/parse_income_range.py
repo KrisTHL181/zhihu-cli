@@ -40,47 +40,42 @@ def _fetch_batch(
 
         print(f"    page={page}...", end=" ")
 
-        try:
-            resp = session.get(RANGE_URL, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = session.get(RANGE_URL, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
 
-            batch_items = data.get("data", [])
-            total = data.get("total", 0)
+        batch_items = data.get("data", [])
+        total = data.get("total", 0)
 
-            if not batch_items:
-                print("no more data")
-                break
-
-            for item in batch_items:
-                items.append(
-                    {
-                        "content_id": item["content_id"],
-                        "content_token": item.get("content_token", ""),
-                        "content_title": item["content_title"],
-                        "content_type": item["content_type"],
-                        "content_publish_at": item.get("content_publish_at", 0),
-                        "content_publish_date": item.get("content_publish_date", ""),
-                        "current_read": item.get("current_read", 0),
-                        "current_interaction": item.get("current_interaction", 0),
-                        "current_income": item.get("current_income", 0),
-                        "total_read": item.get("total_read", 0),
-                        "total_interaction": item.get("total_interaction", 0),
-                        "total_income": item.get("total_income", 0),
-                    }
-                )
-
-            print(f"got {len(batch_items)} items (total={total})")
-
-            if page * PAGE_SIZE >= total:
-                break
-
-            page += 1
-            wait(1.0)
-
-        except Exception as e:
-            print(f"error: {e}")
+        if not batch_items:
+            print("no more data")
             break
+
+        for item in batch_items:
+            items.append(
+                {
+                    "content_id": item["content_id"],
+                    "content_token": item.get("content_token", ""),
+                    "content_title": item["content_title"],
+                    "content_type": item["content_type"],
+                    "content_publish_at": item.get("content_publish_at", 0),
+                    "content_publish_date": item.get("content_publish_date", ""),
+                    "current_read": item.get("current_read", 0),
+                    "current_interaction": item.get("current_interaction", 0),
+                    "current_income": item.get("current_income", 0),
+                    "total_read": item.get("total_read", 0),
+                    "total_interaction": item.get("total_interaction", 0),
+                    "total_income": item.get("total_income", 0),
+                }
+            )
+
+        print(f"got {len(batch_items)} items (total={total})")
+
+        if page * PAGE_SIZE >= total:
+            break
+
+        page += 1
+        wait(1.0)
 
     return items
 

@@ -295,11 +295,7 @@ def register_draft(main_group):
             error("Empty content.")
             raise SystemExit(1)
 
-        try:
-            html = markdown2html(content, scene=type)  # pyright: ignore[reportArgumentType]
-        except Exception as e:
-            error(f"Markdown to HTML conversion failed: {e}")
-            raise SystemExit(1)
+        html = markdown2html(content, scene=type)  # pyright: ignore[reportArgumentType]
 
         try:
             resp = upload_draft(type, id, html)
@@ -308,6 +304,6 @@ def register_draft(main_group):
         except ValueError as e:
             error(f"{e}")
             raise SystemExit(1)
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             error(f"Draft upload failed: {e}")
             raise SystemExit(1)

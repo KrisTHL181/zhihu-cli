@@ -73,12 +73,16 @@ def register_daemon(main_group: click.Group) -> None:
         """Show daemon status and statistics."""
         status = daemon_status()
         if status.get("running"):
-            echo(f"  {f_label('Status:')}    running")
+            echo(f"  {f_label('Status:')}    {status.get('status', 'running')}")
             echo(f"  {f_label('PID:')}       {f_num(status['pid'])}")
-            uptime = status.get("uptime_seconds", 0)
-            echo(f"  {f_label('Uptime:')}    {f_num(f'{uptime:.0f}s')}")
-            handled = status.get("requests_handled", 0)
-            echo(f"  {f_label('Requests:')}  {f_num(handled)}")
+            uptime = status.get("uptime_seconds")
+            if uptime is not None:
+                echo(f"  {f_label('Uptime:')}    {f_num(f'{uptime:.0f}s')}")
+            handled = status.get("requests_handled")
+            if handled is not None:
+                echo(f"  {f_label('Requests:')}  {f_num(handled)}")
+            if status.get("error"):
+                echo(f"  {f_label('Error:')}     {status['error']}")
         else:
             info("Daemon is not running.")
 

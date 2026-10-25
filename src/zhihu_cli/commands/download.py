@@ -339,6 +339,7 @@ def download_user(
         base_dir = Path(output_dir)
 
     downloaded: dict[str, int] = {"answers": 0, "articles": 0, "pins": 0}
+    failed: list[dict[str, str]] = []
 
     if content_types in ("answers", "all"):
         answers_dir = str(base_dir / "answers")
@@ -360,6 +361,7 @@ def download_user(
                 )
                 downloaded["answers"] += 1
             except Exception as e:
+                failed.append({"url": item.get("url", ""), "error": str(e)})
                 error(f"  {item_index(i, len(answer_items))} Error: {e}")
             wait(delay)
 
@@ -385,6 +387,7 @@ def download_user(
                 )
                 downloaded["articles"] += 1
             except Exception as e:
+                failed.append({"url": item.get("url", ""), "error": str(e)})
                 error(f"  {item_index(i, len(article_items))} Error: {e}")
             wait(delay)
 
@@ -409,20 +412,33 @@ def download_user(
                 echo(f"  {item_index(i, len(pin_items))} {preview} -> {f_path(os.path.basename(filepath))}")
                 downloaded["pins"] += 1
             except Exception as e:
+                failed.append({"url": item.get("url", ""), "error": str(e)})
                 error(f"  {item_index(i, len(pin_items))} Error: {e}")
             wait(delay)
 
     if output_json:
         print_json(
-            {"downloaded": downloaded, "base_dir": str(base_dir), "user_name": user_name, "url_token": url_token}
+            {
+                "downloaded": downloaded,
+                "base_dir": str(base_dir),
+                "user_name": user_name,
+                "url_token": url_token,
+                "failed": failed,
+                "failure_count": len(failed),
+            }
         )
+        if failed and not any(downloaded.values()):
+            raise SystemExit(1)
         return
 
     section(f"Done! Downloaded from {f_name(user_name)}:")
     echo(f"  {f_label('Answers:')}  {f_num(downloaded['answers'])}")
     echo(f"  {f_label('Articles:')} {f_num(downloaded['articles'])}")
     echo(f"  {f_label('Pins:')}     {f_num(downloaded['pins'])}")
+    echo(f"  {f_label('Failed:')}   {f_num(len(failed))}")
     echo(f"  {f_label('Output:')}   {f_path(str(base_dir))}")
+    if failed and not any(downloaded.values()):
+        raise SystemExit(1)
 
 
 def register_download(main_group) -> None:

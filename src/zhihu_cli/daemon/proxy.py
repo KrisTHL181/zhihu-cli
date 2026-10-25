@@ -329,7 +329,7 @@ class DaemonProxySession:
             sock.connect(str(SOCKET_PATH))
             sock.settimeout(RW_TIMEOUT)
             return sock
-        except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+        except OSError as e:
             sock.close()
             raise DaemonNotRunningError(f"Daemon not available: {e}") from e
 
@@ -410,26 +410,40 @@ class DaemonProxySession:
 
     # ── control messages ───────────────────────────────────────────────
 
+    def _warn_control_failure(self, operation: str, detail: str) -> None:
+        """Report a failed control message on stderr.
+
+        :param operation: The operation that failed, e.g. ``"session reload"``.
+        :param detail: The daemon's error message or the transport exception.
+        """
+        print(f"  ⚠️  Daemon {operation} failed: {detail}", file=sys.stderr)
+
     def _send_reload(self) -> None:
         """Instruct the daemon to reload its session from the current profile.
 
-        Best-effort: called by :func:`requests.reload_session`, which must
-        succeed even when the daemon has gone away (it then falls back to the
-        direct session on the next request).
+        Called by :func:`requests.reload_session`.  Failure to reload leaves
+        the daemon serving the previous profile's credentials, so this proxy
+        reports it and switches to direct requests, which use the new profile.
         """
         if self._daemon_down:
             return
         try:
-            self._send_recv({"id": make_msg_id(), "type": MSG_RELOAD_SESSION})
-        except (DaemonError, OSError, ValueError):
-            pass
+            resp = self._send_recv({"id": make_msg_id(), "type": MSG_RELOAD_SESSION})
+        except (DaemonError, OSError, ValueError) as exc:
+            self._mark_daemon_down(f"session reload failed: {exc}")
+            return
+        if resp.get("type") == MSG_ERROR:
+            self._mark_daemon_down(f"session reload failed: {resp.get('message', 'unknown error')}")
 
     def _send_config(self, key: str, value: Any) -> None:
-        """Propagate a configuration change to the daemon (best-effort)."""
+        """Propagate a configuration change to the daemon.
+
+        Failures are reported on stderr, and the daemon stays in use.
+        """
         if self._daemon_down:
             return
         try:
-            self._send_recv(
+            resp = self._send_recv(
                 {
                     "id": make_msg_id(),
                     "type": MSG_SET_CONFIG,
@@ -437,8 +451,11 @@ class DaemonProxySession:
                     "value": value,
                 }
             )
-        except (DaemonError, OSError, ValueError):
-            pass
+        except (DaemonError, OSError, ValueError) as exc:
+            self._warn_control_failure(f"config {key}", str(exc))
+            return
+        if resp.get("type") == MSG_ERROR:
+            self._warn_control_failure(f"config {key}", resp.get("message", "unknown error"))
 
     # ── captcha_handler property ───────────────────────────────────────
 
@@ -653,10 +670,7 @@ class DaemonProxySession:
         with self._direct_lock:
             if self._direct is None:
                 direct = _build_context_session()
-                try:
-                    direct.headers.update(self.headers)
-                except Exception:
-                    pass
+                direct.headers.update(self.headers)
                 direct.captcha_handler = self._captcha_handler
                 self._direct = direct
             return self._direct
@@ -675,6 +689,21 @@ class DaemonProxySession:
                 direct.close()
             except Exception:
                 pass
+
+    def _mark_daemon_down(self, reason: Any) -> None:
+        """Abandon the daemon and close the socket, warning once.
+
+        :param reason: Why the daemon is being abandoned, shown in the warning.
+        """
+        with self._direct_lock:
+            first_failure = not self._daemon_down
+            self._daemon_down = True
+        self._close_sock()
+        if first_failure:
+            print(
+                f"  ⚠️  Lost the zhihu daemon ({reason}); falling back to direct requests for this process.",
+                file=sys.stderr,
+            )
 
     def _degrade_to_direct(
         self,
@@ -697,15 +726,7 @@ class DaemonProxySession:
             visible instead of silently changing transport.
         :returns: The direct response, shaped like a daemon reply.
         """
-        with self._direct_lock:
-            first_failure = not self._daemon_down
-            self._daemon_down = True
-        self._close_sock()
-        if first_failure:
-            print(
-                f"  ⚠️  Lost the zhihu daemon ({exc}); falling back to direct requests for this process.",
-                file=sys.stderr,
-            )
+        self._mark_daemon_down(exc)
         return self._fallback_direct(method, url, **kwargs)
 
     def _fallback_direct(self, method: str, url: str, **kwargs: Any) -> DaemonProxyResponse:
@@ -721,8 +742,8 @@ class DaemonProxySession:
         resp = direct.request(method, url, **kwargs)
         try:
             self._sync_cookies(dict(resp.cookies.get_dict()))
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as exc:
+            print(f"  ⚠️  Cookie sync failed: {exc}", file=sys.stderr)
         body = getattr(resp, "content", b"") or b""
         return DaemonProxyResponse(
             {

@@ -265,19 +265,9 @@ def fetch_member_questions(
     limit: int = PAGE_SIZE,
     max_items: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch questions a member has asked.
-
-    Returns an empty list if the endpoint is unavailable.
-    """
+    """Fetch questions a member has asked."""
     url = f"{MEMBER_API.format(token=url_token)}/questions?include=data%5B%2A%5D.excerpt&offset=0&limit={limit}"
-    items: list[dict[str, Any]] = []
-    try:
-        # ``extend`` (not ``list``) so a mid-stream failure still returns the
-        # items already received.
-        items.extend(stream_handler(url, _parse_question_list, max_items=max_items))
-    except Exception:
-        pass
-    return items
+    return list(stream_handler(url, _parse_question_list, max_items=max_items))
 
 
 # ── activity feed ──────────────────────────────────────────────────────────
@@ -399,11 +389,8 @@ def fetch_member_activities(
 
 
 def get_my_url_token():
-    try:
-        resp = session.get("https://www.zhihu.com/api/v4/me")
-        if resp.status_code == 200:
-            me = resp.json()
-            return me.get("url_token") or me.get("urlToken")
-    except Exception:
-        pass
+    resp = session.get("https://www.zhihu.com/api/v4/me")
+    if resp.status_code == 200:
+        me = resp.json()
+        return me.get("url_token") or me.get("urlToken")
     return None

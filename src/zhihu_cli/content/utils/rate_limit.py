@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import threading
 import time
 
@@ -53,6 +54,10 @@ import time
 #: persisted config for that invocation.
 _explicit_lock = threading.Lock()
 _explicit_qps = False
+
+#: Whether the one-shot warning about an unreadable ``rate_limit.qps`` has been
+#: emitted.
+_warned_config_failure = False
 
 
 def _coerce_qps(value: object) -> float:
@@ -173,6 +178,8 @@ def resolve_qps(cli: float | None = None) -> float:
     :param cli: The ``--qps`` value, or ``None`` when not supplied.
     :returns: A finite non-negative float.
     """
+    global _warned_config_failure
+
     if cli is not None:
         return _coerce_qps(cli)
 
@@ -193,8 +200,13 @@ def resolve_qps(cli: float | None = None) -> float:
         from zhihu_cli.content.handlers.cache_manager import cache_manager
 
         return _coerce_qps(cache_manager.get_qps())
-    except Exception:
-        # A broken/unreadable config must never break request setup.
+    except (ImportError, OSError, ValueError, TypeError) as exc:
+        if not _warned_config_failure:
+            _warned_config_failure = True
+            print(
+                f"zhihu: could not read rate_limit.qps from config.json ({exc}); continuing unlimited",
+                file=sys.stderr,
+            )
         return 0.0
 
 

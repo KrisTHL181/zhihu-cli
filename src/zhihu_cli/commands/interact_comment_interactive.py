@@ -631,8 +631,5 @@ def run_interactive_comments(item_type: str, item_id: str) -> None:
 
     # ── Run ─────────────────────────────────────────────────────────────
 
-    try:
-        app = CommentBrowserApp()
-        app.run()
-    except Exception as exc:
-        error(f"TUI error: {exc}")
+    app = CommentBrowserApp()
+    app.run()

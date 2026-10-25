@@ -199,23 +199,19 @@ def _process_message(
 
     sender_name = str(sender_id)
 
-    # Build the LLM context from recent history; fall back to the single
-    # incoming message alone if history is unavailable.
+    # Build the LLM context from recent history.
     messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     my_name: str | None = None
-    try:
-        partner_info: list[str] = []
-        history = list(iter_chat_history(sender_id, max_items=history_limit or None, partner_info=partner_info))
-        if len(partner_info) >= 2:
-            sender_name = partner_info[0]
-            my_name = partner_info[1]
-        for msg in history:
-            if msg.get("is_canceled") or msg.get("is_risk_tip"):
-                continue
-            role = "assistant" if my_name and msg["sender"] == my_name else "user"
-            messages.append({"role": role, "content": msg["content"]})
-    except Exception:
-        pass  # proceed with just the incoming message
+    partner_info: list[str] = []
+    history = list(iter_chat_history(sender_id, max_items=history_limit or None, partner_info=partner_info))
+    if len(partner_info) >= 2:
+        sender_name = partner_info[0]
+        my_name = partner_info[1]
+    for msg in history:
+        if msg.get("is_canceled") or msg.get("is_risk_tip"):
+            continue
+        role = "assistant" if my_name and msg["sender"] == my_name else "user"
+        messages.append({"role": role, "content": msg["content"]})
 
     messages.append({"role": "user", "content": text})
 

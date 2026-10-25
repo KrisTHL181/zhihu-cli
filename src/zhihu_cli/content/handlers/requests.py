@@ -406,10 +406,7 @@ def _get_session() -> Any:
 
         _session = _build_session()
         if _session is not None:
-            try:
-                _headers = dict(_session.headers)
-            except Exception:
-                pass
+            _headers = dict(_session.headers)
         return _session
 
 
@@ -425,11 +422,8 @@ def _build_session() -> Any:
     rate_limit.configure_from_config()
 
     # ── check daemon config ──────────────────────────────────────────
-    try:
-        config = cache_manager.get_config()
-        daemon_enabled = config.get("daemon", {}).get("enabled", True)
-    except Exception:
-        daemon_enabled = True
+    config = cache_manager.get_config()
+    daemon_enabled = config.get("daemon", {}).get("enabled", True)
 
     if daemon_enabled:
         proxy: Any = None
@@ -789,10 +783,7 @@ def reload_session() -> None:
             sess = _build_session()
             _session = sess
             _inject_app_headers(sess)
-            try:
-                _headers = dict(sess.headers)
-            except Exception:
-                pass
+            _headers = dict(sess.headers)
 
 
 def _context_profile() -> str | None:

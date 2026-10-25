@@ -695,10 +695,7 @@ def compute_and_display_stats(output_json: bool = False, aggr: bool = False) -> 
                     for k, v in rec.items():
                         if k in ("type", "date"):
                             continue
-                        try:
-                            totals[k] = totals.get(k, 0) + float(v or 0)
-                        except (ValueError, TypeError):
-                            pass
+                        totals[k] = totals.get(k, 0) + float(v or 0)
                 synth_aggr.append(
                     {
                         "name": fp_stem.replace("metrics_full_", ""),
