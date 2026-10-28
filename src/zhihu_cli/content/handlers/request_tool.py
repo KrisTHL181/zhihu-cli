@@ -13,6 +13,8 @@ import json as json_mod
 from typing import Any
 from urllib.parse import urlparse
 
+from zhihu_cli.content.utils.zse import ZSE93
+
 
 def _get_dc0(headers: dict[str, str]) -> str:
     """Extract ``d_c0`` value from the Cookie header in *headers*."""
@@ -48,7 +50,7 @@ def _build_sign_source(
         path_and_query += "?" + parsed.query
 
     dc0 = _get_dc0(headers)
-    parts = ["101_3_3.0", path_and_query, dc0]
+    parts = [ZSE93, path_and_query, dc0]
     if data:
         parts.append(data)
 
@@ -96,7 +98,7 @@ def build_curl_command(
         md5_hash = hashlib.md5(sign_source.encode()).hexdigest()
         cipher = ZSECipher()
         signature = cipher.encrypt(md5_hash)
-        parts.append("-H 'x-zse-93: 101_3_3.0'")
+        parts.append(f"-H 'x-zse-93: {ZSE93}'")
         parts.append(f"-H 'x-zse-96: 2.0_{signature}'")
 
     if data:

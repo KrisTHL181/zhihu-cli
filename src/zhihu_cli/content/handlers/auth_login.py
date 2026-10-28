@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -11,13 +12,11 @@ from curl_cffi import requests as curl_requests
 
 from zhihu_cli.content.handlers import get_user_agent
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.content.utils.zse import ZSE93
 
 DESKTOP_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 )
-DESKTOP_SEC_CH_UA = '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"'
-DESKTOP_SEC_CH_UA_MOBILE = "?0"
-DESKTOP_SEC_CH_UA_PLATFORM = '"Windows"'
 
 SIGNIN_URL = "https://www.zhihu.com/signin?next=%2F"
 SIGNIN_REFERER = "https://www.zhihu.com/signin"
@@ -31,16 +30,52 @@ RISK_CONTROL_FALLBACK = "https://www.zhihu.com/account/risk_control/"
 RISK_CONTROL_EXIT = object()
 
 
+def _client_hints(ua: str) -> dict[str, str]:
+    """Derive Chromium Client Hints from a User-Agent string.
+
+    The hints must agree with the UA they accompany: sending Chrome's
+    ``sec-ch-ua`` alongside a Firefox or Safari UA is itself a fingerprinting
+    signal.  Non-Chromium UAs therefore get no hints at all.
+
+    :param ua: The effective User-Agent.
+    :returns: ``sec-ch-ua`` / ``sec-ch-ua-mobile`` / ``sec-ch-ua-platform``,
+        or an empty dict when *ua* is not Chromium-based.
+    """
+    edge = re.search(r"Edg(?:e)?/(\d+)", ua)
+    chrome = re.search(r"Chrome/(\d+)", ua)
+    if edge:
+        brand, version = "Microsoft Edge", edge.group(1)
+    elif chrome:
+        brand, version = "Google Chrome", chrome.group(1)
+    else:
+        return {}
+
+    if "Android" in ua:
+        platform = "Android"
+    elif "CrOS" in ua:
+        platform = "Chrome OS"
+    elif "Windows" in ua:
+        platform = "Windows"
+    elif "Macintosh" in ua or "Mac OS X" in ua:
+        platform = "macOS"
+    else:
+        platform = "Linux"
+
+    return {
+        "sec-ch-ua": f'"Not:A-Brand";v="99", "{brand}";v="{version}", "Chromium";v="{version}"',
+        "sec-ch-ua-mobile": "?1" if "Mobile" in ua else "?0",
+        "sec-ch-ua-platform": f'"{platform}"',
+    }
+
+
 def _desktop_headers(referer: str | None = None) -> dict[str, str]:
     ua = get_user_agent() or DESKTOP_USER_AGENT
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "User-Agent": ua,
-        "sec-ch-ua": DESKTOP_SEC_CH_UA,
-        "sec-ch-ua-mobile": DESKTOP_SEC_CH_UA_MOBILE,
-        "sec-ch-ua-platform": DESKTOP_SEC_CH_UA_PLATFORM,
     }
+    headers.update(_client_hints(ua))
     if referer:
         headers["Referer"] = referer
     return headers
@@ -56,7 +91,7 @@ def _login_headers(session: curl_requests.Session, referer: str, *, polling: boo
         headers["sec-fetch-dest"] = "empty"
         headers["sec-fetch-mode"] = "cors"
         headers["sec-fetch-site"] = "same-origin"
-        headers["x-zse-93"] = "101_3_3.0"
+        headers["x-zse-93"] = ZSE93
     xsrf = _cookie_value(session, "_xsrf")
     if xsrf:
         headers["x-xsrftoken"] = xsrf

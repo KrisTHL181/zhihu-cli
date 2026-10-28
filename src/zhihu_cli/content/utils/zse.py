@@ -5,6 +5,11 @@ Based on the Rust implementation from repository: https://github.com/zly2006/zhi
 
 import struct
 
+#: Value of the ``x-zse-93`` header sent on every signed Zhihu request.
+#: Shared by the direct session, the QR login flow, and the curl generator so
+#: the version string has a single source of truth.
+ZSE93 = "101_3_3.0"
+
 
 class ZSECipher:
     """Zhihu ZSE v4 cipher implementation"""

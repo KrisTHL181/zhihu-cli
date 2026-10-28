@@ -347,7 +347,7 @@ def _fetch_paid_column_section_page(url: str) -> str:
     :returns: Raw HTML string.
     :raises requests.HTTPError: If the page cannot be fetched.
     """
-    resp = session.get(url, headers={"User-Agent": session.headers.get("User-Agent", "")})
+    resp = session.get(url)
     resp.raise_for_status()
     return resp.text
 

@@ -45,7 +45,6 @@ only name the handler needs and the CLI startup path never pays for it.
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from zhihu_cli.content.utils.wait import wait
@@ -62,21 +61,6 @@ ZSE_SEED = 91
 
 #: App-flavoured ``x-zse-83`` value the endpoint accepts.
 ZSE83 = "3_3.0"
-
-#: TLS impersonation profile, i.e. what ``get_browser(APP_UA)`` returns.
-#: Hardcoded rather than derived so that ``_session_core`` — which pulls in
-#: ``curl_cffi`` *and* ``lxml`` — stays off this path.
-IMPERSONATE = "chrome_android"
-
-#: App User-Agent the endpoint expects.  This will rot; see :data:`UA_ENV`.
-APP_UA = (
-    "ZhihuHybrid com.zhihu.android/Futureve/11.9.0 Mozilla/5.0 (Linux; Android 14; "
-    "M2102K1G Build/UKQ1.240624.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Version/4.0 Chrome/153.0.8010.36 Mobile Safari/537.36"
-)
-
-#: Environment variable overriding :data:`APP_UA`, read at call time.
-UA_ENV = "ZHIHU_YANXUAN_DECODE_UA"
 
 
 class ServerDecodeError(RuntimeError):
@@ -98,24 +82,29 @@ def _build_session() -> Any:
     is function-local (the ``daemon/proxy.py`` convention) so that importing
     this module stays cheap.
 
+    The User-Agent is the profile's stored one (with the ``zhihu config
+    user-agent`` override on top), and the TLS impersonation profile is
+    derived from it via :func:`~zhihu_cli.content.handlers.requests.get_browser`
+    — so the client identity matches the rest of the session instead of a
+    hardcoded app string that rots.
+
     This is the promotion point if a second unsigned endpoint ever appears.
 
-    :returns: A session carrying the active profile's Cookie, the app
-        User-Agent and ``x-zse-83``, but no signature headers.
+    :returns: A session carrying the active profile's Cookie and User-Agent,
+        plus ``x-zse-83``, but no signature headers.
     """
     from curl_cffi import requests as curl_requests
 
+    from zhihu_cli.content.handlers import get_user_agent
     from zhihu_cli.content.handlers.cache_manager import cache_manager
+    from zhihu_cli.content.handlers.requests import get_browser
 
     headers = cache_manager.load_headers()
-    session = curl_requests.Session(impersonate=IMPERSONATE)
-    session.headers.update(
-        {
-            "User-Agent": os.environ.get(UA_ENV) or APP_UA,
-            "x-zse-83": ZSE83,
-            "Cookie": headers.get("Cookie", ""),
-        }
-    )
+    ua = get_user_agent() or headers.get("User-Agent", "")
+    session = curl_requests.Session(impersonate=get_browser(ua))
+    session.headers.update({"x-zse-83": ZSE83, "Cookie": headers.get("Cookie", "")})
+    if ua:
+        session.headers["User-Agent"] = ua
     return session
 
 

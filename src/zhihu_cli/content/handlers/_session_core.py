@@ -33,8 +33,7 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.captcha import detect_captcha
 from zhihu_cli.content.handlers.captcha_gate import captcha_gate, resolve_captcha
 from zhihu_cli.content.utils import rate_limit
-
-ZSE93 = "101_3_3.0"
+from zhihu_cli.content.utils.zse import ZSE93
 
 
 def get_browser(ua: str) -> _requests.BrowserTypeLiteral:
