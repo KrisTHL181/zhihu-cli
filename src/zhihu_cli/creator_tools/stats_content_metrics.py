@@ -477,9 +477,8 @@ def _display_daily_stats(stats: dict) -> None:
 
     blank()
     divider()
-    echo(
-        f"  {f_label('Data source:')} {f_num(stats['file_count'])} files, {f_num(f'{stats["record_count"]:,}')} daily records"
-    )
+    record_count = stats["record_count"]
+    echo(f"  {f_label('Data source:')} {f_num(stats['file_count'])} files, {f_num(f'{record_count:,}')} daily records")
 
 
 def _display_aggr_stats(stats: dict, synthesized: bool = False) -> None:

@@ -169,7 +169,8 @@ def _show_profile_rich(profile: dict) -> None:
         echo(f"\n{f_bold(profile.get('name', 'Unknown'))}")
         if headline := profile.get("headline"):
             echo(f"  {f_dim(headline)}")
-        echo(f"  {f_url(f'https://www.zhihu.com/people/{profile.get("url_token", "")}')}")
+        url_token = profile.get("url_token", "")
+        echo(f"  {f_url(f'https://www.zhihu.com/people/{url_token}')}")
         uid = profile.get("uid", "")
         if uid:
             echo(f"  {f_label('User ID:')} {f_num(uid)}")

@@ -163,9 +163,10 @@ def register_chat(main_group: click.Group) -> None:
                 )
                 blank()
                 for msg in messages:
-                    echo(
-                        f"  {f_tag(f'{msg["unread_count"]} unread')} {f_name(msg['from'])}  {f_dim(f'id={msg["id"]}')}"
-                    )
+                    unread = msg["unread_count"]
+                    msg_id = msg["id"]
+                    sender = msg["from"]
+                    echo(f"  {f_tag(f'{unread} unread')} {f_name(sender)}  {f_dim(f'id={msg_id}')}")
                 blank()
             return
 
@@ -193,9 +194,10 @@ def register_chat(main_group: click.Group) -> None:
             if marked:
                 blank()
                 for msg in marked:
-                    echo(
-                        f"  {f_tag(f'{msg["unread_count"]} unread')} {f_name(msg['from'])}  {f_dim(f'id={msg["id"]}')}"
-                    )
+                    unread = msg["unread_count"]
+                    msg_id = msg["id"]
+                    sender = msg["from"]
+                    echo(f"  {f_tag(f'{unread} unread')} {f_name(sender)}  {f_dim(f'id={msg_id}')}")
 
     @chat.command("history")
     @click.argument("chat_id")

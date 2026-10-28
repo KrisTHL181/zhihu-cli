@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Zhihu scraper and Markdown conversion utilities."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 keywords = ["zhihu", "scraper", "cli", "markdown", "downloader", "api"]
 authors = [
     { name = "KrisTHL181", email = "KrisTHL181@outlook.com" },
@@ -21,6 +21,8 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Internet :: WWW/HTTP",
@@ -100,7 +102,7 @@ local_scheme = "no-local-version"
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP"]
