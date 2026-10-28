@@ -92,6 +92,10 @@ __all__ = [
     "fetch_member_questions",
     "fetch_member_activities",
     "fetch_yanxuan_segments",
+    "fetch_daily_latest",
+    "fetch_daily_before",
+    "fetch_daily_story",
+    "scrape_daily_story",
     "get_item_stats",
     # ── require a logged-in profile ────────────────────────────────────────
     "fetch_notifications",
@@ -275,6 +279,29 @@ def _call(module_name: str, func_name: str, *args: Any, **kwargs: Any) -> Any:
 def fetch_hot_list(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
     """Return the Zhihu hot list — :func:`zhihu_cli.content.handlers.hot.fetch_hot_list`."""
     return _call("hot", "fetch_hot_list", *args, **kwargs)
+
+
+# ── Zhihu Daily (知乎日报) ─────────────────────────────────────────────────
+
+
+def fetch_daily_latest(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Return the latest Daily issue — :func:`zhihu_cli.content.handlers.daily.fetch_latest`."""
+    return _call("daily", "fetch_latest", *args, **kwargs)
+
+
+def fetch_daily_before(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Return the Daily issue strictly before a date — ``handlers.daily.fetch_before``."""
+    return _call("daily", "fetch_before", *args, **kwargs)
+
+
+def fetch_daily_story(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Return one Daily story — :func:`zhihu_cli.content.handlers.daily.fetch_story`."""
+    return _call("daily", "fetch_story", *args, **kwargs)
+
+
+def scrape_daily_story(*args: Any, **kwargs: Any) -> tuple[dict[str, Any], str]:
+    """Return ``(metadata, markdown)`` for a Daily story — ``handlers.daily.scrape_story``."""
+    return _call("daily", "scrape_story", *args, **kwargs)
 
 
 # ── articles and answers ───────────────────────────────────────────────────

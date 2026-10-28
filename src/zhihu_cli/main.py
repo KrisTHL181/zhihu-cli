@@ -13,6 +13,7 @@ from zhihu_cli.commands.config import register_config
 from zhihu_cli.commands.consult import register_consult
 from zhihu_cli.commands.convert import register_convert
 from zhihu_cli.commands.daemon import register_daemon
+from zhihu_cli.commands.daily import register_daily
 from zhihu_cli.commands.download import register_download
 from zhihu_cli.commands.draft import register_draft
 from zhihu_cli.commands.interact import register_interact
@@ -87,6 +88,7 @@ register_config(main)
 register_consult(main)
 register_convert(main)
 register_daemon(main)
+register_daily(main)
 register_draft(main)
 register_download(main)
 register_interact(main)

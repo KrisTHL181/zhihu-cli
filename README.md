@@ -55,7 +55,7 @@ zhihu auth status         # check login status and active profile
 
 ### 📖 Read & Browse
 
-Browse Zhihu's feeds, hot lists, questions, articles, pins, and comments — all rendered in your terminal with a Rich-powered pager. Explore the real-time trending list with excerpts, scroll through your personalized recommend feed, or dive into a question and its full answer thread without clicking a single link.
+Browse Zhihu's feeds, hot lists, questions, articles, pins, and comments — all rendered in your terminal with a Rich-powered pager. Explore the real-time trending list with excerpts, scroll through your personalized recommend feed, or dive into a question and its full answer thread without clicking a single link. Zhihu Daily (知乎日报) has its own group: `zhihu daily latest`, `zhihu daily before <date>`, and `zhihu daily story <id> --save`.
 
 ### 💾 Download for Offline
 
