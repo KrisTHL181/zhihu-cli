@@ -5,6 +5,8 @@
 # python -m zhihu_cli.font_reference)
 !src/zhihu_cli/font_reference/*.json
 !src/zhihu_cli/font_reference/*.bin
+# MCP Registry 清单：必须入库，publish-mcp.yml 会按 tag 派生出的版本重写它
+!packages/zhihu-mcp/server.json
 *.png
 __pycache__
 

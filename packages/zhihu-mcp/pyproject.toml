@@ -1,0 +1,68 @@
+[build-system]
+# setuptools-scm 10 (via vcs-versioning) probes <root>/.config for per-project
+# overrides. When pip builds this sdist from a temp dir, root="../.." resolves
+# to the filesystem root, and an unreadable /.config aborts the build. The 9.x
+# line has no such probe and still reads the version stored in the sdist.
+requires = ["setuptools>=77", "wheel", "setuptools-scm>=8.0,<10"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zhihu-mcp"
+dynamic = ["version"]
+description = "MCP server for Zhihu — one typed tool per CLI command, plus the zhihu_help and zhihu_run escape hatches. A thin alias for zhihu-toolkit[mcp]."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+keywords = [
+    "zhihu",
+    "知乎",
+    "mcp",
+    "mcp-server",
+    "ai-agent",
+    "claude",
+]
+authors = [
+    { name = "KrisTHL181", email = "KrisTHL181@outlook.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+# No version pin on purpose: this distribution is a permanent alias that always
+# tracks the latest zhihu-toolkit. The server implementation lives there.
+dependencies = [
+    "zhihu-toolkit[mcp]",
+]
+
+[project.scripts]
+# Intentionally duplicates the entry point in zhihu-toolkit so `uvx zhihu-mcp`
+# resolves the executable directly from this alias package. Both point at the
+# same function, so the duplicate is harmless.
+zhihu-mcp = "zhihu_cli.mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/KrisTHL181/zhihu-cli"
+Repository = "https://github.com/KrisTHL181/zhihu-cli"
+Issues = "https://github.com/KrisTHL181/zhihu-cli/issues"
+
+# Metadata + entry point only. Nothing is packaged from this directory, and
+# src/ belongs to the parent zhihu-toolkit project. server.json is an MCP
+# Registry manifest, not package data; MANIFEST.in keeps it out of the sdist.
+[tool.setuptools]
+packages = []
+
+[tool.setuptools_scm]
+root = "../.."
+fallback_version = "0.1.0"
+# PyPI 禁止 local version（+gHASH.dDATE），去掉本地段；打 tag 的版本不受影响
+local_scheme = "no-local-version"

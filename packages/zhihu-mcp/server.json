@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.KrisTHL181/zhihu-mcp",
+  "title": "Zhihu",
+  "description": "Zhihu CLI for AI agents: search, read, download, and publish from the terminal.",
+  "repository": {
+    "url": "https://github.com/KrisTHL181/zhihu-cli",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "zhihu-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

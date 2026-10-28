@@ -1,0 +1,83 @@
+name: publish-mcp
+
+# Separate from publish.yml on purpose: the zhihu-mcp alias must never be able
+# to block a zhihu-toolkit release, and vice versa.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to publish (e.g. 0.3.1). Required for a manual run: a
+          dispatch has no tag, so setuptools-scm would otherwise derive a
+          pre-release such as 0.3.1.dev24, which pip and uvx skip by default.
+        required: true
+        type: string
+
+permissions:
+  id-token: write      # 向 PyPI 做 trusted publishing (OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/zhihu-mcp
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # setuptools-scm 需要看到 tags 来派生版本号
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install build
+      - name: Build
+        # A workflow_dispatch run has no tag to derive a version from, so the
+        # caller supplies one. It is passed through env rather than interpolated
+        # into the script, and exported (not written to GITHUB_ENV) because
+        # GITHUB_ENV only affects later steps, not the build below.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "manual run: publishing as $INPUT_VERSION"
+            export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ZHIHU_MCP="$INPUT_VERSION"
+          fi
+          python -m build
+      - name: Sync server.json version
+        # setuptools-scm derives the version from the tag, so the registry
+        # manifest cannot carry a hardcoded one: `mcp-publisher` rejects a
+        # version that does not exist on PyPI. Read it back out of the wheel
+        # name rather than importing setuptools-scm, which is only a build
+        # requirement and is not installed in this step.
+        run: |
+          VERSION=$(ls dist/*.whl | sed -E 's/.*zhihu_mcp-([^-]+)-py3.*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "could not read the version from dist/*.whl" >&2
+            exit 1
+          fi
+          echo "registry manifest version: $VERSION"
+          python - "$VERSION" <<'PY'
+          import json, pathlib, sys
+          version = sys.argv[1]
+          path = pathlib.Path("server.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          data["version"] = version
+          data["packages"][0]["version"] = version
+          path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/zhihu-mcp/dist
+          attestations: true   # SLSA 签名，需要 id-token: write
+      - name: Upload registry manifest
+        # Download this artifact and run `mcp-publisher publish` from it; the
+        # version in it already matches the release that was just published.
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-registry-manifest
+          path: packages/zhihu-mcp/server.json

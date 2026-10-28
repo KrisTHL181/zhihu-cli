@@ -1,0 +1,2 @@
+# MCP Registry manifest — consumed by the registry, never shipped in the sdist.
+exclude server.json
