@@ -24,47 +24,25 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from _pytest.config import Config
-    from _pytest.config.argparsing import Parser
     from _pytest.nodes import Item
 
 _LIVE_DIR = Path(__file__).resolve().parent
 _DEFAULT_TEST_HOME = _LIVE_DIR.parent / ".state"
 
 
-def pytest_addoption(parser: Parser) -> None:
-    """Register the live-test switches.
-
-    :param parser: pytest's option parser.
-    """
-    parser.addoption(
-        "--live",
-        action="store_true",
-        default=False,
-        help="run tests that hit the real Zhihu API",
-    )
-    parser.addoption(
-        "--live-write",
-        action="store_true",
-        default=False,
-        help="run live tests that modify a real Zhihu account (implies --live)",
-    )
-    parser.addoption(
-        "--live-budget",
-        action="store",
-        type=int,
-        default=80,
-        help="maximum number of HTTP requests one live session may send (0 = unlimited)",
-    )
-
-
 def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
     """Skip live tests unless the matching flags were passed.
+
+    The options themselves are registered in ``tests/conftest.py`` so they also
+    parse from the repository root.
 
     :param config: pytest's configuration object.
     :param items: Every collected test item.
     """
-    run_live = config.getoption("--live")
     run_write = config.getoption("--live-write")
+    # --live-write implies --live, as its help text promises; otherwise asking
+    # for write tests alone would collect everything and skip all of it.
+    run_live = config.getoption("--live") or run_write
 
     skip_live = pytest.mark.skip(reason="live test: pass --live to run it against the real Zhihu API")
     skip_write = pytest.mark.skip(reason="live write test: pass --live --live-write to run it against a real account")

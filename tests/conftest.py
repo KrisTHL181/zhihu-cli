@@ -16,6 +16,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from _pytest.config.argparsing import Parser
 
 _TESTS_DIR = Path(__file__).resolve().parent
 
@@ -26,3 +30,35 @@ HOME_DIR = Path(os.environ.get("ZHIHU_TEST_HOME") or _TESTS_DIR / ".state").expa
 # Unconditional on purpose: an exported ``ZHIHU_CLI_HOME`` must never aim a test
 # run at the user's real data directory.
 os.environ["ZHIHU_CLI_HOME"] = str(HOME_DIR)
+
+
+def pytest_addoption(parser: Parser) -> None:
+    """Register the live-suite switches at the root.
+
+    pytest only loads the ``conftest.py`` files on the path given to the
+    initial arguments, so an option registered in ``tests/live/conftest.py``
+    is unknown to a bare ``pytest --live``.  Registering here makes
+    ``pytest --live`` and ``pytest tests/live --live`` equivalent; the hooks
+    that consume the options stay in ``tests/live`` where the tests live.
+
+    :param parser: pytest's option parser.
+    """
+    parser.addoption(
+        "--live",
+        action="store_true",
+        default=False,
+        help="run tests that hit the real Zhihu API",
+    )
+    parser.addoption(
+        "--live-write",
+        action="store_true",
+        default=False,
+        help="run live tests that modify a real Zhihu account (implies --live)",
+    )
+    parser.addoption(
+        "--live-budget",
+        action="store",
+        type=int,
+        default=80,
+        help="maximum number of HTTP requests one live session may send (0 = unlimited)",
+    )
