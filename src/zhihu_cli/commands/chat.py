@@ -302,12 +302,11 @@ def register_chat(main_group: click.Group) -> None:
         subdirectory, and rewrites image URLs to local relative paths.  Regular
         links in message text are left unchanged.
         """
-        from pathlib import Path
-
         from zhihu_cli.content.handlers.chat import export_chat_history
+        from zhihu_cli.paths import zhihu_home
 
         if output_dir is None:
-            output_dir = str(Path.home() / ".zhihu-cli" / "downloads" / "chats")
+            output_dir = str(zhihu_home() / "downloads" / "chats")
 
         filepath = export_chat_history(chat_id, output_dir, max_items=max_items)
 

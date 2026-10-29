@@ -10,6 +10,7 @@ from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.paths import zhihu_home
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ def _extract_daily_item(d: dict[str, Any] | None, content_type: str = "") -> dic
 
 
 def run_batch_daily_analysis(use_aggr: bool = False) -> None:
-    data_dir = Path.home() / ".zhihu-cli" / "exports"
+    data_dir = zhihu_home() / "exports"
     metrics_dir = data_dir / "content_metrics"
     os.makedirs(metrics_dir, exist_ok=True)
     assets_file = data_dir / "all_assets_list.json"

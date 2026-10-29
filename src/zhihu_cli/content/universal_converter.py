@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from zhihu_cli.paths import zhihu_home
+
 
 def detect_format(items: list[dict[str, Any]]) -> str:
     """Heuristically detect the format of the first item."""
@@ -87,7 +89,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        default=str(Path.home() / ".zhihu-cli" / "exports" / "all_assets_list.json"),
+        default=str(zhihu_home() / "exports" / "all_assets_list.json"),
         help="Output unified assets file",
     )
     parser.add_argument("--type", "-t", help="Force a specific type for all items (e.g., 'article', 'answer', 'pin')")

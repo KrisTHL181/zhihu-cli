@@ -23,12 +23,12 @@ import os
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Any, TypeVar
 
 import click
 
 from zhihu_cli.output import error
+from zhihu_cli.paths import zhihu_home
 
 #: Endpoint used when neither the cache nor the environment supplies one.
 DEFAULT_API_BASE = "https://api.openai.com/v1"
@@ -48,10 +48,10 @@ DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_MAX_IMAGE_SIDE = 8000
 
 #: Current cache location for the LLM configuration.
-CONFIG_PATH = Path.home() / ".zhihu-cli" / "llm_config.json"
+CONFIG_PATH = zhihu_home() / "llm_config.json"
 
 #: Pre-refactor cache location, read as a fallback and migrated on write.
-LEGACY_CONFIG_PATH = Path.home() / ".zhihu-cli" / "crank" / "llm_config.json"
+LEGACY_CONFIG_PATH = zhihu_home() / "crank" / "llm_config.json"
 
 #: Message shown when no API key could be resolved from any source.
 MISSING_API_KEY_MESSAGE = (

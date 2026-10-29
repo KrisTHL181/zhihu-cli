@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zhihu_cli.paths import zhihu_home
+
 
 class CacheManager:
     _instance: "CacheManager | None" = None
@@ -25,7 +27,7 @@ class CacheManager:
             return
 
         if cache_dir is None:
-            self.cache_dir = Path.home() / ".zhihu-cli" / "cache"
+            self.cache_dir = zhihu_home() / "cache"
         else:
             self.cache_dir = Path(cache_dir).resolve()
 

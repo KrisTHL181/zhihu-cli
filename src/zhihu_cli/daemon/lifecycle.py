@@ -25,8 +25,9 @@ from zhihu_cli.daemon.protocol import (
     recv_message,
     send_message,
 )
+from zhihu_cli.paths import zhihu_home
 
-DAEMON_LOG_FILE = Path.home() / ".zhihu-cli" / "daemon.log"
+DAEMON_LOG_FILE = zhihu_home() / "daemon.log"
 
 _CONNECT_TIMEOUT = 2.0
 _READ_TIMEOUT = 3.0

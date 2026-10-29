@@ -6,7 +6,6 @@ import os
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import urlparse
 
 from zhihu_cli.content.handlers.article import fetch_article_item
@@ -15,6 +14,7 @@ from zhihu_cli.content.handlers.requests import fetch_page_html, get_page_state,
 from zhihu_cli.content.utils.html2markdown import PageToMarkdown
 from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.daemon.proxy import DaemonHTTPError
+from zhihu_cli.paths import zhihu_home
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -373,7 +373,7 @@ class ContentDownloader:
 
     def __init__(self, output_dir: str | None = None, with_media: bool = False) -> None:
         if output_dir is None:
-            output_dir = str(Path.home() / ".zhihu-cli" / "downloads")
+            output_dir = str(zhihu_home() / "downloads")
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -721,9 +721,7 @@ def main() -> None:
     )
     parser.add_argument("--download-answers", nargs="+", metavar="URL", help="Download answer pages")
     parser.add_argument("--download-pins", nargs="+", metavar="URL", help="Download pin pages")
-    parser.add_argument(
-        "--output-dir", type=str, default=str(Path.home() / ".zhihu-cli" / "downloads"), help="Output directory"
-    )
+    parser.add_argument("--output-dir", type=str, default=str(zhihu_home() / "downloads"), help="Output directory")
 
     args = parser.parse_args()
 

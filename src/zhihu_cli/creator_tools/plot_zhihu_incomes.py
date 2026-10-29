@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,8 +6,9 @@ import pandas as pd
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
+from zhihu_cli.paths import zhihu_home
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+DATA_DIR = zhihu_home()
 INPUT_FILE = DATA_DIR / "exports" / "zhihu_income_report.json"
 OUTPUT_FILE = DATA_DIR / "plots" / "income_analysis.png"
 

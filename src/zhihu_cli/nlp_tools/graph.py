@@ -21,7 +21,9 @@ import networkx as nx
 import numpy as np
 import plotly.graph_objects as go
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+from zhihu_cli.paths import zhihu_home
+
+DATA_DIR = zhihu_home()
 
 
 # ── graph construction ────────────────────────────────────────────────────────

@@ -6,14 +6,14 @@ import json
 import os
 from collections.abc import Iterable
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.handlers.waterfall import stream_handler
+from zhihu_cli.paths import zhihu_home
 
-DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "creator_score_detail.json")
+DB_FILE: str = str(zhihu_home() / "exports" / "creator_score_detail.json")
 SCORE_URL: str = "https://www.zhihu.com/api/v4/creators/creator_score_detail"
 
 

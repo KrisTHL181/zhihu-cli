@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
+from zhihu_cli.paths import zhihu_home
 
-DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "follower_detail.json")
+DB_FILE: str = str(zhihu_home() / "exports" / "follower_detail.json")
 FOLLOWER_URL: str = "https://www.zhihu.com/api/v4/creators/analysis/aggregation/tab/follow/detail"
 
 

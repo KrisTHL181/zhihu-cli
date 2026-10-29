@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from zhihu_cli.paths import zhihu_home
+
 BASE_MODEL_NAME: str = "hfl/chinese-macbert-base"
 
 # Paths
-CRANK_DIR: Path = Path.home() / ".zhihu-cli" / "crank"
+CRANK_DIR: Path = zhihu_home() / "crank"
 CLASSIFIER_DIR: Path = CRANK_DIR / "classifier"
 MODEL_DIR: Path = CLASSIFIER_DIR / "model"
 METRICS_PATH: Path = CLASSIFIER_DIR / "metrics.json"

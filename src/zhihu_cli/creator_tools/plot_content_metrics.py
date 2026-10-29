@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -12,8 +11,9 @@ import pandas as pd
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.creator_tools._smoothing import compute_smoothed, smoothing_label
+from zhihu_cli.paths import zhihu_home
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+DATA_DIR = zhihu_home()
 METRICS_DIR = DATA_DIR / "exports" / "content_metrics"
 OUTPUT_FILE = DATA_DIR / "plots" / "content_metrics.png"
 ENGAGEMENT_FILE = DATA_DIR / "plots" / "content_metrics_engagement.png"

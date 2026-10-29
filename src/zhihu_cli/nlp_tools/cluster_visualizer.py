@@ -18,8 +18,9 @@ from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_score
 
 from zhihu_cli.nlp_tools import STOP_WORDS as stop_words
+from zhihu_cli.paths import zhihu_home
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+DATA_DIR = zhihu_home()
 
 
 def find_best_k(X: Any, max_k: int = 20) -> None:

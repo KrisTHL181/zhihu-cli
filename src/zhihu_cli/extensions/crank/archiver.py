@@ -35,6 +35,7 @@ from zhihu_cli.content.utils.llm_config import (
 )
 from zhihu_cli.content.utils.wait import wait
 from zhihu_cli.output import error, warning
+from zhihu_cli.paths import zhihu_home
 from zhihu_cli.prompts import (
     COMMIT_MESSAGE_SYSTEM_PROMPT,
     COMMIT_MESSAGE_USER_PROMPT,
@@ -45,7 +46,7 @@ from zhihu_cli.prompts import (
 
 ARTICLES_API = "https://www.zhihu.com/api/v4/members/{token}/articles"
 
-CRANK_DIR = str(Path.home() / ".zhihu-cli" / "crank")
+CRANK_DIR = str(zhihu_home() / "crank")
 HALL_OF_FLAMES_ROOT = CRANK_DIR
 SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
 

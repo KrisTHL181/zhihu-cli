@@ -38,7 +38,6 @@ import sys
 import threading
 import time
 import traceback
-from pathlib import Path
 from typing import Any
 
 from curl_cffi import CurlHttpVersion
@@ -69,6 +68,7 @@ from zhihu_cli.daemon.protocol import (
     read_message,
     write_message,
 )
+from zhihu_cli.paths import zhihu_home
 
 # ── stderr-based logging (output -> daemon.log) ──────────────────────────
 
@@ -108,7 +108,7 @@ class DaemonServer:
     :class:`ZhihuSession`.
     """
 
-    SOCKET_PATH = Path.home() / ".zhihu-cli" / "daemon.sock"
+    SOCKET_PATH = zhihu_home() / "daemon.sock"
 
     def __init__(self, idle_timeout: int = 300) -> None:
         self.idle_timeout = idle_timeout

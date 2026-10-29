@@ -12,8 +12,9 @@ from wordcloud import WordCloud
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.nlp_tools import FONT_PATH, STOP_WORDS
+from zhihu_cli.paths import zhihu_home
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+DATA_DIR = zhihu_home()
 OUTPUT_FILE: str = str(DATA_DIR / "plots" / "zhihu_wordcloud.png")
 
 

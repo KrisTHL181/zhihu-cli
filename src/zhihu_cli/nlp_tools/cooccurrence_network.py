@@ -9,8 +9,9 @@ import numpy as np
 import plotly.graph_objects as go
 
 from zhihu_cli.nlp_tools import STOP_WORDS
+from zhihu_cli.paths import zhihu_home
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+DATA_DIR = zhihu_home()
 
 
 def load_and_tokenize(source_dir: str) -> tuple[list[list[str]], "Counter[str]"]:

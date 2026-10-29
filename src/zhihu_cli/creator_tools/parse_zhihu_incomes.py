@@ -3,14 +3,14 @@ import json
 import os
 from datetime import datetime, timedelta
 from io import StringIO
-from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.paths import zhihu_home
 
-DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "zhihu_income_report.json")
+DB_FILE: str = str(zhihu_home() / "exports" / "zhihu_income_report.json")
 BASE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/detail/download"
 
 

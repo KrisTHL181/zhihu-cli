@@ -21,14 +21,14 @@ import json
 import os
 import socket
 import tempfile
-from pathlib import Path
 
 from zhihu_cli.daemon import _platform
 from zhihu_cli.daemon.protocol import MSG_AUTH, make_msg_id, send_message
+from zhihu_cli.paths import zhihu_home
 
-STATE_FILE = Path.home() / ".zhihu-cli" / "daemon.json"
-UNIX_SOCKET_PATH = Path.home() / ".zhihu-cli" / "daemon.sock"
-LEGACY_PID_FILE = Path.home() / ".zhihu-cli" / "daemon.pid"
+STATE_FILE = zhihu_home() / "daemon.json"
+UNIX_SOCKET_PATH = zhihu_home() / "daemon.sock"
+LEGACY_PID_FILE = zhihu_home() / "daemon.pid"
 
 
 # ── state file ───────────────────────────────────────────────────────────────

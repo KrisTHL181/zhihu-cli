@@ -27,11 +27,12 @@ from zhihu_cli.extensions.crank.archiver import (
     fetch_article_list,
     parse_since,
 )
+from zhihu_cli.paths import zhihu_home
 
 if TYPE_CHECKING:
     import click
 
-CRANK_DIR = str(Path.home() / ".zhihu-cli" / "crank")
+CRANK_DIR = str(zhihu_home() / "crank")
 HALL_OF_FLAMES_ROOT = CRANK_DIR
 SERIAL_PAPERS_DIR = os.path.join(CRANK_DIR, "papers")
 DEFAULT_REGISTRY_PATH = os.path.join(CRANK_DIR, "authors_registry.json")

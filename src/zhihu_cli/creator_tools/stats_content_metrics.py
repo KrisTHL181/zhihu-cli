@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import statistics
 from collections import defaultdict
-from pathlib import Path
 
 from zhihu_cli.output import (
     blank,
@@ -29,8 +28,9 @@ from zhihu_cli.output import (
     section,
     warning,
 )
+from zhihu_cli.paths import zhihu_home
 
-DATA_DIR = Path.home() / ".zhihu-cli"
+DATA_DIR = zhihu_home()
 METRICS_DIR = DATA_DIR / "exports" / "content_metrics"
 
 # ── metric definitions (mirrors plot_content_metrics.py) ────────────────────

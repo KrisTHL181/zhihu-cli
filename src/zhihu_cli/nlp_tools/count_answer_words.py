@@ -7,6 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from zhihu_cli.paths import zhihu_home
+
 
 def count_words(filepath: str, no_code: bool = False, no_latex: bool = False, no_frontmatter: bool = False) -> int:
     with open(filepath, encoding="utf-8") as f:
@@ -68,7 +70,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Count characters in Markdown files")
     parser.add_argument(
         "--folder",
-        default=str(Path.home() / ".zhihu-cli" / "downloads" / "answers"),
+        default=str(zhihu_home() / "downloads" / "answers"),
         help="Folder containing Markdown files",
     )
     parser.add_argument("--no-code", action="store_true", help="Only count text, ignore code blocks")

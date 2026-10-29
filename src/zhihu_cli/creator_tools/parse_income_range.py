@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.requests import session
 from zhihu_cli.content.utils.wait import wait
+from zhihu_cli.paths import zhihu_home
 
-DB_FILE: str = str(Path.home() / ".zhihu-cli" / "exports" / "creator_income_items.json")
+DB_FILE: str = str(zhihu_home() / "exports" / "creator_income_items.json")
 RANGE_URL: str = "https://www.zhihu.com/api/v4/creators/text/income/income/range"
 PAGE_SIZE: int = 20
 MAX_DAYS: int = 30  # API rejects ranges longer than ~30 days

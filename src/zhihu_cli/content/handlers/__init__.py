@@ -2,12 +2,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-USER_AGENT_FILE = Path.home() / ".zhihu-cli" / "user-agent"
+from zhihu_cli.paths import zhihu_home
+
+USER_AGENT_FILE = zhihu_home() / "user-agent"
 
 
 def get_data_dir() -> Path:
     """Return ~/.zhihu-cli/ data directory, creating it if needed."""
-    data_dir = Path.home() / ".zhihu-cli"
+    data_dir = zhihu_home()
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
