@@ -1,9 +1,13 @@
-"""Client-side proxy session that talks to the daemon over a Unix socket.
+"""Client-side proxy session that talks to the daemon over a local socket.
 
 :class:`DaemonProxySession` is a drop-in replacement for
 :class:`~zhihu_cli.content.handlers.requests.ZhihuSession`.  It has the
 same ``get`` / ``post`` / ``put`` / ``delete`` / ``request`` API, plus
 ``headers``, ``cookies``, and ``captcha_handler`` attributes.
+
+The transport is whatever the daemon published in its state file: a Unix
+domain socket on POSIX, or loopback TCP with a token handshake on Windows.
+This module never branches on the platform.
 
 When the daemon is not running at *build* time, attempting to use the proxy
 raises :class:`DaemonNotRunningError`.  The session factory in ``requests.py``
@@ -28,11 +32,11 @@ import json
 import socket
 import sys
 import threading
-from pathlib import Path
 from typing import Any
 
 from zhihu_cli.content.handlers.captcha_gate import captcha_gate, resolve_captcha
 from zhihu_cli.content.utils import rate_limit
+from zhihu_cli.daemon import transport
 from zhihu_cli.daemon.protocol import (
     MSG_CAPTCHA_REQUIRED,
     MSG_CAPTCHA_RESOLVED,
@@ -52,7 +56,6 @@ from zhihu_cli.daemon.protocol import (
     send_message,
 )
 
-SOCKET_PATH = Path.home() / ".zhihu-cli" / "daemon.sock"
 CONNECT_TIMEOUT = 2.0
 RW_TIMEOUT = 60.0
 
@@ -265,10 +268,11 @@ class DaemonProxySession:
     """Drop-in replacement for :class:`ZhihuSession` that proxies requests
     through the background daemon.
 
-    Maintains a single persistent Unix-socket connection to the daemon for
-    the lifetime of the CLI process.  All HTTP requests, control messages,
-    and pings reuse the same connection — the daemon server handles
-    multiple request/response pairs per connection natively.
+    Maintains a single persistent connection to the daemon (Unix domain
+    socket or loopback TCP, per the daemon state file) for the lifetime of
+    the CLI process.  All HTTP requests, control messages, and pings reuse
+    the same connection — the daemon server handles multiple
+    request/response pairs per connection natively.
 
     If the daemon exits after the connection was established, the next
     request that finds it unreachable degrades in place: see
@@ -319,18 +323,16 @@ class DaemonProxySession:
         return self._sock
 
     def _connect(self) -> socket.socket:
-        """Open a fresh connection to the daemon socket.
+        """Open a fresh connection to the endpoint in the daemon state file.
 
         :raises DaemonNotRunningError: if the daemon is unavailable.
         """
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(CONNECT_TIMEOUT)
+        state = transport.read_state()
+        if state is None:
+            raise DaemonNotRunningError("Daemon not running (no state file)")
         try:
-            sock.connect(str(SOCKET_PATH))
-            sock.settimeout(RW_TIMEOUT)
-            return sock
+            return transport.connect(state, CONNECT_TIMEOUT, RW_TIMEOUT)
         except OSError as e:
-            sock.close()
             raise DaemonNotRunningError(f"Daemon not available: {e}") from e
 
     def _send_recv(self, msg: dict[str, Any]) -> dict[str, Any]:

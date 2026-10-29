@@ -64,6 +64,9 @@ MSG_SHUTDOWN = "shutdown"
 MSG_SET_CONFIG = "set_config"
 MSG_CAPTCHA_REQUIRED = "captcha_required"
 MSG_CAPTCHA_RESOLVED = "captcha_resolved"
+# Transport handshake: validated by the server before message dispatch and
+# never produces a response of its own.
+MSG_AUTH = "auth"
 
 FRAME_HEADER_SIZE = 4  # uint32 big-endian
 MAX_MESSAGE_SIZE = 32 * 1024 * 1024  # 32 MiB safety cap

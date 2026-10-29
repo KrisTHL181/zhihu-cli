@@ -1,21 +1,21 @@
 """Daemon process lifecycle management.
 
 Provides helpers for starting, stopping, and checking the status of the
-background zhihu-daemon process.  The daemon communicates over a Unix
-domain socket at ``~/.zhihu-cli/daemon.sock`` and writes its PID to
-``~/.zhihu-cli/daemon.pid``.
+background zhihu-daemon process.  The daemon publishes its endpoint to a
+state file at ``~/.zhihu-cli/daemon.json``: a Unix domain socket on POSIX,
+or loopback TCP (with a per-start token) on Windows.  Clients connect from
+that state file rather than branching on the platform.
 """
 
 from __future__ import annotations
 
-import os
-import signal
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+from zhihu_cli.daemon import _platform, transport
 from zhihu_cli.daemon.protocol import (
     MSG_PING,
     MSG_PONG,
@@ -26,8 +26,6 @@ from zhihu_cli.daemon.protocol import (
     send_message,
 )
 
-DAEMON_SOCKET = Path.home() / ".zhihu-cli" / "daemon.sock"
-DAEMON_PID_FILE = Path.home() / ".zhihu-cli" / "daemon.pid"
 DAEMON_LOG_FILE = Path.home() / ".zhihu-cli" / "daemon.log"
 
 _CONNECT_TIMEOUT = 2.0
@@ -38,24 +36,20 @@ _READ_TIMEOUT = 3.0
 
 
 def is_running() -> bool:
-    """Return :data:`True` if the daemon is alive and accepting connections.
+    """Return :data:`True` if the daemon state names a live daemon process.
 
-    Checks the PID file validity (signal 0) *and* socket existence.
+    Only the state file and the process identity are consulted; the
+    endpoint itself is not probed.  A state file whose process is gone
+    (or whose PID has been reused by an unrelated process) is stale and is
+    cleaned up.
     """
-    if not DAEMON_PID_FILE.exists():
+    state = transport.read_state()
+    if state is None:
         return False
-    if not DAEMON_SOCKET.exists():
-        # Stale PID file — clean up
-        DAEMON_PID_FILE.unlink(missing_ok=True)
-        return False
-
-    try:
-        pid = int(DAEMON_PID_FILE.read_text().strip())
-        os.kill(pid, 0)  # signal 0 = existence check only
+    if _state_matches_process(state):
         return True
-    except (OSError, ValueError):
-        cleanup_stale_files()
-        return False
+    cleanup_stale_files()
+    return False
 
 
 def start_daemon(idle_timeout: int = 300, foreground: bool = False) -> int:
@@ -91,20 +85,26 @@ def start_daemon(idle_timeout: int = 300, foreground: bool = False) -> int:
         pass
 
     try:
+        # Detach from the terminal and redirect output to the log.  Platform
+        # differences (start_new_session on POSIX, creationflags on Windows)
+        # live in _platform.popen_kwargs().
         proc = subprocess.Popen(
             daemon_args,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            start_new_session=True,
+            **_platform.popen_kwargs(),
         )
     finally:
         if log_fh is not subprocess.DEVNULL:
             log_fh.close()  # type: ignore[union-attr]
 
-    # Wait for the socket to appear (up to 2 seconds)
+    # Wait for the daemon to publish its endpoint in the state file (up to
+    # 2 seconds).  The file is written only after the listener is bound, so
+    # this replaces polling for the socket path.
     for _ in range(20):
-        if DAEMON_SOCKET.exists():
+        state = transport.read_state()
+        if state is not None and state.get("pid") == proc.pid and _platform.pid_alive(proc.pid):
             return proc.pid
         time.sleep(0.1)
 
@@ -128,8 +128,9 @@ def start_daemon(idle_timeout: int = 300, foreground: bool = False) -> int:
 def stop_daemon(timeout: float = 5.0) -> bool:
     """Gracefully stop the daemon.
 
-    Sends a ``shutdown`` message over the socket first; SIGTERM / SIGKILL
-    follow if the process is still alive afterwards.
+    Sends a ``shutdown`` message over the local socket first; then asks the
+    process to exit through the platform helper (SIGTERM on POSIX, terminate
+    on Windows) and finally force-kills it if it is still alive.
 
     :param timeout: Seconds to wait for graceful exit.
     :returns: :data:`True` if the daemon was stopped.
@@ -137,39 +138,49 @@ def stop_daemon(timeout: float = 5.0) -> bool:
     if not is_running():
         return False
 
-    pid = _read_pid()
+    # Read the state exactly once: the PID and start time must describe the
+    # same process, and the identity is re-checked before every signal below.
+    state = transport.read_state()
+    if state is None:
+        return False
+    pid = state.get("pid")
+    if not isinstance(pid, int):
+        cleanup_stale_files()
+        return False
 
-    # Try IPC shutdown first
+    # Try IPC shutdown first.  The exception types are caught (not only
+    # cleaned up in ``finally``) so the terminal fallbacks below always run
+    # even when the daemon vanished between ``is_running()`` and here.
     sock = None
     try:
-        sock = _connect()
-        send_message(sock, {"id": make_msg_id(), "type": MSG_SHUTDOWN})
-        # Read acknowledgement (pong or error — either is fine)
-        recv_message(sock)
-        # Give it a moment to shut down
-        _wait_for_exit(pid, min(timeout, 3.0))
+        try:
+            sock = _connect()
+            send_message(sock, {"id": make_msg_id(), "type": MSG_SHUTDOWN})
+            # Read acknowledgement (pong or error — either is fine)
+            recv_message(sock)
+            # Give it a moment to shut down
+            if pid:
+                _wait_for_exit(pid, min(timeout, 3.0))
+        except (DaemonNotRunningError, OSError, ValueError):
+            pass
+
+        # If still alive, ask politely, then force it.  The identity is
+        # re-checked immediately before each signal: between waiting for the
+        # daemon to exit and this point its PID could have been reused by an
+        # unrelated process, which must never be signalled.
+        if _platform.pid_alive(pid) and _state_matches_process(state):
+            _platform.terminate(pid, force=False)
+            _wait_for_exit(pid, timeout)
+
+        if _platform.pid_alive(pid) and _state_matches_process(state):
+            _platform.terminate(pid, force=True)
+            _wait_for_exit(pid, 2.0)
+
+        return not _platform.pid_alive(pid) if pid else True
     finally:
         if sock is not None:
             sock.close()
-
-    # If still alive, send SIGTERM
-    if pid and _pid_alive(pid):
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        _wait_for_exit(pid, timeout)
-
-    # Force kill if still alive
-    if pid and _pid_alive(pid):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        _wait_for_exit(pid, 2.0)
-
-    cleanup_stale_files()
-    return not _pid_alive(pid) if pid else True
+        cleanup_stale_files()
 
 
 def daemon_status() -> dict:
@@ -210,54 +221,70 @@ def daemon_status() -> dict:
 
 
 def cleanup_stale_files() -> None:
-    """Remove PID file and socket if they exist (idempotent)."""
-    DAEMON_PID_FILE.unlink(missing_ok=True)
-    DAEMON_SOCKET.unlink(missing_ok=True)
+    """Remove the state file and legacy pid/socket files (idempotent)."""
+    transport.remove_state()
+    transport.LEGACY_PID_FILE.unlink(missing_ok=True)
+    transport.UNIX_SOCKET_PATH.unlink(missing_ok=True)
 
 
 # ── internal helpers ─────────────────────────────────────────────────────────
 
 
 def _connect() -> socket.socket:
-    """Connect to the daemon socket.
+    """Connect to the endpoint published in the state file.
 
-    :raises DaemonNotRunningError: if connection fails.
+    :raises DaemonNotRunningError: if no state exists or the connection fails.
     """
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(_CONNECT_TIMEOUT)
+    state = transport.read_state()
+    if state is None:
+        raise DaemonNotRunningError("Daemon not running (no state file)")
     try:
-        sock.connect(str(DAEMON_SOCKET))
-        sock.settimeout(_READ_TIMEOUT)
-        return sock
+        return transport.connect(state, _CONNECT_TIMEOUT, _READ_TIMEOUT)
     except OSError as e:
-        sock.close()
         raise DaemonNotRunningError(f"Daemon not available: {e}") from e
 
 
-def _read_pid() -> int | None:
-    """Read the PID from the PID file, or :data:`None`."""
-    if not DAEMON_PID_FILE.exists():
-        return None
-    try:
-        return int(DAEMON_PID_FILE.read_text().strip())
-    except (ValueError, OSError):
-        return None
+def _state_matches_process(state: dict) -> bool:
+    """Return :data:`True` if *state* still names the daemon process.
 
+    A PID alone is not an identity: after the daemon exits, the OS may
+    reuse its PID for an unrelated process, so a stale state file plus PID
+    reuse would otherwise make the old daemon look alive — and
+    :func:`stop_daemon` would signal the wrong process.  The state
+    therefore records the process start time, which is re-read and compared
+    here.  The check fails closed: if the identity cannot be re-read, the
+    state is treated as stale rather than risk killing a reused PID.
 
-def _pid_alive(pid: int) -> bool:
-    """Return :data:`True` if a process with *pid* exists."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
+    :param state: State mapping as returned by :func:`transport.read_state`.
+    :returns: :data:`True` only when the PID is alive and its start time
+        matches the recorded one (or the state predates the identity check).
+    """
+    pid = state.get("pid")
+    if not isinstance(pid, int) or not _platform.pid_alive(pid):
         return False
+    expected = state.get("start_time")
+    if expected is None:
+        # Legacy state file, or a platform without process identity —
+        # preserve the old PID-only behaviour.
+        return True
+    current = _platform.process_start_time(pid)
+    return current is not None and current == expected
+
+
+def _read_pid() -> int | None:
+    """Read the daemon PID from the state file, or :data:`None`."""
+    state = transport.read_state()
+    if state is None:
+        return None
+    pid = state.get("pid")
+    return pid if isinstance(pid, int) else None
 
 
 def _wait_for_exit(pid: int, timeout: float) -> None:
     """Poll until *pid* exits or *timeout* elapses."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _pid_alive(pid):
+        if not _platform.pid_alive(pid):
             return
         time.sleep(0.1)
 

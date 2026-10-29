@@ -39,6 +39,7 @@ dependencies = [
     "textual>=2.0",
     "qrcode",
     "Pillow",
+    "psutil>=5.9; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

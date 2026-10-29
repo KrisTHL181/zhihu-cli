@@ -1,7 +1,8 @@
-"""Daemon server: Unix socket listener that holds a persistent ZhihuSession.
+"""Daemon server: local socket listener that holds a persistent ZhihuSession.
 
 The server creates one long-lived :class:`ZhihuSession` (with QUIC/HTTP3)
-and accepts JSON-RPC-style messages over a Unix domain socket.  HTTP
+and accepts JSON-RPC-style messages over a local socket — a Unix domain
+socket on POSIX, or loopback TCP with a per-start token on Windows.  HTTP
 requests are executed synchronously in a thread-pool to keep the asyncio
 event loop responsive.
 
@@ -26,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import faulthandler
+import hmac
 import os
 import signal
 import sys
@@ -46,7 +48,9 @@ from zhihu_cli.content.handlers._session_core import (
 from zhihu_cli.content.handlers.cache_manager import cache_manager
 from zhihu_cli.content.handlers.captcha import detect_captcha
 from zhihu_cli.content.utils import rate_limit
+from zhihu_cli.daemon import _platform, transport
 from zhihu_cli.daemon.protocol import (
+    MSG_AUTH,
     MSG_CAPTCHA_REQUIRED,
     MSG_CAPTCHA_RESOLVED,
     MSG_HTTP_REQUEST,
@@ -88,13 +92,20 @@ class DaemonServer:
     """
 
     SOCKET_PATH = Path.home() / ".zhihu-cli" / "daemon.sock"
-    PID_FILE = Path.home() / ".zhihu-cli" / "daemon.pid"
 
     def __init__(self, idle_timeout: int = 300) -> None:
         self.idle_timeout = idle_timeout
+        #: TCP auth token for this start; ``None`` on a Unix socket.
+        self._token: str | None = None
+        #: Human-readable bound endpoint, for the start log (never the token).
+        self._endpoint: str = ""
         self._session: ZhihuSession | None = None
         self._session_lock = threading.Lock()
         self._last_activity = time.monotonic()
+        #: Requests currently being processed.  The main loop is a single
+        #: asyncio thread, so no lock is needed; the idle checker uses this
+        #: to avoid shutting down in the middle of a request.
+        self._in_flight = 0
         self._requests_handled = 0
         self._start_time = time.monotonic()
         self._shutdown_event = asyncio.Event()
@@ -112,14 +123,15 @@ class DaemonServer:
         the asyncio event loop.
 
         Any exception during initialisation or the event loop is logged to
-        stderr (→ daemon.log) and triggers cleanup so stale PID/socket
+        stderr (→ daemon.log) and triggers cleanup so stale state/socket
         files don't block a subsequent restart.
         """
         # A fatal signal (SIGSEGV/SIGABRT/…) otherwise kills the process
         # without leaving any closing line in daemon.log, which makes a crash
-        # indistinguishable from SIGKILL.  This dumps a traceback to the same
-        # file first.  SIGKILL cannot be observed from inside the process;
-        # its signature is simply a log with no exit line.
+        # indistinguishable from an uncatchable kill.  This dumps a traceback
+        # to the same file first.  An uncatchable kill cannot be observed
+        # from inside the process; its signature is simply a log with no
+        # exit line.
         faulthandler.enable(file=sys.stderr)
         failed = False
         try:
@@ -193,49 +205,52 @@ class DaemonServer:
             # ``zhihu config qps set`` reaches this process, via SET_CONFIG.
             rate_limit.limiter.configure(cache_manager.get_qps())
 
-    def _write_pid_file(self) -> None:
-        self.PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        self.PID_FILE.write_text(str(os.getpid()))
-
     @classmethod
     def _cleanup_stale_socket(cls) -> None:
-        """Remove a leftover socket file from a previous run."""
+        """Remove leftovers from a previous run (state, legacy pid/socket).
+
+        ``Path.unlink(missing_ok=True)`` only touches the filesystem, so
+        the legacy socket path is safe to remove on every platform — no
+        socket object is ever created here.
+        """
+        transport.remove_state()
+        transport.LEGACY_PID_FILE.unlink(missing_ok=True)
         cls.SOCKET_PATH.unlink(missing_ok=True)
 
     @classmethod
     def cleanup(cls) -> None:
-        """Remove PID file and socket on shutdown."""
+        """Remove state, legacy pid file, and socket on shutdown."""
+        transport.remove_state()
+        transport.LEGACY_PID_FILE.unlink(missing_ok=True)
         cls.SOCKET_PATH.unlink(missing_ok=True)
-        cls.PID_FILE.unlink(missing_ok=True)
 
     # ── async server loop ───────────────────────────────────────────────
 
     async def _async_main(self) -> None:
         loop = asyncio.get_running_loop()
 
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                # Pass the signal number through so the shutdown log can name
-                # SIGTERM and SIGINT apart.
-                loop.add_signal_handler(sig, self._handle_signal, sig)
-            except NotImplementedError:
-                pass  # Windows / restricted environments
+        _platform.register_signal_handlers(loop, self._handle_signal)
 
-        server = await asyncio.start_unix_server(
-            self._handle_connection,
-            path=str(self.SOCKET_PATH),
-        )
-        # Restrict to current user only
-        try:
-            self.SOCKET_PATH.chmod(0o600)
-        except OSError:
-            pass
+        kind = transport.transport_kind()
+        # Process identity for PID-reuse detection; it does not depend on
+        # the transport, so read it once for the state dict below.
+        start_time = _platform.process_start_time()
+        server, fields = await _platform.bind_listener(self._handle_connection, self.SOCKET_PATH, kind)
+        self._token = fields.get("token")
+        self._endpoint = fields.get("path") or f"{fields['host']}:{fields['port']}"
+        state = {
+            "version": 1,
+            "pid": os.getpid(),
+            "started_at": time.time(),
+            "start_time": start_time,
+            **fields,
+        }
 
-        # Write PID file only after the socket is successfully listening.
-        # Doing it here ensures a stale PID file is never left behind if
-        # the event loop fails to start.
-        self._write_pid_file()
-        _log(f"Daemon started (PID {os.getpid()}), listening on {self.SOCKET_PATH}, idle timeout={self.idle_timeout}s")
+        # Publish the endpoint only after the listener is up, so a client
+        # never reads a state file pointing at a socket that does not accept
+        # connections yet.
+        transport.write_state(state)
+        _log(f"Daemon started (PID {os.getpid()}), listening on {self._endpoint}, idle timeout={self.idle_timeout}s")
 
         # Idle-timeout background task
         idle_task = asyncio.create_task(self._idle_checker())
@@ -261,6 +276,29 @@ class DaemonServer:
 
     # ── connection handling ─────────────────────────────────────────────
 
+    async def _authenticate(self, reader: asyncio.StreamReader) -> bool:
+        """Consume and validate the one-frame TCP token handshake.
+
+        Rejected clients are logged once, at a level that does not dump a
+        traceback (a peer that simply cannot authenticate is not a server
+        bug), and the caller closes the connection.
+
+        :param reader: The connection's stream reader.
+        :returns: :data:`True` if the frame carried the expected token.
+        """
+        try:
+            msg = await asyncio.wait_for(read_message(reader), timeout=10)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, OSError, ValueError) as exc:
+            _log(f"Rejected daemon client: no valid auth frame ({type(exc).__name__})")
+            return False
+        if not isinstance(msg, dict):
+            _log("Rejected daemon client: auth frame is not an object")
+            return False
+        if msg.get("type") != MSG_AUTH or not hmac.compare_digest(str(msg.get("token", "")), self._token or ""):
+            _log("Rejected daemon client: auth token mismatch")
+            return False
+        return True
+
     async def _handle_connection(
         self,
         reader: asyncio.StreamReader,
@@ -270,20 +308,33 @@ class DaemonServer:
         multiple request/response pairs (persistent connection).
         """
         try:
+            # TCP transport authenticates the peer before any message
+            # dispatch; a Unix socket is already protected by filesystem
+            # permissions and has no token.
+            if self._token is not None and not await self._authenticate(reader):
+                return
             while not self._shutdown_event.is_set():
                 msg = await read_message(reader)
-                msg_id = msg.get("id", make_msg_id())
+                # Count the request as activity as soon as it arrives, not
+                # only once the response is out: a request that takes longer
+                # than the idle budget must not let the idle checker fire.
+                self._last_activity = time.monotonic()
+                self._in_flight += 1
                 try:
-                    response = await self._process_message(msg)
-                except Exception:
-                    _log(f"Unhandled exception processing message {msg_id}", exc=True)
-                    response = build_error(
-                        msg_id,
-                        "InternalError",
-                        "Daemon encountered an unexpected error.  Check daemon.log for details.",
-                    )
-                write_message(writer, response)
-                await writer.drain()
+                    msg_id = msg.get("id", make_msg_id())
+                    try:
+                        response = await self._process_message(msg)
+                    except Exception:
+                        _log(f"Unhandled exception processing message {msg_id}", exc=True)
+                        response = build_error(
+                            msg_id,
+                            "InternalError",
+                            "Daemon encountered an unexpected error.  Check daemon.log for details.",
+                        )
+                    write_message(writer, response)
+                    await writer.drain()
+                finally:
+                    self._in_flight -= 1
                 self._last_activity = time.monotonic()
                 self._requests_handled += 1
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
@@ -556,12 +607,16 @@ class DaemonServer:
 
         Set *idle_timeout* to 0 to disable automatic shutdown entirely.
         Checks every 10 seconds so the daemon exits promptly after going
-        idle without wasting CPU on busy-polling.
+        idle without wasting CPU on busy-polling.  The timeout is suppressed
+        while a request is in flight, so a long-running request is never
+        killed by the idle clock.
         """
         if self.idle_timeout <= 0:
             return  # Disabled — never auto-exit
         while not self._shutdown_event.is_set():
             await asyncio.sleep(10)
+            if self._in_flight:
+                continue
             idle_for = time.monotonic() - self._last_activity
             if idle_for > self.idle_timeout:
                 self._request_shutdown(f"idle timeout ({self.idle_timeout}s, idle for {idle_for:.0f}s)")

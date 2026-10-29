@@ -7,7 +7,8 @@ handshakes on every CLI invocation.
 Public API
 ----------
 - :class:`DaemonProxySession` — drop-in replacement for ``ZhihuSession``
-  that proxies requests through the background daemon over a Unix socket
+  that proxies requests through the background daemon over a local socket
+  (Unix domain socket on POSIX, loopback TCP on Windows)
 - :func:`is_running`, :func:`start_daemon`, :func:`stop_daemon`,
   :func:`daemon_status` — lifecycle management helpers
 """

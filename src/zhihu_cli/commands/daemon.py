@@ -60,8 +60,9 @@ def register_daemon(main_group: click.Group) -> None:
     def daemon_stop() -> None:
         """Stop the daemon gracefully.
 
-        Sends a shutdown message over the Unix socket; falls back to
-        SIGTERM / SIGKILL if the socket is unresponsive.
+        Sends a shutdown message over the daemon socket; falls back to
+        SIGTERM / SIGKILL (POSIX) or psutil terminate/kill (Windows) if the
+        daemon is unresponsive.
         """
         if stop_daemon():
             success("Daemon stopped.")
