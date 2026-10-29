@@ -544,14 +544,14 @@ def use_profile(name: str) -> Iterator[None]:
                 print(thread)
 
     Pinning is per-thread, so concurrent threads may each pin a different profile
-    without rewriting the shared ``active_profile`` file or reloading the
-    process-wide daemon session.  Naming the active profile is free: the existing
+    without rewriting the shared ``active_profile`` file or re-pinning the
+    process-wide session.  Naming the active profile is free: the existing
     session is reused.
 
-    Two costs, both because the daemon holds one session for one profile: a
-    non-active profile bypasses the daemon, paying a direct session (the
-    ``_session_core`` import plus a TLS/QUIC handshake) on first use and caching
-    it per profile from then on; and those cached sessions are never closed.
+    Two costs: a non-active profile bypasses the daemon, paying a direct session
+    (the ``_session_core`` import plus a TLS/QUIC handshake) on first use and
+    caching it per profile from then on; and those cached sessions are never
+    closed.
     Captcha handling is one process-wide gate, so it is *not* isolated per
     profile — see the README's limitations section.
 
@@ -667,9 +667,10 @@ def direct_sessions(
         # every thread's session is closed here
 
     This is the supported way to make a worker pool bypass the daemon.  The
-    process-wide daemon holds one session behind one lock, and a curl_cffi
-    session must not be shared across threads; inside the block every thread
-    that resolves the process session builds and caches its own instead.
+    daemon keeps one session per profile but serialises every request behind a
+    single lock, and a curl_cffi session must not be shared across threads;
+    inside the block every thread that resolves the process session builds and
+    caches its own instead.
 
     The mode is process-wide, so workers created anywhere while the block is
     active participate — unlike a context variable, which

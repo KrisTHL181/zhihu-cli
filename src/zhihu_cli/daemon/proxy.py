@@ -237,26 +237,33 @@ class DaemonProxyResponse:
         return True  # Always truthy (match requests.Response behaviour)
 
 
-def _build_context_session() -> Any:
-    """Build a direct session honouring an enclosing ``use_profile()``.
+def _build_context_session(profile: str | None = None) -> Any:
+    """Build a direct session for the pinned profile, falling back to the active one.
 
     The streaming and daemon-failure paths build their own session rather than
     asking :func:`~zhihu_cli.content.handlers.requests._get_session` for one, so
     they must read the pinned profile themselves — otherwise a
     ``with use_profile("alt"): download_video(...)`` would silently authenticate
-    as the *active* profile.
+    as the *active* profile.  An enclosing ``use_profile()`` (read from the
+    context) wins over *profile*, which is the proxy's own construction-time
+    pin.
 
     Both imports stay inside the body on purpose: this module's import graph is
     deliberately light (the daemon exists so the CLI never imports
     ``_session_core``), and a module-level import would undo that.
 
+    :param profile: Profile pinned when the proxy was constructed, or ``None``
+        for the active one.  Ignored when a context profile is pinned.
     :returns: A direct :class:`ZhihuSession` for the pinned profile, or for the
         active one when nothing is pinned.
     """
     from zhihu_cli.content.handlers._session_core import _build_direct_session
     from zhihu_cli.content.handlers.requests import _context_profile, _inject_app_headers
 
-    sess = _build_direct_session(_context_profile())
+    context_profile = _context_profile()
+    if context_profile is not None:
+        profile = context_profile
+    sess = _build_direct_session(profile)
     # Mirror what ``_build_session`` puts on the daemon proxy: without
     # ``x-app-version`` / ``x-app-za`` some mobile-api endpoints answer with
     # ``data: null``.
@@ -279,15 +286,23 @@ class DaemonProxySession:
     :meth:`_degrade_to_direct`.  A request that fails on the established
     connection itself is not replayed.
 
+    The daemon keeps one session per profile.  A proxy pins its profile at
+    construction time and attaches that name to every message it sends, so two
+    processes using different profiles never share credentials even though they
+    talk to the same daemon.
+
     Usage::
 
-        proxy = DaemonProxySession()
+        proxy = DaemonProxySession(profile="alt")
         proxy._test_connection()          # raises DaemonNotRunningError if unavailable
         resp = proxy.get("https://www.zhihu.com/api/v4/me")
         print(resp.json())
     """
 
-    def __init__(self) -> None:
+    def __init__(self, profile: str | None = None) -> None:
+        #: Profile this proxy is pinned to; ``None`` means the active profile
+        #: (legacy behavior for callers that do not pin one).
+        self.profile = profile
         self._captcha_handler: str = "auto"
         self.headers: dict[str, str] = {}
         self.cookies: _CookieProxy = _CookieProxy(self)
@@ -345,8 +360,12 @@ class DaemonProxySession:
         concurrent callers (multi-threaded use of zhihu_cli as a library)
         do not interleave messages on the shared socket, which would
         cause "Message too large" and other framing errors.
+
+        Every message names the proxy's pinned profile.  Centralising the
+        injection here means no individual message builder has to remember it.
         """
         with self._lock:
+            msg.setdefault("profile", self.profile)
             sock = self._get_sock()
             send_message(sock, msg)
             return recv_message(sock)
@@ -382,7 +401,10 @@ class DaemonProxySession:
 
         Called once after setting ``self.headers`` from the profile, so
         subsequent ``_sync_cookies`` calls have a baseline to diff against.
+        The previous profile's keys are dropped first: after a reload or a
+        re-pin they no longer belong to this proxy's identity.
         """
+        self._cookie_dict.clear()
         cookie_header = self.headers.get("Cookie", "")
         if not isinstance(cookie_header, str) or not cookie_header:
             return
@@ -671,7 +693,7 @@ class DaemonProxySession:
 
         with self._direct_lock:
             if self._direct is None:
-                direct = _build_context_session()
+                direct = _build_context_session(self.profile)
                 direct.headers.update(self.headers)
                 direct.captcha_handler = self._captcha_handler
                 self._direct = direct
@@ -765,7 +787,7 @@ class DaemonProxySession:
         response — callers use ``iter_lines()`` to consume the stream and
         MUST call ``.close()`` when done to release the underlying session.
         """
-        direct = _build_context_session()
+        direct = _build_context_session(self.profile)
         resp = direct.request(method, url, **kwargs)
         return _StreamResponse(resp, direct)
 
@@ -926,10 +948,10 @@ class DaemonProxySession:
             403 when the user skipped/cancelled the challenge.
         :raises DaemonRequestError: if the daemon's retry failed.
         """
-        from zhihu_cli.content.handlers._session_core import _build_direct_session
-
-        # Use a temporary direct session for captcha cookie harvesting
-        direct = _build_direct_session()
+        # Use a temporary direct session pinned to the same profile for captcha
+        # cookie harvesting.  Building it for the active profile instead would
+        # harvest cookies into the wrong account's jar.
+        direct = _build_context_session(self.profile)
         try:
             result = resolve_captcha(direct, captcha_error)
             if result == "resolved":

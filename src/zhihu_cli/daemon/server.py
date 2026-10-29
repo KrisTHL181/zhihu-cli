@@ -1,10 +1,12 @@
-"""Daemon server: local socket listener that holds a persistent ZhihuSession.
+"""Daemon server: local socket listener that holds persistent ZhihuSessions.
 
-The server creates one long-lived :class:`ZhihuSession` (with QUIC/HTTP3)
-and accepts JSON-RPC-style messages over a local socket — a Unix domain
-socket on POSIX, or loopback TCP with a per-start token on Windows.  HTTP
-requests are executed synchronously in a thread-pool to keep the asyncio
-event loop responsive.
+The server keeps one long-lived :class:`ZhihuSession` (with QUIC/HTTP3) per
+profile name and accepts JSON-RPC-style messages over a local socket — a Unix
+domain socket on POSIX, or loopback TCP with a per-start token on Windows.
+Each client message may carry a ``profile`` field; the server selects (and, if
+needed, lazily builds) that profile's session and never falls back to another
+profile's credentials.  HTTP requests are executed synchronously in a
+thread-pool to keep the asyncio event loop responsive.
 
 Captcha handling
 ----------------
@@ -27,7 +29,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import faulthandler
+import hashlib
 import hmac
+import json
 import os
 import signal
 import sys
@@ -81,6 +85,19 @@ def _log(msg: str, *, exc: bool = False) -> None:
         traceback.print_exc(file=sys.stderr)
 
 
+def _profile_label(profile: str | None) -> str:
+    """Return a log-safe label for *profile*.
+
+    ``None`` is the key older clients (which do not send the field) use; it
+    resolves to the daemon's active profile, exactly as before per-profile
+    sessions existed.
+
+    :param profile: Profile name, or ``None``.
+    :returns: The name, or ``"<active>"`` for ``None``.
+    """
+    return profile if profile is not None else "<active>"
+
+
 # Default timeout for requests that don't specify one (prevents a single
 # hung request from blocking the shared session indefinitely).
 _DEFAULT_REQUEST_TIMEOUT = 30.0
@@ -99,7 +116,18 @@ class DaemonServer:
         self._token: str | None = None
         #: Human-readable bound endpoint, for the start log (never the token).
         self._endpoint: str = ""
-        self._session: ZhihuSession | None = None
+        #: One session per profile name.  ``None`` is the key used by clients
+        #: that do not pin a profile (older versions), and resolves to the
+        #: active profile at build time — the pre-isolation behavior.
+        self._sessions: dict[str | None, ZhihuSession] = {}
+        #: Fingerprint of the headers/UA/app-header triple each session was
+        #: built from, so a reload can be a no-op when nothing changed.
+        self._fingerprints: dict[str | None, str] = {}
+        #: Per-profile captcha mode, applied whenever that session is (re)built.
+        self._captcha_modes: dict[str | None, str] = {}
+        #: Single global lock protecting both registry mutations and the whole
+        #: HTTP exchange (preserves the previous serialisation).  It is a plain
+        #: ``threading.Lock`` — never re-acquire it.
         self._session_lock = threading.Lock()
         self._last_activity = time.monotonic()
         #: Requests currently being processed.  The main loop is a single
@@ -135,7 +163,9 @@ class DaemonServer:
         faulthandler.enable(file=sys.stderr)
         failed = False
         try:
-            self._init_session()
+            # Pre-build the active profile under its own name so the common
+            # (unpinned) case is warm at first request.
+            self._init_session(cache_manager.get_active_profile())
             self._cleanup_stale_socket()
             asyncio.run(self._async_main())
         except KeyboardInterrupt:
@@ -165,45 +195,119 @@ class DaemonServer:
 
     # ── initialization ──────────────────────────────────────────────────
 
-    def _init_session(self) -> None:
-        """Build (or rebuild) the :class:`ZhihuSession` from the currently
-        active profile's headers.
+    def _session_fingerprint(self, headers: dict[str, str], ua: str) -> str:
+        """Return a stable digest of the identity a session would be built from.
+
+        Reloads compare this instead of rebuilding unconditionally, so the
+        per-client ``reload_session`` that every CLI build sends no longer
+        tears down the daemon's session when nothing changed.
+
+        :param headers: Profile headers as loaded from the cache.
+        :param ua: Resolved User-Agent (may be empty).
+        :returns: Hex SHA-256 over headers, UA, and the app-identity headers.
+        """
+        payload = json.dumps(
+            [
+                sorted(headers.items()),
+                ua,
+                cache_manager.get_app_version(),
+                cache_manager.get_app_za(),
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _build_session_locked(self, profile: str | None) -> None:
+        """Build and install the :class:`ZhihuSession` for *profile*.
+
+        The caller must hold :attr:`_session_lock`; this method never acquires
+        it (the lock is not reentrant).  Only the previous session for the same
+        profile key is closed — other profiles are untouched.
+
+        :param profile: Profile name, or ``None`` for the active/legacy key.
+        """
+        hdrs = cache_manager.load_headers(profile)
+        ua = _resolve_user_agent(hdrs)
+        sess = ZhihuSession(
+            impersonate=get_browser(ua),
+            http_version=CurlHttpVersion.V3,
+        )
+        sess.headers.update(hdrs)
+        if ua:
+            sess.headers["User-Agent"] = ua
+        # Inject the mobile-app identity headers (mirrors
+        # requests._inject_app_headers for the direct session).  Without
+        # ``x-app-za`` the server treats requests as a generic web client
+        # and returns a reduced feed (e.g. excludes paid / 盐选 answers).
+        sess.headers["x-app-version"] = cache_manager.get_app_version()
+        sess.headers["x-app-za"] = cache_manager.get_app_za()
+        # Daemon never handles captcha interactively (no TTY) unless a client
+        # pinned another mode through SET_CONFIG.  Captcha detection is done
+        # manually in _handle_http_request().
+        sess.captcha_handler = self._captcha_modes.get(profile, "ignore")
+
+        old = self._sessions.get(profile)
+        self._sessions[profile] = sess
+        self._fingerprints[profile] = self._session_fingerprint(hdrs, ua)
+        if old is not None and old is not sess:
+            try:
+                old.close()
+            except Exception:
+                pass
+        # The daemon is the account-wide chokepoint: every client that goes
+        # through it shares these sessions' ``request``, so pacing it here
+        # limits the account, not one process.  Deliberately the *persistent*
+        # config only — the daemon must not inherit ``ZHIHU_QPS`` from whichever
+        # client happened to start it.  A client's ``--qps`` stays client-local;
+        # only ``zhihu config qps set`` reaches this process, via SET_CONFIG.
+        rate_limit.limiter.configure(cache_manager.get_qps())
+        _log(f"Session rebuilt for profile '{_profile_label(profile)}'")
+
+    def _reload_session_locked(self, profile: str | None) -> None:
+        """Reload *profile*'s session only when its identity changed.
+
+        The caller must hold :attr:`_session_lock`.  Reuse is the common case:
+        every CLI invocation asks for a reload, but the profile's headers are
+        unchanged, so rebuilding would only drop a warm QUIC connection.
+
+        :param profile: Profile name, or ``None`` for the active/legacy key.
+        """
+        hdrs = cache_manager.load_headers(profile)
+        ua = _resolve_user_agent(hdrs)
+        fingerprint = self._session_fingerprint(hdrs, ua)
+        if profile in self._sessions and self._fingerprints.get(profile) == fingerprint:
+            _log(f"Session reused for profile '{_profile_label(profile)}'")
+            return
+        self._build_session_locked(profile)
+
+    def _init_session(self, profile: str | None = None) -> None:
+        """Build (or rebuild) *profile*'s session from its headers.
+
+        Used at startup and for config rebuilds; acquires the lock itself.
+
+        :param profile: Profile name, or ``None`` for the active/legacy key.
         """
         with self._session_lock:
-            hdrs = cache_manager.load_headers()
-            ua = _resolve_user_agent(hdrs)
-            sess = ZhihuSession(
-                impersonate=get_browser(ua),
-                http_version=CurlHttpVersion.V3,
-            )
-            sess.headers.update(hdrs)
-            if ua:
-                sess.headers["User-Agent"] = ua
-            # Inject the mobile-app identity headers (mirrors
-            # requests._inject_app_headers for the direct session).  Without
-            # ``x-app-za`` the server treats requests as a generic web client
-            # and returns a reduced feed (e.g. excludes paid / 盐选 answers).
-            sess.headers["x-app-version"] = cache_manager.get_app_version()
-            sess.headers["x-app-za"] = cache_manager.get_app_za()
-            # Daemon never handles captcha interactively (no TTY).
-            # Captcha detection is done manually in _handle_http_request().
-            sess.captcha_handler = "ignore"
+            self._build_session_locked(profile)
 
-            old = self._session
-            self._session = sess
-            if old is not None:
-                try:
-                    old.close()
-                except Exception:
-                    pass
-            # The daemon is the account-wide chokepoint: every client that
-            # goes through it shares this session's ``request``, so pacing it
-            # here limits the account, not one process.  Deliberately the
-            # *persistent* config only — the daemon must not inherit
-            # ``ZHIHU_QPS`` from whichever client happened to start it.  A
-            # client's ``--qps`` stays client-local; only
-            # ``zhihu config qps set`` reaches this process, via SET_CONFIG.
-            rate_limit.limiter.configure(cache_manager.get_qps())
+    def _reload_session(self, profile: str | None) -> None:
+        """Reload *profile*'s session; thread-pool entry point.
+
+        :param profile: Profile name, or ``None`` for the active/legacy key.
+        """
+        with self._session_lock:
+            self._reload_session_locked(profile)
+
+    def _rebuild_all_sessions(self) -> None:
+        """Rebuild every cached profile's session; thread-pool entry point.
+
+        Used when a global setting (the User-Agent override) changes and every
+        cached profile's fingerprint therefore no longer matches.
+        """
+        with self._session_lock:
+            for profile in list(self._sessions):
+                self._build_session_locked(profile)
 
     @classmethod
     def _cleanup_stale_socket(cls) -> None:
@@ -383,16 +487,18 @@ class DaemonServer:
         self._request_shutdown("shutdown request from client (zhihu daemon stop)")
         return build_pong(msg_id)
 
-    async def _handle_reload_session(self, msg_id: str, _msg: dict[str, Any]) -> dict[str, Any]:
-        """Rebuild the session from the current profile headers.
+    async def _handle_reload_session(self, msg_id: str, msg: dict[str, Any]) -> dict[str, Any]:
+        """Reload the session named by the message's ``profile`` field.
 
-        Runs in a thread-pool worker so that acquiring ``_session_lock``
-        never blocks the asyncio event loop — even when a long-running
-        HTTP request already holds the lock.
+        The rebuild is fingerprint-idempotent: unchanged headers reuse the
+        existing session.  Runs in a thread-pool worker so that acquiring
+        ``_session_lock`` never blocks the asyncio event loop — even when a
+        long-running HTTP request already holds the lock.
         """
+        profile = msg.get("profile")
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self._init_session)
+            await loop.run_in_executor(None, self._reload_session, profile)
             return build_pong(msg_id)
         except Exception as e:
             _log("Session reload failed", exc=True)
@@ -403,9 +509,13 @@ class DaemonServer:
 
         All session mutations are dispatched to a thread-pool worker so
         that ``_session_lock`` contention never stalls the event loop.
-        The ``user_agent`` key rebuilds the entire session and must NOT
+        The ``user_agent`` key rebuilds every cached profile and must NOT
         be called inside ``_session_lock`` (``threading.Lock`` is
         non-reentrant — doing so would deadlock).
+
+        ``captcha_handler`` applies to the message's ``profile`` (the
+        per-profile mode is remembered for future builds); the other keys are
+        process-global.
 
         ``qps`` is the account-wide rate limit: it configures the same
         process-global limiter that :meth:`ZhihuSession.request` calls, so it
@@ -415,18 +525,19 @@ class DaemonServer:
         """
         key = msg.get("key")
         value = msg.get("value")
+        profile = msg.get("profile")
         loop = asyncio.get_running_loop()
 
         if key == "captcha_handler":
             try:
-                await loop.run_in_executor(None, self._do_set_captcha_handler, value)
+                await loop.run_in_executor(None, self._do_set_captcha_handler, profile, value)
                 return build_pong(msg_id)
             except Exception as e:
-                _log(f"Setting config captcha_handler failed: {value!r}", exc=True)
+                _log(f"Setting config captcha_handler failed for profile {_profile_label(profile)!r}", exc=True)
                 return build_error(msg_id, type(e).__name__, str(e))
         elif key == "user_agent":
             try:
-                await loop.run_in_executor(None, self._init_session)
+                await loop.run_in_executor(None, self._rebuild_all_sessions)
                 return build_pong(msg_id)
             except Exception as e:
                 _log("Session rebuild for user_agent failed", exc=True)
@@ -444,20 +555,28 @@ class DaemonServer:
         else:
             return build_error(msg_id, "UnknownConfig", f"Unknown config key: {key}")
 
-    def _do_set_captcha_handler(self, value: Any) -> None:
-        """Set the captcha_handler mode on the shared session (called from
-        a thread-pool worker).
+    def _do_set_captcha_handler(self, profile: str | None, value: Any) -> None:
+        """Set the captcha_handler mode for *profile* (thread-pool worker).
+
+        The mode is remembered even when that profile has no session yet, so a
+        later lazy build applies it.
+
+        :param profile: Profile name, or ``None`` for the active/legacy key.
+        :param value: The new mode; non-strings are ignored.
         """
+        if not isinstance(value, str):
+            return
         with self._session_lock:
-            if self._session is None:
-                raise RuntimeError("Session not initialised")
-            if isinstance(value, str):
-                self._session.captcha_handler = value
+            self._captcha_modes[profile] = value
+            sess = self._sessions.get(profile)
+            if sess is not None:
+                sess.captcha_handler = value
 
     async def _handle_http_request(self, msg_id: str, msg: dict[str, Any]) -> dict[str, Any]:
         method = msg.get("method", "GET")
         url = msg.get("url", "")
         kwargs = msg.get("kwargs", {})
+        profile = msg.get("profile")
 
         loop = asyncio.get_running_loop()
 
@@ -465,7 +584,7 @@ class DaemonServer:
         # so network errors don't propagate to the connection handler and
         # silently kill the client socket (client would hang until timeout).
         try:
-            resp, cookies = await loop.run_in_executor(None, self._do_request, method, url, kwargs)
+            resp, cookies = await loop.run_in_executor(None, self._do_request, method, url, kwargs, profile)
         except Exception as e:
             _log(f"HTTP request failed: {method} {url}: {e}", exc=True)
             return build_error(msg_id, type(e).__name__, str(e))
@@ -501,16 +620,24 @@ class DaemonServer:
         retry_method = retry.get("method", "GET")
         retry_url = retry.get("url", "")
         retry_kwargs = retry.get("kwargs", {})
+        profile = msg.get("profile")
 
         loop = asyncio.get_running_loop()
+
+        # Never retry under a different account: an unknown profile is an
+        # error rather than a silent fallback to the active one.
+        if profile is not None and profile not in cache_manager.list_profiles():
+            return build_error(msg_id, "UnknownProfile", f"Profile {profile!r} does not exist")
 
         try:
             # Visit unhuman URL to harvest post-captcha cookies
             if unhuman_url:
-                await loop.run_in_executor(None, self._do_request, "GET", unhuman_url, {"timeout": 30.0})
+                await loop.run_in_executor(None, self._do_request, "GET", unhuman_url, {"timeout": 30.0}, profile)
 
             # Retry the original request
-            resp, cookies = await loop.run_in_executor(None, self._do_request, retry_method, retry_url, retry_kwargs)
+            resp, cookies = await loop.run_in_executor(
+                None, self._do_request, retry_method, retry_url, retry_kwargs, profile
+            )
             return self._build_response(msg_id, resp, cookies)
         except Exception as e:
             _log(f"captcha retry failed: {retry_method} {retry_url}", exc=True)
@@ -518,14 +645,24 @@ class DaemonServer:
 
     # ── session-level request execution ─────────────────────────────────
 
-    def _do_request(self, method: str, url: str, kwargs: dict[str, Any]) -> tuple[Any, dict[str, str]]:
-        """Execute an HTTP request with the shared session.
+    def _do_request(
+        self,
+        method: str,
+        url: str,
+        kwargs: dict[str, Any],
+        profile: str | None = None,
+    ) -> tuple[Any, dict[str, str]]:
+        """Execute an HTTP request with the session for *profile*.
 
-        All access to ``self._session`` is protected by ``_session_lock``.
-        A default timeout is applied when the caller does not specify one
-        to prevent a single hung request from blocking all concurrent
-        requests (and the idle checker) indefinitely.
+        All access to the session registry is protected by ``_session_lock``.
+        The session is selected strictly by *profile* — a missing one is built
+        lazily for that profile, never borrowed from another.  A default timeout
+        is applied when the caller does not specify one to prevent a single hung
+        request from blocking all concurrent requests (and the idle checker)
+        indefinitely.
 
+        :param profile: Profile name from the request message, or ``None`` for
+            the active/legacy key.
         :returns: ``(response, cookies_dict)`` — cookies are read while the
             lock is still held, avoiding a second lock acquisition just to
             harvest auth tokens.
@@ -551,27 +688,32 @@ class DaemonServer:
             safe_kwargs["timeout"] = _DEFAULT_REQUEST_TIMEOUT
 
         with self._session_lock:
-            if self._session is None:
-                raise RuntimeError("Session not initialised")
+            sess = self._sessions.get(profile)
+            if sess is None:
+                # Lazy build for this profile only.  Never fall back to another
+                # profile's session: that would run the request as the wrong
+                # account.
+                self._build_session_locked(profile)
+                sess = self._sessions[profile]
             saved_version = None
             saved_za = None
             if skip_app:
                 # Temporarily drop the app-identity headers (restored below)
                 # so endpoints that reject x-app-za (articles list) work.
-                saved_version = self._session.headers.pop("x-app-version", None)
-                saved_za = self._session.headers.pop("x-app-za", None)
+                saved_version = sess.headers.pop("x-app-version", None)
+                saved_za = sess.headers.pop("x-app-za", None)
             try:
-                resp = self._session.request(method, url, **safe_kwargs)
+                resp = sess.request(method, url, **safe_kwargs)
             finally:
                 if saved_version is not None:
-                    self._session.headers["x-app-version"] = saved_version
+                    sess.headers["x-app-version"] = saved_version
                 if saved_za is not None:
-                    self._session.headers["x-app-za"] = saved_za
+                    sess.headers["x-app-za"] = saved_za
             # Harvest auth cookies while the lock is still held — this
             # avoids a second lock acquisition in _build_response().
             cookies: dict[str, str] = {}
             for name in ("d_c0", "z_c0", "_xsrf"):
-                val = self._session.cookies.get(name, "")
+                val = sess.cookies.get(name, "")
                 if val:
                     cookies[name] = str(val)
             return resp, cookies

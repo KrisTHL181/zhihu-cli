@@ -6,6 +6,14 @@ Wire format::
 
 All multi-byte integers are network byte order (big-endian).
 
+Every client → daemon message may also carry an optional ``"profile"`` field:
+the profile name the client pinned when it built its proxy (``None`` or absent
+means the daemon's active profile, which is what older clients get).  It is
+transport-independent — :class:`~zhihu_cli.daemon.proxy.DaemonProxySession`
+injects it in :meth:`~zhihu_cli.daemon.proxy.DaemonProxySession._send_recv`, so
+no builder takes a profile argument — and lets the daemon select the matching
+per-profile session instead of sharing one across accounts.
+
 Message types (``msg["type"]``):
 
     ``http_request``
@@ -22,8 +30,8 @@ Message types (``msg["type"]``):
         Client → Daemon / Daemon → Client.  Health check + stats.
 
     ``reload_session``
-        Client → Daemon.  Instruct the daemon to rebuild its session from
-        the current profile headers.
+        Client → Daemon.  Reload the session named by ``profile`` from its
+        headers.  Idempotent: an unchanged fingerprint reuses the session.
 
     ``shutdown``
         Client → Daemon.  Graceful shutdown request.

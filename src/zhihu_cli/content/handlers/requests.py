@@ -214,10 +214,10 @@ _session_lock = threading.Lock()
 # Deliberately a ContextVar rather than ``switch_profile()`` + ``reload_session()``:
 # ``CacheManager.switch_profile`` writes the ``active_profile`` *file*, i.e. state
 # every other process on this machine reads, and on the daemon path a reload is
-# pushed into the shared long-running daemon, replacing the session its other
-# clients are using.  A ContextVar is per-thread, so two threads (or the threads
-# of the out-of-tree consumer that uses this package as a library) can each pin
-# their own profile without observing or disturbing the other's.
+# pushed for the active profile, re-pinning this client's proxy.  A ContextVar is
+# per-thread, so two threads (or the threads of the out-of-tree consumer that
+# uses this package as a library) can each pin their own profile without
+# observing or disturbing the other's.
 
 #: Session pinned by the enclosing :func:`use_profile`; ``None`` means "use the
 #: process-wide session".  Note that a value of ``None`` *is* meaningful inside
@@ -421,6 +421,11 @@ def _build_session() -> Any:
     # is a no-op after ``main`` pinned an explicit ``--qps``/``ZHIHU_QPS``.
     rate_limit.configure_from_config()
 
+    # Resolve the profile once: the daemon proxy pins it at construction and
+    # the direct fallback must use the same one.
+    profile = cache_manager.get_active_profile()
+    hdrs = cache_manager.load_headers(profile)
+
     # ── check daemon config ──────────────────────────────────────────
     config = cache_manager.get_config()
     daemon_enabled = config.get("daemon", {}).get("enabled", True)
@@ -430,11 +435,10 @@ def _build_session() -> Any:
         try:
             from zhihu_cli.daemon.proxy import DaemonProxySession
 
-            proxy = DaemonProxySession()
+            proxy = DaemonProxySession(profile=profile)
             proxy._test_connection()
 
             # Mirror current profile headers
-            hdrs = cache_manager.load_headers()
             proxy.headers = dict(hdrs)
             if hdrs.get("User-Agent"):
                 proxy.headers["User-Agent"] = hdrs["User-Agent"]
@@ -463,7 +467,7 @@ def _build_session() -> Any:
     # ── direct session (lazy heavy import) ───────────────────────────
     from zhihu_cli.content.handlers._session_core import _build_direct_session
 
-    session_ = _build_direct_session()
+    session_ = _build_direct_session(profile)
     _inject_app_headers(session_)
     return session_
 
@@ -758,8 +762,12 @@ def reload_session() -> None:
 
     with _session_lock:
         if DaemonProxySession is not None and isinstance(_session, DaemonProxySession):
+            # Re-pin the proxy: the active profile may have changed since it
+            # was constructed.  Subsequent messages then name the new profile.
+            profile = cache_manager.get_active_profile()
+            _session.profile = profile
             # Update local headers mirror
-            hdrs = cache_manager.load_headers()
+            hdrs = cache_manager.load_headers(profile)
             _headers = dict(hdrs)
             _session.headers = dict(hdrs)
             if hdrs.get("User-Agent"):
@@ -817,9 +825,9 @@ def _profile_session(name: str) -> Any:
         if sess is None:
             if name not in cache_manager.list_profiles():
                 raise AuthError(f"Profile '{name}' does not exist")
-            # Deliberately the direct factory, not ``_build_session``: the daemon
-            # holds one session for one profile, so a second profile cannot be
-            # proxied through it.
+            # Deliberately the direct factory, not ``_build_session``: this cache
+            # is private to the process and must not disturb the process-wide
+            # session (or re-pin a shared daemon proxy).
             from zhihu_cli.content.handlers._session_core import _build_direct_session
 
             sess = _build_direct_session(name)
@@ -847,8 +855,7 @@ def use_profile(name: str) -> Iterator[None]:
     reused as-is: no second session is built and requests keep going through the
     daemon.
 
-    Two costs to be aware of, both a consequence of the daemon holding a single
-    session:
+    Two costs to be aware of:
 
     * A non-active profile bypasses the daemon, so its first use pays for a
       direct session (the ``_session_core`` import plus a TLS/QUIC handshake).
@@ -955,7 +962,7 @@ def push_rate_limit_to_daemon(qps: float | None = None) -> None:
     ephemeral = not isinstance(sess, DaemonProxySession)
     if ephemeral:
         try:
-            sess = DaemonProxySession()
+            sess = DaemonProxySession(profile=cache_manager.get_active_profile())
             sess._test_connection()
         except Exception:
             return
