@@ -280,8 +280,8 @@ def register_interact(main_group) -> None:
 
         \b
         Examples:
-          zhihu interact comment reply https://www.zhihu.com/question/123/answer/456 11515861130 "同意！"
-          zhihu interact comment reply https://zhuanlan.zhihu.com/p/123456 11515861130 "好文"
+          zhihu interact comment reply https://www.zhihu.com/question/123/answer/456 12345678901 "同意！"
+          zhihu interact comment reply https://zhuanlan.zhihu.com/p/123456 12345678901 "好文"
         """
         item_type, item_id = _parse_item_url(url)
         if item_type == "answers":
@@ -399,9 +399,9 @@ def register_interact(main_group) -> None:
 
         \b
         Examples:
-          zhihu interact collect view 921015490
-          zhihu interact collect view https://www.zhihu.com/collection/921015490
-          zhihu interact collect view 921015490 --max 10 --json
+          zhihu interact collect view 123456789
+          zhihu interact collect view https://www.zhihu.com/collection/123456789
+          zhihu interact collect view 123456789 --max 10 --json
         """
         set_json_mode(output_json)
         # Resolve ID from URL or use as-is

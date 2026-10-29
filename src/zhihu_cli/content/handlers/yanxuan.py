@@ -36,9 +36,9 @@ def extract_url_token(input_str: str) -> str:
     """Extract answer ID (url_token) from a Zhihu URL or raw ID string.
 
     Supports:
-    - Raw answer ID: ``"2541691985"``
-    - Composite ID:   ``"question_id/2541691985"``
-    - Full URL:       ``"https://www.zhihu.com/question/xxx/answer/2541691985"``
+    - Raw answer ID: ``"1234567890"``
+    - Composite ID:   ``"question_id/1234567890"``
+    - Full URL:       ``"https://www.zhihu.com/question/xxx/answer/1234567890"``
     - Paid column:    ``"https://www.zhihu.com/market/paid_column/<id>/section/<id>"``
     """
     # If it looks like a URL, parse it

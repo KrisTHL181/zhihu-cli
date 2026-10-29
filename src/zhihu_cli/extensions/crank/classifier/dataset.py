@@ -4,7 +4,7 @@ Positive samples come from Hall of Flames series directories.
 Negative samples come from scraped normal science articles.
 
 The author-stratified split prevents the model from overfitting to individual
-author writing style (e.g. 杨学志 with 165 papers).
+author writing style (e.g. a prolific author with 165 papers).
 """
 
 from __future__ import annotations

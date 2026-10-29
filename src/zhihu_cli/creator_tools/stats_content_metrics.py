@@ -324,7 +324,7 @@ def _compute_aggr_stats(aggr_files: list[dict]) -> dict:
 def _infer_type_from_name(name: str) -> str:
     """Infer content type from file stem fragment.
 
-    :param name: Fragment like ``answer_10146656462`` or ``pin_2061600059276387141``.
+    :param name: Fragment like ``answer_123456789`` or ``pin_987654321``.
     """
     for ct in ("answer", "article", "pin"):
         if ct in name:

@@ -43,8 +43,8 @@ DEFAULT_REGISTRY_PATH = os.path.join(CRANK_DIR, "authors_registry.json")
 def extract_article_id(url: str | None) -> str | None:
     """Extract numeric article ID from a Zhihu article URL.
 
-    >>> extract_article_id('https://zhuanlan.zhihu.com/p/638541668')
-    '638541668'
+    >>> extract_article_id('https://zhuanlan.zhihu.com/p/123456789')
+    '123456789'
     """
     if not url:
         return None
