@@ -17,6 +17,19 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # setuptools-scm 需要看到 tags
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[test]"
+      # Live tests are collected and skipped without --live, so this is offline.
+      - run: python -m pytest -q
+
   build:
     runs-on: ubuntu-latest
     steps:

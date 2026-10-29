@@ -9,6 +9,8 @@
 !packages/zhihu-mcp/server.json
 *.png
 __pycache__
+# pytest live-suite sandbox (redirected ZHIHU_CLI_HOME)
+tests/.state/
 
 (draft)*
 downloads

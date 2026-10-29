@@ -120,3 +120,7 @@ line-ending = "auto"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: hits the real Zhihu API; skipped unless --live is passed",
+    "live_write: writes to a real Zhihu account; requires --live and --live-write",
+]
