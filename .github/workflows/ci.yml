@@ -49,11 +49,16 @@ jobs:
           import glob, os, zipfile
           w = glob.glob("dist/*.whl")[0]
           names = set(zipfile.ZipFile(w).namelist())
-          # 期望包内路径 = 本地 src/zhihu_cli/{prompts,nlp_tools} 下实际的 *.txt，
+          # 期望包内路径 = 本地对应目录下实际的数据文件，
           # 不硬编码文件名，加/改/删数据文件无需动这里
           expected = set()
-          for sub in ("prompts", "nlp_tools"):
-              for src in glob.glob(f"src/zhihu_cli/{sub}/*.txt"):
+          for sub, pattern in (
+              ("prompts", "*.txt"),
+              ("nlp_tools", "*.txt"),
+              ("font_reference", "*.bin"),
+              ("font_reference", "*.json"),
+          ):
+              for src in glob.glob(f"src/zhihu_cli/{sub}/{pattern}"):
                   expected.add(f"zhihu_cli/{sub}/{os.path.basename(src)}")
           missing = expected - names
           assert not missing, f"wheel 缺失数据文件: {missing}"
