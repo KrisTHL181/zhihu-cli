@@ -119,19 +119,29 @@ src/zhihu_cli/
 ### Optional Dependencies
 
 ```bash
-pip install -e ".[nlp]"          # jieba, matplotlib, wordcloud, scikit-learn...
-pip install -e ".[creator]"      # matplotlib, numpy, pandas, seaborn...
-pip install -e ".[classifier]"   # torch, transformers, scikit-learn...
-pip install -e ".[llm]"          # openai (zhihu agora ai, zhihu chat bot, crank)
-pip install -e ".[notify]"       # desktop-notifier (zhihu chat interactive --notify)
-pip install -e ".[mcp]"          # mcp (the zhihu-mcp server entry point)
+pip install "zhihu-toolkit[nlp]"          # jieba, matplotlib, wordcloud, scikit-learn...
+pip install "zhihu-toolkit[creator]"      # matplotlib, numpy, pandas, seaborn...
+pip install "zhihu-toolkit[classifier]"   # torch, transformers, scikit-learn...
+pip install "zhihu-toolkit[llm]"          # openai (zhihu agora ai, zhihu chat bot, crank)
+pip install "zhihu-toolkit[notify]"       # desktop-notifier (zhihu chat interactive --notify)
+pip install "zhihu-toolkit[browser]"      # browser-cookie3 (zhihu auth import)
+pip install "zhihu-toolkit[mcp]"          # mcp (the zhihu-mcp server entry point)
 ```
 
 ### Shell Completions
 
+Click ships completion for each shell — add the matching line to your rc file:
+
 ```bash
-eval "$(python autocomp.py)"
+# bash
+eval "$(_ZHIHU_COMPLETE=bash_source zhihu)"
+# zsh
+eval "$(_ZHIHU_COMPLETE=zsh_source zhihu)"
+# fish
+_ZHIHU_COMPLETE=fish_source zhihu | source
 ```
+
+From a repository clone, `python autocomp.py` detects your shell and prints the right line.
 
 ---
 
