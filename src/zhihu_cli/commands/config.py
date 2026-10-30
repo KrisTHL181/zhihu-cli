@@ -75,7 +75,7 @@ def _register_item(config_group: click.Group, item: _Item) -> None:
         else:
             success(f"{item.display} set to: {item._format(value)}")
 
-    cmd_set.__doc__ = f"Set the {item.display.lower()}."
+    cmd_set.help = f"Set the {item.display.lower()}."
 
     # ── show ───────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ def _register_item(config_group: click.Group, item: _Item) -> None:
             sep = "\n" if item.show_on_newline else " "
             echo(f"{f_label(item.label + ':')}{sep}{item._format(value)}")
 
-    cmd_show.__doc__ = f"Show the current {item.display.lower()}."
+    cmd_show.help = f"Show the current {item.display.lower()}."
 
     # ── clear ──────────────────────────────────────────────────────────
 
@@ -106,7 +106,7 @@ def _register_item(config_group: click.Group, item: _Item) -> None:
         else:
             success(f"{item.display} reset to: {item._format(item.default)}")
 
-    cmd_clear.__doc__ = f"Reset {item.display.lower()} to default."
+    cmd_clear.help = f"Reset {item.display.lower()} to default."
 
 
 # ═══════════════════════════════════════════════════════════════════════

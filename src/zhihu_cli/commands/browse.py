@@ -529,7 +529,14 @@ def register_browse(main_group):
         echo(f"  {f_dim(f'── {len(comments)} segment comments')}")
 
     @browse.command("feed")
-    @click.option("--type", "-t", "feed_type", type=click.Choice(["recommend", "follow"]), default="recommend")
+    @click.option(
+        "--type",
+        "-t",
+        "feed_type",
+        type=click.Choice(["recommend", "follow"]),
+        default="recommend",
+        help="Feed to stream: 'recommend' (default) or 'follow'.",
+    )
     @click.option(
         "--max",
         "-n",
