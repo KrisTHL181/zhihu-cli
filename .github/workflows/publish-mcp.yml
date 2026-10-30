@@ -49,10 +49,11 @@ jobs:
           python -m build
       - name: Sync server.json version
         # setuptools-scm derives the version from the tag, so the registry
-        # manifest cannot carry a hardcoded one: `mcp-publisher` rejects a
-        # version that does not exist on PyPI. Read it back out of the wheel
-        # name rather than importing setuptools-scm, which is only a build
-        # requirement and is not installed in this step.
+        # manifest in the repo carries the placeholder 0.0.0 instead of a real
+        # release number: `mcp-publisher` rejects a version that does not exist
+        # on PyPI, and a hardcoded one goes stale silently. Rewrite both fields
+        # from the wheel name rather than importing setuptools-scm, which is
+        # only a build requirement and is not installed in this step.
         run: |
           VERSION=$(ls dist/*.whl | sed -E 's/.*zhihu_mcp-([^-]+)-py3.*/\1/')
           if [ -z "$VERSION" ]; then
@@ -63,6 +64,8 @@ jobs:
           python - "$VERSION" <<'PY'
           import json, pathlib, sys
           version = sys.argv[1]
+          if version == "0.0.0":
+              sys.exit("refusing to publish the registry manifest with the placeholder version 0.0.0")
           path = pathlib.Path("server.json")
           data = json.loads(path.read_text(encoding="utf-8"))
           data["version"] = version

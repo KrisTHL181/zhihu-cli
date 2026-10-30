@@ -16,6 +16,17 @@ jobs:
       - run: pip install ruff==0.15.9
       - run: ruff check .
       - run: ruff format --check .
+      # 仓库里的 registry 清单只存占位版本；真实版本由 publish-mcp.yml 在发版时
+      # 从 tag 派生并重写，写死一个具体版本号只会随时间失效
+      - name: server.json keeps the placeholder version
+        run: |
+          python - <<'EOF'
+          import json, pathlib
+          data = json.loads(pathlib.Path("packages/zhihu-mcp/server.json").read_text(encoding="utf-8"))
+          versions = {data["version"], data["packages"][0]["version"]}
+          assert versions == {"0.0.0"}, f"server.json must keep the placeholder 0.0.0, found {sorted(versions)}"
+          print("server.json placeholder OK")
+          EOF
 
   test:
     runs-on: ubuntu-latest

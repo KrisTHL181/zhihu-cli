@@ -7,12 +7,12 @@
     "url": "https://github.com/KrisTHL181/zhihu-cli",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.0.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "zhihu-mcp",
-      "version": "0.1.0",
+      "version": "0.0.0",
       "transport": {
         "type": "stdio"
       }

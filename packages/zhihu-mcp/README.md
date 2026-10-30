@@ -39,7 +39,7 @@ Authentication is shared with the `zhihu` CLI. Log in once with `zhihu auth logi
 
 ## MCP Registry
 
-The repository's `server.json` is the manifest for the [official MCP Registry](https://registry.modelcontextprotocol.io). Don't hand-edit its two `version` strings: the `publish-mcp.yml` workflow rewrites them from the tag-derived build version and uploads the result as the `mcp-registry-manifest` artifact. Publish from that artifact:
+The repository's `server.json` is the manifest for the [official MCP Registry](https://registry.modelcontextprotocol.io). Its two `version` strings are the placeholder `0.0.0` in the working tree — do not replace it with a real release number. The `publish-mcp.yml` workflow rewrites both from the tag-derived build version and uploads the result as the `mcp-registry-manifest` artifact. Publish from that artifact:
 
 ```bash
 mcp-publisher login github
