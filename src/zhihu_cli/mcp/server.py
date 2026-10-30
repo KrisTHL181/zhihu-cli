@@ -46,10 +46,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
+try:
+    from mcp.server import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
 
-from zhihu_cli.mcp.generate import EXCLUDED_PATHS, generate_tools
+    # ``generate`` imports ``mcp`` too, so it belongs to the same guarded block.
+    from zhihu_cli.mcp.generate import EXCLUDED_PATHS, generate_tools
+except ImportError as _exc:  # only reachable without the optional ``[mcp]`` extra
+    _MCP_IMPORT_ERROR: ImportError | None = _exc
+else:
+    _MCP_IMPORT_ERROR = None
 
 # ── instructions ───────────────────────────────────────────────────────────
 
@@ -269,11 +275,14 @@ def _build_server(include: tuple[tuple[str, ...], ...] | None = None) -> MCPServ
 
 
 #: The unfiltered server, also what a library consumer importing ``mcp`` gets.
-mcp = _build_server()
+#: ``None`` when the optional ``[mcp]`` extra is not installed.
+mcp = _build_server() if _MCP_IMPORT_ERROR is None else None
 
 
 def main() -> None:
     """Serve MCP over stdio, optionally restricted to selected command groups."""
+    if _MCP_IMPORT_ERROR is not None:
+        sys.exit("zhihu-mcp needs the optional MCP dependency.\nInstall it with: pip install 'zhihu-toolkit[mcp]'")
     parser = argparse.ArgumentParser(
         prog="zhihu-mcp",
         description="Expose the zhihu CLI to AI agents over MCP (stdio).",
