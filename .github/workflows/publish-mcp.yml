@@ -18,7 +18,8 @@ on:
         type: string
 
 permissions:
-  id-token: write      # 向 PyPI 做 trusted publishing (OIDC)
+  contents: read       # 检出仓库
+  id-token: write      # PyPI trusted publishing + MCP Registry 的 github-oidc 认证
 
 jobs:
   publish:
@@ -78,9 +79,43 @@ jobs:
           packages-dir: packages/zhihu-mcp/dist
           attestations: true   # SLSA 签名，需要 id-token: write
       - name: Upload registry manifest
-        # Download this artifact and run `mcp-publisher publish` from it; the
-        # version in it already matches the release that was just published.
+        # Kept as the manual fallback: if the registry publish below fails, the
+        # artifact carries the same rewritten manifest and can be published by
+        # hand. It is uploaded first so a registry outage cannot lose it.
         uses: actions/upload-artifact@v4
         with:
           name: mcp-registry-manifest
           path: packages/zhihu-mcp/server.json
+      - name: Wait for PyPI to list the new version
+        # The registry verifies that packages[0].version exists on PyPI, and the
+        # JSON API can lag the upload by a few seconds. Poll before publishing
+        # rather than letting a transient 404 fail the release.
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('server.json'))['version'])")
+          for i in $(seq 1 24); do
+            if curl -fsS "https://pypi.org/pypi/zhihu-mcp/$VERSION/json" >/dev/null; then
+              echo "PyPI lists zhihu-mcp $VERSION"
+              exit 0
+            fi
+            echo "waiting for PyPI to list $VERSION ($i/24)…"
+            sleep 5
+          done
+          echo "PyPI did not list $VERSION within 120s" >&2
+          exit 1
+      - name: Install mcp-publisher
+        env:
+          # Pinned rather than 'latest' so a broken upstream release cannot take
+          # this workflow down silently; bump deliberately when needed.
+          MCP_PUBLISHER_VERSION: v1.8.6
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Validate the registry manifest
+        run: ./mcp-publisher validate
+      - name: Authenticate to the MCP Registry
+        # Keyless: the workflow's OIDC token proves ownership of the
+        # io.github.KrisTHL181 namespace, so no PAT secret is required.
+        run: ./mcp-publisher login github-oidc
+      - name: Publish to the MCP Registry
+        # The registry is still in preview; a failure here turns the job red but
+        # the PyPI release and the manifest artifact above are already done.
+        run: ./mcp-publisher publish
