@@ -125,7 +125,7 @@ pip install "zhihu-toolkit[classifier]"   # torch, transformers, scikit-learn...
 pip install "zhihu-toolkit[llm]"          # openai (zhihu agora ai, zhihu chat bot, crank)
 pip install "zhihu-toolkit[notify]"       # desktop-notifier (zhihu chat interactive --notify)
 pip install "zhihu-toolkit[browser]"      # browser-cookie3 (zhihu auth import)
-pip install "zhihu-toolkit[mcp]"          # mcp (the zhihu-mcp server entry point)
+pip install "zhihu-toolkit[mcp]"          # click2mcp (the zhihu-mcp server entry point)
 ```
 
 ### Shell Completions
