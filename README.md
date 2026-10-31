@@ -12,7 +12,7 @@ browse · download · search · publish · analyze — all from the command line
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![GitHub Repo stars](https://img.shields.io/github/stars/KrisTHL181/zhihu-cli?style=flat)](https://github.com/KrisTHL181/zhihu-cli/stargazers)
+[![GitHub Repo stars](https://img.shields.io/github/stars/KrisTHL181/zhihu-toolkit?style=flat)](https://github.com/KrisTHL181/zhihu-toolkit/stargazers)
 
 </div>
 
@@ -173,6 +173,6 @@ MIT
 
 *Made with ❤️ and way too many terminal sessions.*
 
-[Report a bug](https://github.com/KrisTHL181/zhihu-cli/issues) · [Fork this repository](https://github.com/KrisTHL181/zhihu-cli/fork) · Star ⭐ this repo!
+[Report a bug](https://github.com/KrisTHL181/zhihu-toolkit/issues) · [Fork this repository](https://github.com/KrisTHL181/zhihu-toolkit/fork) · Star ⭐ this repo!
 
 </div>

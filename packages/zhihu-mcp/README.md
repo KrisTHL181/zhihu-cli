@@ -50,7 +50,7 @@ The version in the manifest must match a release that actually exists on PyPI, o
 
 ## Links
 
-- Source, documentation, and the full command reference: <https://github.com/KrisTHL181/zhihu-cli>
+- Source, documentation, and the full command reference: <https://github.com/KrisTHL181/zhihu-toolkit>
 - The underlying toolkit: [`zhihu-toolkit`](https://pypi.org/project/zhihu-toolkit/)
 
 MIT licensed. Unofficial project, not affiliated with Zhihu.

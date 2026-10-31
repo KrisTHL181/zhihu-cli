@@ -4,7 +4,7 @@
   "title": "Zhihu",
   "description": "Zhihu CLI for AI agents: search, read, download, and publish from the terminal.",
   "repository": {
-    "url": "https://github.com/KrisTHL181/zhihu-cli",
+    "url": "https://github.com/KrisTHL181/zhihu-toolkit",
     "source": "github"
   },
   "version": "0.0.0",

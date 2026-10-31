@@ -51,9 +51,9 @@ dependencies = [
 zhihu-mcp = "zhihu_cli.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/KrisTHL181/zhihu-cli"
-Repository = "https://github.com/KrisTHL181/zhihu-cli"
-Issues = "https://github.com/KrisTHL181/zhihu-cli/issues"
+Homepage = "https://github.com/KrisTHL181/zhihu-toolkit"
+Repository = "https://github.com/KrisTHL181/zhihu-toolkit"
+Issues = "https://github.com/KrisTHL181/zhihu-toolkit/issues"
 
 # Metadata + entry point only. Nothing is packaged from this directory, and
 # src/ belongs to the parent zhihu-toolkit project. server.json is an MCP

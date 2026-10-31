@@ -6,7 +6,7 @@ search, read, download, publish, and analyze — so you can work with Zhihu from
 conversation instead of dropping into a shell.
 
 It is an adapter, not a second implementation. Every command and flag of
-[`zhihu-cli`](https://github.com/KrisTHL181/zhihu-cli) works through it, and whatever you
+[`zhihu-cli`](https://github.com/KrisTHL181/zhihu-toolkit) works through it, and whatever you
 already know about the CLI applies here unchanged.
 
 ## What it lets you do

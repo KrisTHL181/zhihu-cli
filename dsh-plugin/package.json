@@ -5,7 +5,7 @@
   "description": "Expose the zhihu-cli toolkit as DeepSeek Harness tools through the package's own zhihu-mcp stdio server.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KrisTHL181/zhihu-cli.git",
+    "url": "git+https://github.com/KrisTHL181/zhihu-toolkit.git",
     "directory": "dsh-plugin"
   },
   "publishConfig": {
