@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -26,6 +27,156 @@ from zhihu_cli.output import (
     warning,
 )
 
+#: A cURL header flag: ``-H '...'`` / ``--header '...'``, quoted or bare.
+_CURL_HEADER_RE = re.compile(r"(?:^|\s)(?:-H|--header)(?:[=\s]+)(?P<value>'[^']*'|\"[^\"]*\"|\S+)")
+
+#: Characters allowed in an HTTP field name (RFC 9110 ``token``).
+_FIELD_NAME_RE = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
+
+#: Header names without a ``-`` that must be read as headers, not as cookies.
+_KNOWN_HEADER_NAMES = frozenset(
+    {
+        "accept",
+        "accept-charset",
+        "accept-encoding",
+        "accept-language",
+        "authorization",
+        "cache-control",
+        "connection",
+        "content-length",
+        "content-type",
+        "cookie",
+        "dnt",
+        "expect",
+        "host",
+        "origin",
+        "pragma",
+        "referer",
+        "te",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "via",
+        "x-api-version",
+        "x-app-version",
+        "x-app-za",
+        "x-requested-with",
+        "x-zse-83",
+        "x-zse-93",
+        "x-zse-96",
+    }
+)
+
+#: cURL emits these itself; storing them would pin stale values.
+_SKIP_HEADER_NAMES = frozenset({"accept-encoding", "content-length"})
+
+#: Headers whose spelling the rest of the codebase reads case-sensitively.
+_CANONICAL_HEADER_NAMES = {"cookie": "Cookie", "user-agent": "User-Agent"}
+
+
+def _unquote_curl_value(value: str) -> str:
+    """Strip the matching quotes cURL wraps a header value in.
+
+    :param value: A raw ``-H`` value as captured from the pasted command.
+    :returns: The value without surrounding single or double quotes.
+    """
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def _split_auth_line(raw: str) -> tuple[str, str] | None:
+    """Split one pasted line into a ``(name, value)`` pair.
+
+    Accepts both ``Key: Value`` and ``Key=Value``.  cURL flags, the command's
+    own URL, and anything that is not a well-formed field name are rejected.
+
+    :param raw: A cURL ``-H`` value or one line of pasted text.
+    :returns: ``(name, value)``, or ``None`` when the line is not a pair.
+    """
+    raw = raw.strip()
+    if not raw or raw.startswith("-"):
+        # Blank lines and cURL flags such as ``--compressed`` or ``-X POST``.
+        return None
+    if re.match(r"(?i)^\$?\s*(?:curl\b|https?://|www\.)", raw):
+        # The cURL command itself and bare URLs are not headers.
+        return None
+
+    cuts = [pos for pos in (raw.find(":"), raw.find("=")) if pos > 0]
+    if not cuts:
+        return None
+
+    cut = min(cuts)
+    name = raw[:cut].strip()
+    value = raw[cut + 1 :].strip()
+    if not value or not _FIELD_NAME_RE.fullmatch(name):
+        return None
+    return name, value
+
+
+def _is_header_name(name: str) -> bool:
+    """Tell a request-header name from a bare cookie name.
+
+    :param name: The part before the first ``:`` or ``=``.
+    :returns: ``True`` for hyphens (``x-zse-96``) and well-known headers
+        (``Cookie``); ``False`` for cookie names such as ``z_c0``.
+    """
+    return "-" in name or name.lower() in _KNOWN_HEADER_NAMES
+
+
+def _cookie_segments(raw: str) -> list[str]:
+    """Split a cookie string into ``name=value`` segments.
+
+    ``;`` and ``&`` are both accepted as separators, and quotes/padding are
+    dropped, so a string copied from DevTools, a URL query, or several lines
+    normalizes to the ``"; "`` form Zhihu expects.
+
+    :param raw: A cookie string or ``name=value`` fragment.
+    :returns: The non-empty segments.
+    """
+    return [segment.strip() for segment in re.split(r"[;&]", raw) if segment.strip()]
+
+
+def _parse_pasted_headers(text: str) -> dict[str, str]:
+    """Parse pasted credentials into a header dictionary.
+
+    Understands the three shapes ``zhihu auth paste`` accepts:
+
+    * a cURL command with ``-H 'Key: Value'`` / ``-H 'Key=Value'``;
+    * ``Key: Value`` or ``Key=Value`` lines, one header per line;
+    * a bare cookie string (``z_c0=...; _xsrf=...``), on one line or across
+      several lines, which becomes the ``Cookie`` header.
+
+    Keys that are not header-shaped are folded into ``Cookie`` rather than
+    stored as headers of their own.
+
+    :param text: The text pasted on stdin.
+    :returns: Header name -> value; empty when nothing could be parsed.
+    """
+    curl_values = list(_CURL_HEADER_RE.finditer(text))
+    lines = [_unquote_curl_value(match.group("value")) for match in curl_values] if curl_values else text.splitlines()
+
+    headers: dict[str, str] = {}
+    cookies: list[str] = []
+    for line in lines:
+        pair = _split_auth_line(line)
+        if pair is None:
+            continue
+        name, value = pair
+        lowered = name.lower()
+        if lowered in _SKIP_HEADER_NAMES:
+            continue
+        if lowered == "cookie":
+            cookies.extend(_cookie_segments(value))
+        elif _is_header_name(name):
+            headers[_CANONICAL_HEADER_NAMES.get(lowered, name)] = value
+        else:
+            cookies.extend(_cookie_segments(f"{name}={value}"))
+
+    if cookies:
+        headers["Cookie"] = "; ".join(cookies)
+    return headers
+
 
 def register_auth(main_group) -> None:
     """Register the auth command group on a Click group."""
@@ -37,39 +188,38 @@ def register_auth(main_group) -> None:
     @auth.command("paste")
     @click.option("--profile", "-p", "profile_name", default=None, help="Save to a named profile")
     def auth_paste(profile_name: str | None) -> None:
-        """Paste a cURL command from browser DevTools to cache headers.
+        """Paste credentials to cache headers.
 
-        \033[2m1. Open Zhihu in browser, F12 → Network tab\033[0m
-        \033[2m2. Find any API request, right-click → Copy → Copy as cURL\033[0m
-        \033[2m3. Paste here and press Ctrl+D\033[0m
+        Accepts any of these, one per line or all at once:
 
-        Use --profile to save to a named profile (e.g. work, personal).
+        \033[2m1. A cURL command copied from browser DevTools\033[0m
+        \033[2m   (F12 → Network → right-click → Copy → Copy as cURL)\033[0m
+        \033[2m2. Key: Value or Key=Value header lines\033[0m
+        \033[2m3. A bare cookie string, e.g. z_c0=...; _xsrf=...\033[0m
+
+        Press Ctrl+D when done. Use --profile to save to a named profile
+        (e.g. work, personal).
         """
         if profile_name and profile_name.startswith("_"):
             error("Profile names starting with '_' are reserved for internal use.")
             raise SystemExit(1)
 
-        echo("Paste cURL command (Ctrl+D to finish):")
+        echo("Paste cURL, 'Key: Value' / 'Key=Value' lines, or a cookie string (Ctrl+D to finish):")
         try:
-            curl_text = sys.stdin.read()
+            pasted = sys.stdin.read()
         except EOFError:
-            curl_text = ""
+            pasted = ""
 
-        if not curl_text.strip():
+        if not pasted.strip():
             error("No input detected.")
             raise SystemExit(1)
 
-        import re
-
-        headers: dict[str, str] = {}
-        for h in re.findall(r"(?:-H|--header)\s+['\"]([^'\"]+)['\"]", curl_text):
-            if ":" in h:
-                k, v = h.split(":", 1)
-                if k.strip().lower() not in ("accept-encoding", "content-length"):
-                    headers[k.strip()] = v.strip()
-
+        headers = _parse_pasted_headers(pasted)
         if not headers:
-            error("Could not parse any headers from the input.")
+            error(
+                "Could not parse any headers. Paste a cURL command, 'Key: Value' / 'Key=Value' lines, "
+                "or a cookie string."
+            )
             raise SystemExit(1)
 
         cache_manager.save_headers(headers, profile_name=profile_name)
